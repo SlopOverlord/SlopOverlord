@@ -1,0 +1,14 @@
+{
+  "name": "SlopOverlord",
+  "dockerComposeFile": "../utils/docker/docker-compose.yml",
+  "service": "core",
+  "workspaceFolder": "/workspace",
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "swiftlang.swift-vscode",
+        "dbaeumer.vscode-eslint"
+      ]
+    }
+  }
+}

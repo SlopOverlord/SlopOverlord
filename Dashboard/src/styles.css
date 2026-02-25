@@ -1,0 +1,152 @@
+:root {
+  --bg-a: #06111f;
+  --bg-b: #0f2238;
+  --bg-c: #132e4f;
+  --panel: rgba(11, 23, 39, 0.72);
+  --line: rgba(161, 224, 255, 0.24);
+  --text: #e8f5ff;
+  --muted: #9eb8ca;
+  --accent: #40df9f;
+  --warn: #ffb347;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  font-family: "Space Grotesk", sans-serif;
+  color: var(--text);
+  background: radial-gradient(circle at 15% 20%, #22517a 0, transparent 35%),
+    radial-gradient(circle at 80% 0%, #163855 0, transparent 33%),
+    linear-gradient(135deg, var(--bg-a), var(--bg-b), var(--bg-c));
+}
+
+.page {
+  max-width: 1280px;
+  margin: 0 auto;
+  padding: 24px;
+}
+
+.hero {
+  margin-bottom: 18px;
+  animation: rise 260ms ease-out;
+}
+
+.hero h1 {
+  margin: 0;
+  letter-spacing: 0.04em;
+}
+
+.hero p {
+  margin-top: 6px;
+  color: var(--muted);
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.panel {
+  min-height: 260px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  padding: 14px;
+  backdrop-filter: blur(4px);
+  animation: rise 320ms ease-out;
+}
+
+.panel h2 {
+  margin-top: 0;
+  font-size: 1rem;
+  letter-spacing: 0.03em;
+}
+
+.chat-form {
+  display: grid;
+  gap: 8px;
+}
+
+textarea,
+input {
+  width: 100%;
+  border: 1px solid var(--line);
+  background: rgba(8, 19, 31, 0.85);
+  color: var(--text);
+  border-radius: 10px;
+  padding: 10px;
+  font: inherit;
+}
+
+button {
+  border: 0;
+  border-radius: 10px;
+  padding: 9px 12px;
+  background: linear-gradient(140deg, var(--accent), #2bc4c8);
+  color: #032316;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.log,
+.feed {
+  margin-top: 10px;
+  max-height: 230px;
+  overflow: auto;
+  display: grid;
+  gap: 8px;
+}
+
+.log-item,
+.feed-item,
+.task-card {
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 10px;
+  padding: 8px;
+  background: rgba(6, 16, 28, 0.64);
+}
+
+.log-item p,
+.feed-item p,
+.task-card p {
+  margin: 4px 0 0;
+  color: var(--muted);
+}
+
+.artifact-controls {
+  display: flex;
+  gap: 8px;
+}
+
+pre {
+  margin-top: 8px;
+  padding: 10px;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(3, 11, 19, 0.9);
+  max-height: 200px;
+  overflow: auto;
+  white-space: pre-wrap;
+}
+
+@media (max-width: 920px) {
+  .grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}

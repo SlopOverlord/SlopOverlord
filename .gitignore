@@ -1,0 +1,5 @@
+.build/
+.data/
+.DS_Store
+Dashboard/node_modules/
+Dashboard/dist/

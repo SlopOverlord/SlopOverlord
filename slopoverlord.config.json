@@ -1,0 +1,22 @@
+{
+  "listen": {
+    "host": "0.0.0.0",
+    "port": 251018
+  },
+  "auth": {
+    "token": "dev-token"
+  },
+  "models": [
+    "openai:gpt-4.1-mini",
+    "ollama:qwen3"
+  ],
+  "memory": {
+    "backend": "sqlite-local-vectors"
+  },
+  "nodes": [
+    "local"
+  ],
+  "gateways": [],
+  "plugins": [],
+  "sqlitePath": "./.data/core.sqlite"
+}

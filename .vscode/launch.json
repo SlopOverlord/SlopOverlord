@@ -1,0 +1,64 @@
+{
+    "configurations": [
+        {
+            "type": "swift",
+            "request": "launch",
+            "args": [],
+            "cwd": "${workspaceFolder:SlopOverlord}",
+            "name": "Debug Core",
+            "target": "Core",
+            "configuration": "debug",
+            "preLaunchTask": "swift: Build Debug Core"
+        },
+        {
+            "type": "swift",
+            "request": "launch",
+            "args": [],
+            "cwd": "${workspaceFolder:SlopOverlord}",
+            "name": "Release Core",
+            "target": "Core",
+            "configuration": "release",
+            "preLaunchTask": "swift: Build Release Core"
+        },
+        {
+            "type": "swift",
+            "request": "launch",
+            "args": [],
+            "cwd": "${workspaceFolder:SlopOverlord}",
+            "name": "Debug Node",
+            "target": "Node",
+            "configuration": "debug",
+            "preLaunchTask": "swift: Build Debug Node"
+        },
+        {
+            "type": "swift",
+            "request": "launch",
+            "args": [],
+            "cwd": "${workspaceFolder:SlopOverlord}",
+            "name": "Release Node",
+            "target": "Node",
+            "configuration": "release",
+            "preLaunchTask": "swift: Build Release Node"
+        },
+        {
+            "type": "swift",
+            "request": "launch",
+            "args": [],
+            "cwd": "${workspaceFolder:SlopOverlord}",
+            "name": "Debug App",
+            "target": "App",
+            "configuration": "debug",
+            "preLaunchTask": "swift: Build Debug App"
+        },
+        {
+            "type": "swift",
+            "request": "launch",
+            "args": [],
+            "cwd": "${workspaceFolder:SlopOverlord}",
+            "name": "Release App",
+            "target": "App",
+            "configuration": "release",
+            "preLaunchTask": "swift: Build Release App"
+        }
+    ]
+}

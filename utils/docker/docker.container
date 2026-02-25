@@ -1,0 +1,3 @@
+name=slopoverlord-dev-container
+compose=utils/docker/docker-compose.yml
+services=core,dashboard
