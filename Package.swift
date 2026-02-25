@@ -17,6 +17,8 @@ let package = Package(
     dependencies: [
         .package(url: "https://github.com/apple/swift-argument-parser.git", from: "1.5.0"),
         .package(url: "https://github.com/apple/swift-configuration.git", from: "0.2.0"),
+        .package(url: "https://github.com/apple/swift-log.git", from: "1.6.0"),
+        .package(url: "https://github.com/apple/swift-nio.git", from: "2.74.0"),
         .package(url: "https://github.com/mattt/AnyLanguageModel.git", branch: "main")
     ],
     targets: [
@@ -44,7 +46,11 @@ let package = Package(
                 "Protocols",
                 "PluginSDK",
                 .product(name: "ArgumentParser", package: "swift-argument-parser"),
-                .product(name: "Configuration", package: "swift-configuration")
+                .product(name: "Configuration", package: "swift-configuration"),
+                .product(name: "Logging", package: "swift-log"),
+                .product(name: "NIOCore", package: "swift-nio"),
+                .product(name: "NIOPosix", package: "swift-nio"),
+                .product(name: "NIOHTTP1", package: "swift-nio")
             ],
             path: "Sources/Core",
             resources: [
@@ -58,7 +64,8 @@ let package = Package(
             name: "Node",
             dependencies: [
                 "Protocols",
-                .product(name: "ArgumentParser", package: "swift-argument-parser")
+                .product(name: "ArgumentParser", package: "swift-argument-parser"),
+                .product(name: "Logging", package: "swift-log")
             ],
             path: "Sources/Node",
             linkerSettings: [
@@ -67,7 +74,10 @@ let package = Package(
         ),
         .executableTarget(
             name: "App",
-            dependencies: ["Protocols"],
+            dependencies: [
+                "Protocols",
+                .product(name: "Logging", package: "swift-log")
+            ],
             path: "Sources/App"
         ),
         .testTarget(

@@ -1,6 +1,7 @@
 import ArgumentParser
 import Configuration
 import Foundation
+import Logging
 import Protocols
 
 @main
@@ -13,10 +14,19 @@ struct CoreMain: AsyncParsableCommand {
     @Option(name: [.short, .long], help: "Path to JSON config file")
     var configPath: String = CoreConfig.defaultConfigPath
 
-    @Flag(name: .long, help: "Generates an immediate visor bulletin after boot")
+    @Option(name: .long, help: "Generates an immediate visor bulletin after boot")
     var bootstrapBulletin: Bool = true
 
+    @Flag(name: .long, help: "Runs demo request on startup")
+    var runDemoRequest: Bool = false
+
+    @Flag(name: .long, help: "Run one-shot startup flow and exit")
+    var oneshot: Bool = false
+
     mutating func run() async throws {
+        await LoggingBootstrapper.shared.bootstrapIfNeeded()
+        let logger = Logger(label: "slopoverlord.core.main")
+
         var resolvedConfigPath = configPath
         var config = CoreConfig.load(from: resolvedConfigPath)
 
@@ -32,27 +42,62 @@ struct CoreMain: AsyncParsableCommand {
 
         let service = CoreService(config: config)
         let router = CoreRouter(service: service)
-
-        print("SlopOverlord Core initialized on \(config.listen.host):\(config.listen.port)")
-
-        let sampleRequest = ChannelMessageRequest(
-            userId: "demo-user",
-            content: "Implement a feature and run tests"
-        )
-        let requestBody = try? JSONEncoder().encode(sampleRequest)
-        let response = await router.handle(
-            method: "POST",
-            path: "/v1/channels/general/messages",
-            body: requestBody
+        let server = CoreHTTPServer(
+            host: config.listen.host,
+            port: config.listen.port,
+            router: router,
+            logger: logger
         )
 
-        if let body = String(data: response.body, encoding: .utf8) {
-            print("POST /v1/channels/general/messages -> \(response.status) \(body)")
+        logger.info("SlopOverlord Core initialized")
+
+        if !oneshot {
+            try server.start()
+            logger.info("Core HTTP server listening on \(config.listen.host):\(config.listen.port)")
+        }
+
+        if runDemoRequest {
+            let sampleRequest = ChannelMessageRequest(
+                userId: "demo-user",
+                content: "Implement a feature and run tests"
+            )
+            let requestBody = try? JSONEncoder().encode(sampleRequest)
+            let response = await router.handle(
+                method: "POST",
+                path: "/v1/channels/general/messages",
+                body: requestBody
+            )
+
+            if let body = String(data: response.body, encoding: .utf8) {
+                logger.info("POST /v1/channels/general/messages -> \(response.status) \(body)")
+            }
         }
 
         if bootstrapBulletin {
             let bulletin = await service.triggerVisorBulletin()
-            print("Visor bulletin generated: \(bulletin.headline)")
+            logger.info("Visor bulletin generated: \(bulletin.headline)")
         }
+
+        // Daemon mode by default: keep process alive for container/service runtime.
+        if !oneshot {
+            logger.info("SlopOverlord Core daemon mode is active")
+            defer { try? server.shutdown() }
+            try server.waitUntilClosed()
+        }
+    }
+}
+
+private actor LoggingBootstrapper {
+    static let shared = LoggingBootstrapper()
+
+    private var isBootstrapped = false
+
+    func bootstrapIfNeeded() {
+        guard !isBootstrapped else {
+            return
+        }
+
+        LoggingSystem.bootstrap(StreamLogHandler.standardError)
+        isBootstrapped = true
     }
 }

@@ -1,4 +1,5 @@
 import Foundation
+import AgentRuntime
 import Protocols
 
 /// Minimal transport-agnostic response type used by Core router handlers.
@@ -103,9 +104,13 @@ public actor CoreRouter {
             route[1] == RouteSegment.channels &&
             route[3] == RouteSegment.state:
             let channelId = route[2]
-            guard let state = await service.getChannelState(channelId: channelId) else {
-                return json(status: HTTPStatus.notFound, payload: ["error": ErrorCode.channelNotFound])
-            }
+            let state = await service.getChannelState(channelId: channelId) ?? ChannelSnapshot(
+                channelId: channelId,
+                messages: [],
+                contextUtilization: 0,
+                activeWorkerIds: [],
+                lastDecision: nil
+            )
             return encodable(status: HTTPStatus.ok, payload: state)
 
         case let route where route.count == 2 &&

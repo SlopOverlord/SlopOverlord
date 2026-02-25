@@ -1,4 +1,5 @@
 import XCTest
+@testable import AgentRuntime
 @testable import Core
 @testable import Protocols
 
@@ -20,6 +21,21 @@ final class CoreRouterTests: XCTestCase {
 
         let response = await router.handle(method: "GET", path: "/v1/bulletins", body: nil)
         XCTAssertEqual(response.status, 200)
+    }
+
+    func testChannelStateReturnsEmptySnapshotWhenChannelMissing() async throws {
+        let service = CoreService(config: .default)
+        let router = CoreRouter(service: service)
+
+        let response = await router.handle(method: "GET", path: "/v1/channels/general/state", body: nil)
+        XCTAssertEqual(response.status, 200)
+
+        let snapshot = try JSONDecoder().decode(ChannelSnapshot.self, from: response.body)
+        XCTAssertEqual(snapshot.channelId, "general")
+        XCTAssertTrue(snapshot.messages.isEmpty)
+        XCTAssertEqual(snapshot.contextUtilization, 0)
+        XCTAssertTrue(snapshot.activeWorkerIds.isEmpty)
+        XCTAssertNil(snapshot.lastDecision)
     }
 
     func testArtifactContentNotFound() async {
