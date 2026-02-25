@@ -1,12 +1,10 @@
-version: "3.9"
-
 services:
   core:
     build:
       context: ../..
       dockerfile: utils/docker/core.Dockerfile
     ports:
-      - "251018:251018"
+      - "25101:25101"
     volumes:
       - core_data:/app/.data
 
@@ -15,7 +13,7 @@ services:
       context: ../..
       dockerfile: utils/docker/dashboard.Dockerfile
     ports:
-      - "251019:251019"
+      - "25102:25102"
     depends_on:
       - core
 

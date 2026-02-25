@@ -60,7 +60,7 @@ public struct CoreConfig: Codable, Sendable {
 
     public static var `default`: CoreConfig {
         CoreConfig(
-            listen: .init(host: "0.0.0.0", port: 251018),
+            listen: .init(host: "0.0.0.0", port: 25101),
             auth: .init(token: "dev-token"),
             models: ["openai:gpt-4.1-mini", "ollama:qwen3"],
             memory: .init(backend: "sqlite-local-vectors"),

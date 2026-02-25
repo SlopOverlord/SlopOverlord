@@ -1,7 +1,7 @@
 {
   "listen": {
     "host": "0.0.0.0",
-    "port": 251018
+    "port": 25101
   },
   "auth": {
     "token": "dev-token"

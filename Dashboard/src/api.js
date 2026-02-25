@@ -1,4 +1,4 @@
-const API_BASE = window.__SLOPOVERLORD_CONFIG__?.apiBase || "http://localhost:251018";
+const API_BASE = window.__SLOPOVERLORD_CONFIG__?.apiBase || "http://localhost:25101";
 
 export async function sendChannelMessage(channelId, payload) {
   const response = await fetch(`${API_BASE}/v1/channels/${channelId}/messages`, {

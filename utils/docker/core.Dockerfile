@@ -8,5 +8,5 @@ FROM swift:6.2-jammy
 WORKDIR /app
 COPY --from=builder /workspace/.build/release/Core /app/Core
 COPY slopoverlord.config.json /app/slopoverlord.config.json
-EXPOSE 251018
+EXPOSE 25101
 CMD ["/app/Core"]

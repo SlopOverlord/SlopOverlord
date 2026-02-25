@@ -1,0 +1,82 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+      - "codex/**"
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  swift-test:
+    name: Swift Tests
+    runs-on: ubuntu-latest
+    container:
+      image: swift:6.2-jammy
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install System Dependencies
+        run: |
+          apt-get update
+          apt-get install -y libsqlite3-dev
+
+      - name: Swift Version
+        run: swift --version
+
+      - name: Resolve Swift Packages
+        run: swift package resolve
+
+      - name: Run Test Suite
+        run: swift test --parallel
+
+  swift-build:
+    name: Swift Build
+    runs-on: ubuntu-latest
+    container:
+      image: swift:6.2-jammy
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install System Dependencies
+        run: |
+          apt-get update
+          apt-get install -y libsqlite3-dev
+
+      - name: Build Core (Release)
+        run: swift build -c release --product Core
+
+      - name: Build Node (Release)
+        run: swift build -c release --product Node
+
+      - name: Build App (Release)
+        run: swift build -c release --product App
+
+  dashboard-build:
+    name: Dashboard Build
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install Dashboard Dependencies
+        working-directory: Dashboard
+        run: npm install
+
+      - name: Build Dashboard
+        working-directory: Dashboard
+        run: npm run build
