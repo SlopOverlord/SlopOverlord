@@ -24,6 +24,7 @@ enum CoreRouterConstants {
 private enum HTTPMethod {
     static let get = "GET"
     static let post = "POST"
+    static let put = "PUT"
 }
 
 private enum HTTPStatus {
@@ -31,6 +32,7 @@ private enum HTTPStatus {
     static let created = 201
     static let badRequest = 400
     static let notFound = 404
+    static let internalServerError = 500
 }
 
 private enum RoutePath {
@@ -47,6 +49,7 @@ private enum RouteSegment {
     static let workers = "workers"
     static let artifacts = "artifacts"
     static let content = "content"
+    static let config = "config"
 }
 
 private enum ErrorCode {
@@ -54,6 +57,7 @@ private enum ErrorCode {
     static let notFound = "not_found"
     static let channelNotFound = "channel_not_found"
     static let artifactNotFound = "artifact_not_found"
+    static let configWriteFailed = "config_write_failed"
 }
 
 private struct AcceptResponse: Encodable {
@@ -91,6 +95,8 @@ public actor CoreRouter {
             return await handleGet(segments: segments)
         case HTTPMethod.post:
             return await handlePost(segments: segments, body: body)
+        case HTTPMethod.put:
+            return await handlePut(segments: segments, body: body)
         default:
             return json(status: HTTPStatus.notFound, payload: ["error": ErrorCode.notFound])
         }
@@ -119,6 +125,12 @@ public actor CoreRouter {
             let bulletins = await service.getBulletins()
             return encodable(status: HTTPStatus.ok, payload: bulletins)
 
+        case let route where route.count == 2 &&
+            route[0] == RouteSegment.v1 &&
+            route[1] == RouteSegment.config:
+            let config = await service.getConfig()
+            return encodable(status: HTTPStatus.ok, payload: config)
+
         case let route where route.count == 4 &&
             route[0] == RouteSegment.v1 &&
             route[1] == RouteSegment.artifacts &&
@@ -128,6 +140,30 @@ public actor CoreRouter {
                 return json(status: HTTPStatus.notFound, payload: ["error": ErrorCode.artifactNotFound])
             }
             return encodable(status: HTTPStatus.ok, payload: response)
+
+        default:
+            return json(status: HTTPStatus.notFound, payload: ["error": ErrorCode.notFound])
+        }
+    }
+
+    /// Handles all `PUT` routes under `/v1`.
+    private func handlePut(segments: [String], body: Data?) async -> CoreRouterResponse {
+        switch segments {
+        case let route where route.count == 2 &&
+            route[0] == RouteSegment.v1 &&
+            route[1] == RouteSegment.config:
+            guard let body,
+                  let request = try? decoder.decode(CoreConfig.self, from: body)
+            else {
+                return json(status: HTTPStatus.badRequest, payload: ["error": ErrorCode.invalidBody])
+            }
+
+            do {
+                let config = try await service.updateConfig(request)
+                return encodable(status: HTTPStatus.ok, payload: config)
+            } catch {
+                return json(status: HTTPStatus.internalServerError, payload: ["error": ErrorCode.configWriteFailed])
+            }
 
         default:
             return json(status: HTTPStatus.notFound, payload: ["error": ErrorCode.notFound])

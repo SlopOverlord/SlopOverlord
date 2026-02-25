@@ -6,17 +6,22 @@ import Protocols
 public actor CoreService {
     private let runtime: RuntimeSystem
     private let store: any PersistenceStore
+    private let configPath: String
+    private var currentConfig: CoreConfig
     private var eventTask: Task<Void, Never>?
 
     /// Creates core orchestration service with runtime and persistence backend.
-    public init(config: CoreConfig) {
-        let modelProvider = Self.buildModelProvider(config: config)
+    public init(config: CoreConfig, configPath: String = CoreConfig.defaultConfigPath) {
+        let resolvedModels = Self.resolveModelIdentifiers(config: config)
+        let modelProvider = Self.buildModelProvider(config: config, resolvedModels: resolvedModels)
         self.runtime = RuntimeSystem(
             modelProvider: modelProvider,
-            defaultModel: config.models.first
+            defaultModel: resolvedModels.first
         )
         let schema = Self.loadSchemaSQL()
         self.store = SQLiteStore(path: config.sqlitePath, schemaSQL: schema)
+        self.configPath = configPath
+        self.currentConfig = config
         Task {
             await self.startEventPersistence()
         }
@@ -81,6 +86,25 @@ public actor CoreService {
         await runtime.workerSnapshots()
     }
 
+    /// Returns currently active runtime config snapshot.
+    public func getConfig() -> CoreConfig {
+        currentConfig
+    }
+
+    /// Persists config to file and updates in-memory snapshot.
+    public func updateConfig(_ config: CoreConfig) throws -> CoreConfig {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+
+        let encoded = try encoder.encode(config)
+        let payload = encoded + Data("\n".utf8)
+        let url = URL(fileURLWithPath: configPath)
+        try payload.write(to: url, options: .atomic)
+
+        currentConfig = config
+        return currentConfig
+    }
+
     /// Loads bundled SQL schema text used by SQLite store.
     private static func loadSchemaSQL() -> String {
         let fileManager = FileManager.default
@@ -109,19 +133,44 @@ public actor CoreService {
     }
 
     /// Builds model provider plugin for AnyLanguageModel-based agent responses.
-    private static func buildModelProvider(config: CoreConfig) -> AnyLanguageModelProviderPlugin? {
-        let supportsOpenAI = config.models.contains { $0.hasPrefix("openai:") }
-        let supportsOllama = config.models.contains { $0.hasPrefix("ollama:") }
+    private static func buildModelProvider(
+        config: CoreConfig,
+        resolvedModels: [String]
+    ) -> AnyLanguageModelProviderPlugin? {
+        let supportsOpenAI = resolvedModels.contains { $0.hasPrefix("openai:") }
+        let supportsOllama = resolvedModels.contains { $0.hasPrefix("ollama:") }
+
+        let primaryOpenAIConfig = config.models.first {
+            resolvedIdentifier(for: $0).hasPrefix("openai:")
+        }
+        let primaryOllamaConfig = config.models.first {
+            resolvedIdentifier(for: $0).hasPrefix("ollama:")
+        }
 
         var openAISettings: AnyLanguageModelProviderPlugin.OpenAISettings?
         if supportsOpenAI {
             let apiKey = ProcessInfo.processInfo.environment["OPENAI_API_KEY"] ?? ""
-            if !apiKey.isEmpty {
-                openAISettings = .init(apiKey: { apiKey })
+            let configuredKey = primaryOpenAIConfig?.apiKey.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            let resolvedKey = configuredKey.isEmpty ? apiKey : configuredKey
+
+            if !resolvedKey.isEmpty {
+                if let baseURL = parseURL(primaryOpenAIConfig?.apiUrl) {
+                    openAISettings = .init(apiKey: { resolvedKey }, baseURL: baseURL)
+                } else {
+                    openAISettings = .init(apiKey: { resolvedKey })
+                }
             }
         }
 
-        let ollamaSettings: AnyLanguageModelProviderPlugin.OllamaSettings? = supportsOllama ? .init() : nil
+        let ollamaSettings: AnyLanguageModelProviderPlugin.OllamaSettings? = {
+            guard supportsOllama else {
+                return nil
+            }
+            if let baseURL = parseURL(primaryOllamaConfig?.apiUrl) {
+                return .init(baseURL: baseURL)
+            }
+            return .init()
+        }()
 
         guard openAISettings != nil || ollamaSettings != nil else {
             return nil
@@ -129,11 +178,51 @@ public actor CoreService {
 
         return AnyLanguageModelProviderPlugin(
             id: "any-language-model",
-            models: config.models,
+            models: resolvedModels,
             openAI: openAISettings,
             ollama: ollamaSettings,
             systemInstructions: "You are SlopOverlord core channel assistant."
         )
+    }
+
+    private static func resolveModelIdentifiers(config: CoreConfig) -> [String] {
+        config.models.map(resolvedIdentifier(for:))
+    }
+
+    private static func resolvedIdentifier(for model: CoreConfig.ModelConfig) -> String {
+        let modelValue = model.model.trimmingCharacters(in: .whitespacesAndNewlines)
+        if modelValue.hasPrefix("openai:") || modelValue.hasPrefix("ollama:") {
+            return modelValue
+        }
+
+        let provider = inferredProvider(model: model)
+        if let provider {
+            return "\(provider):\(modelValue)"
+        }
+
+        return modelValue
+    }
+
+    private static func inferredProvider(model: CoreConfig.ModelConfig) -> String? {
+        let title = model.title.lowercased()
+        let apiURL = model.apiUrl.lowercased()
+
+        if title.contains("openai") || apiURL.contains("openai") {
+            return "openai"
+        }
+
+        if title.contains("ollama") || apiURL.contains("ollama") || apiURL.contains("11434") {
+            return "ollama"
+        }
+
+        return nil
+    }
+
+    private static func parseURL(_ raw: String?) -> URL? {
+        guard let raw = raw?.trimmingCharacters(in: .whitespacesAndNewlines), !raw.isEmpty else {
+            return nil
+        }
+        return URL(string: raw)
     }
 
     /// Subscribes to runtime event stream and persists events in background.

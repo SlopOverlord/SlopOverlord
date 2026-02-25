@@ -191,7 +191,7 @@ private final class CoreHTTPHandler: ChannelInboundHandler, @unchecked Sendable 
         headers.add(name: "content-type", value: contentType)
         headers.add(name: "content-length", value: "\(contentLength)")
         headers.add(name: "access-control-allow-origin", value: "*")
-        headers.add(name: "access-control-allow-methods", value: "GET,POST,OPTIONS")
+        headers.add(name: "access-control-allow-methods", value: "GET,POST,PUT,OPTIONS")
         headers.add(name: "access-control-allow-headers", value: "content-type,authorization")
         headers.add(name: "access-control-max-age", value: "600")
         return headers

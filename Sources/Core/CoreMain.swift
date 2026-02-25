@@ -40,7 +40,7 @@ struct CoreMain: AsyncParsableCommand {
             config.sqlitePath = envConfig.string(forKey: "core.sqlite.path", default: config.sqlitePath)
         }
 
-        let service = CoreService(config: config)
+        let service = CoreService(config: config, configPath: resolvedConfigPath)
         let router = CoreRouter(service: service)
         let server = CoreHTTPServer(
             host: config.listen.host,

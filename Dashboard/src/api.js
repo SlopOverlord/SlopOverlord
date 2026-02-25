@@ -26,3 +26,23 @@ export async function fetchArtifact(id) {
   if (!response.ok) return null;
   return response.json();
 }
+
+export async function fetchRuntimeConfig() {
+  const response = await fetch(`${API_BASE}/v1/config`);
+  if (!response.ok) return null;
+  return response.json();
+}
+
+export async function updateRuntimeConfig(config) {
+  const response = await fetch(`${API_BASE}/v1/config`, {
+    method: "PUT",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(config)
+  });
+
+  if (!response.ok) {
+    return null;
+  }
+
+  return response.json();
+}

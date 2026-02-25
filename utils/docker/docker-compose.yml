@@ -3,6 +3,8 @@ services:
     build:
       context: ../..
       dockerfile: utils/docker/core.Dockerfile
+      args:
+        SWIFT_BUILD_CONFIGURATION: ${SWIFT_BUILD_CONFIGURATION:-release}
     ports:
       - "25101:25101"
     volumes:

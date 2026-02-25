@@ -38,6 +38,37 @@ final class CoreRouterTests: XCTestCase {
         XCTAssertNil(snapshot.lastDecision)
     }
 
+    func testGetConfigEndpoint() async throws {
+        let service = CoreService(config: .default)
+        let router = CoreRouter(service: service)
+
+        let response = await router.handle(method: "GET", path: "/v1/config", body: nil)
+        XCTAssertEqual(response.status, 200)
+
+        let config = try JSONDecoder().decode(CoreConfig.self, from: response.body)
+        XCTAssertEqual(config.listen.port, 25101)
+    }
+
+    func testPutConfigEndpoint() async throws {
+        let tempPath = FileManager.default.temporaryDirectory
+            .appendingPathComponent("slopoverlord-config-\(UUID().uuidString).json")
+            .path
+
+        let service = CoreService(config: .default, configPath: tempPath)
+        let router = CoreRouter(service: service)
+
+        var config = CoreConfig.default
+        config.listen.port = 25155
+        config.sqlitePath = "./.data/core-config-test.sqlite"
+
+        let payload = try JSONEncoder().encode(config)
+        let response = await router.handle(method: "PUT", path: "/v1/config", body: payload)
+        XCTAssertEqual(response.status, 200)
+
+        let updated = try JSONDecoder().decode(CoreConfig.self, from: response.body)
+        XCTAssertEqual(updated.listen.port, 25155)
+    }
+
     func testArtifactContentNotFound() async {
         let service = CoreService(config: .default)
         let router = CoreRouter(service: service)
