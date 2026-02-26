@@ -35,3 +35,55 @@ public struct ArtifactContentResponse: Codable, Sendable {
         self.content = content
     }
 }
+
+public enum ProviderAuthMethod: String, Codable, Sendable {
+    case apiKey = "api_key"
+    case deeplink
+}
+
+public struct OpenAIProviderModelsRequest: Codable, Sendable {
+    public var authMethod: ProviderAuthMethod
+    public var apiKey: String?
+    public var apiUrl: String?
+
+    public init(authMethod: ProviderAuthMethod, apiKey: String? = nil, apiUrl: String? = nil) {
+        self.authMethod = authMethod
+        self.apiKey = apiKey
+        self.apiUrl = apiUrl
+    }
+}
+
+public struct ProviderModelOption: Codable, Sendable, Equatable {
+    public var id: String
+    public var title: String
+
+    public init(id: String, title: String) {
+        self.id = id
+        self.title = title
+    }
+}
+
+public struct OpenAIProviderModelsResponse: Codable, Sendable {
+    public var provider: String
+    public var authMethod: ProviderAuthMethod
+    public var usedEnvironmentKey: Bool
+    public var source: String
+    public var warning: String?
+    public var models: [ProviderModelOption]
+
+    public init(
+        provider: String,
+        authMethod: ProviderAuthMethod,
+        usedEnvironmentKey: Bool,
+        source: String,
+        warning: String?,
+        models: [ProviderModelOption]
+    ) {
+        self.provider = provider
+        self.authMethod = authMethod
+        self.usedEnvironmentKey = usedEnvironmentKey
+        self.source = source
+        self.warning = warning
+        self.models = models
+    }
+}

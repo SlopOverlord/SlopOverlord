@@ -27,6 +27,48 @@ func bulletinsEndpoint() async {
 }
 
 @Test
+func workersEndpoint() async throws {
+    let service = CoreService(config: .default)
+    let router = CoreRouter(service: service)
+
+    let createBody = try JSONEncoder().encode(
+        WorkerCreateRequest(
+            spec: WorkerTaskSpec(
+                taskId: "task-1",
+                channelId: "general",
+                title: "Worker",
+                objective: "Do work",
+                tools: ["shell"],
+                mode: .interactive
+            )
+        )
+    )
+    let createResponse = await router.handle(method: "POST", path: "/v1/workers", body: createBody)
+    #expect(createResponse.status == 201)
+
+    let response = await router.handle(method: "GET", path: "/v1/workers", body: nil)
+    #expect(response.status == 200)
+
+    let workers = try JSONDecoder().decode([WorkerSnapshot].self, from: response.body)
+    #expect(!workers.isEmpty)
+}
+
+@Test
+func openAIModelsEndpoint() async throws {
+    let service = CoreService(config: .default)
+    let router = CoreRouter(service: service)
+
+    let request = OpenAIProviderModelsRequest(authMethod: .apiKey, apiKey: "", apiUrl: "https://api.openai.com/v1")
+    let body = try JSONEncoder().encode(request)
+    let response = await router.handle(method: "POST", path: "/v1/providers/openai/models", body: body)
+    #expect(response.status == 200)
+
+    let payload = try JSONDecoder().decode(OpenAIProviderModelsResponse.self, from: response.body)
+    #expect(payload.provider == "openai")
+    #expect(!payload.models.isEmpty)
+}
+
+@Test
 func channelStateReturnsEmptySnapshotWhenChannelMissing() async throws {
     let service = CoreService(config: .default)
     let router = CoreRouter(service: service)

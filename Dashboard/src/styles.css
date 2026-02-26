@@ -168,6 +168,162 @@ body {
   min-height: 620px;
 }
 
+.projects-shell {
+  display: grid;
+  gap: 12px;
+}
+
+.projects-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.projects-head h2 {
+  margin: 0;
+}
+
+.projects-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 12px;
+}
+
+.project-card {
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 12px;
+  background: rgba(7, 17, 29, 0.86);
+  padding: 12px;
+  display: grid;
+  gap: 10px;
+  cursor: pointer;
+  transition: border-color 120ms ease;
+}
+
+.project-card:hover {
+  border-color: rgba(64, 223, 159, 0.55);
+}
+
+.project-card-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.project-card-head h3 {
+  margin: 0;
+}
+
+.project-menu {
+  position: relative;
+}
+
+.project-menu summary {
+  list-style: none;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 8px;
+  padding: 4px 8px;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.project-menu summary::-webkit-details-marker {
+  display: none;
+}
+
+.project-menu[open] summary {
+  border-color: rgba(64, 223, 159, 0.6);
+  color: var(--text);
+}
+
+.project-menu-list {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 6px);
+  min-width: 140px;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 10px;
+  background: rgba(7, 16, 27, 0.97);
+  padding: 8px;
+  display: grid;
+  gap: 6px;
+  z-index: 10;
+}
+
+.project-menu-list button {
+  width: 100%;
+}
+
+.project-stats p {
+  margin: 0;
+  color: var(--muted);
+}
+
+.project-task-pill {
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 999px;
+  padding: 2px 10px;
+  font-size: 0.8rem;
+}
+
+.project-task-pill.ok {
+  color: #76f5bb;
+  border-color: rgba(118, 245, 187, 0.45);
+}
+
+.project-task-pill.warn {
+  color: #ffd089;
+  border-color: rgba(255, 208, 137, 0.45);
+}
+
+.project-task-pill.muted {
+  color: #9eb8ca;
+}
+
+.project-details {
+  display: grid;
+  gap: 12px;
+}
+
+.project-details-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.project-details-head h3 {
+  margin: 0;
+}
+
+.project-back {
+  min-width: 140px;
+}
+
+.project-details-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.project-listing {
+  margin-top: 10px;
+  display: grid;
+  gap: 8px;
+}
+
+.project-listing-item {
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 10px;
+  padding: 10px;
+  background: rgba(7, 16, 27, 0.72);
+}
+
+.project-listing-item p {
+  margin: 4px 0 0;
+  color: var(--muted);
+}
+
 .settings-side {
   background: rgba(8, 16, 28, 0.92);
   border: 1px solid var(--line);
@@ -316,6 +472,60 @@ body {
   gap: 12px;
 }
 
+.entry-models-shell {
+  display: grid;
+  gap: 12px;
+}
+
+.provider-auth-card {
+  display: grid;
+  gap: 10px;
+}
+
+.provider-auth-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.provider-auth-head h3 {
+  margin: 0;
+}
+
+.provider-auth-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.provider-auth-grid label {
+  display: grid;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 0.88rem;
+}
+
+.provider-auth-note {
+  display: grid;
+  gap: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 10px;
+  padding: 10px;
+  background: rgba(7, 16, 29, 0.88);
+}
+
+.provider-auth-note p {
+  margin: 0;
+  color: var(--muted);
+}
+
+.provider-auth-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
 .entry-list {
   border: 1px solid rgba(255, 255, 255, 0.1);
   border-radius: 12px;
@@ -404,7 +614,8 @@ body {
 }
 
 textarea,
-input {
+input,
+select {
   width: 100%;
   border: 1px solid var(--line);
   background: rgba(8, 19, 31, 0.85);
@@ -502,6 +713,14 @@ pre {
   }
 
   .entry-form-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .provider-auth-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .project-details-grid {
     grid-template-columns: 1fr;
   }
 }

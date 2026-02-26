@@ -21,6 +21,12 @@ export async function fetchBulletins() {
   return response.json();
 }
 
+export async function fetchWorkers() {
+  const response = await fetch(`${API_BASE}/v1/workers`);
+  if (!response.ok) return [];
+  return response.json();
+}
+
 export async function fetchArtifact(id) {
   const response = await fetch(`${API_BASE}/v1/artifacts/${id}/content`);
   if (!response.ok) return null;
@@ -38,6 +44,20 @@ export async function updateRuntimeConfig(config) {
     method: "PUT",
     headers: { "content-type": "application/json" },
     body: JSON.stringify(config)
+  });
+
+  if (!response.ok) {
+    return null;
+  }
+
+  return response.json();
+}
+
+export async function fetchOpenAIModels(payload) {
+  const response = await fetch(`${API_BASE}/v1/providers/openai/models`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(payload)
   });
 
   if (!response.ok) {

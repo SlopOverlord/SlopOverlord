@@ -1,8 +1,9 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { fetchArtifact, fetchBulletins, fetchChannelState, sendChannelMessage } from "./api";
+import { fetchArtifact, fetchBulletins, fetchChannelState, fetchWorkers, sendChannelMessage } from "./api";
 import { SidebarView } from "./components/SidebarView";
 import { ConfigView } from "./views/ConfigView";
 import { PlaceholderView } from "./views/PlaceholderView";
+import { ProjectsView } from "./views/ProjectsView";
 import { RuntimeOverviewView } from "./views/RuntimeOverviewView";
 
 const CHANNEL_ID = "general";
@@ -13,6 +14,7 @@ export function App() {
   const [text, setText] = useState("Implement branch workflow and review");
   const [messages, setMessages] = useState([]);
   const [state, setState] = useState(null);
+  const [workers, setWorkers] = useState([]);
   const [bulletins, setBulletins] = useState([]);
   const [artifactId, setArtifactId] = useState("");
   const [artifactContent, setArtifactContent] = useState("Select artifact id to preview");
@@ -34,9 +36,14 @@ export function App() {
   }, [state]);
 
   async function refreshRuntime() {
-    const [nextState, nextBulletins] = await Promise.all([fetchChannelState(CHANNEL_ID), fetchBulletins()]);
+    const [nextState, nextBulletins, nextWorkers] = await Promise.all([
+      fetchChannelState(CHANNEL_ID),
+      fetchBulletins(),
+      fetchWorkers()
+    ]);
     setState(nextState);
     setBulletins(nextBulletins);
+    setWorkers(nextWorkers);
     setMessages(nextState?.messages || []);
   }
 
@@ -89,7 +96,7 @@ export function App() {
     {
       id: "projects",
       label: { icon: "PR", title: "Projects" },
-      content: <PlaceholderView title="Projects" />
+      content: <ProjectsView channelState={state} workers={workers} />
     },
     {
       id: "sessions",

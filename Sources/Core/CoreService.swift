@@ -1,4 +1,7 @@
 import Foundation
+#if canImport(FoundationNetworking)
+import FoundationNetworking
+#endif
 import AgentRuntime
 import PluginSDK
 import Protocols
@@ -16,7 +19,7 @@ public actor CoreService {
         let modelProvider = Self.buildModelProvider(config: config, resolvedModels: resolvedModels)
         self.runtime = RuntimeSystem(
             modelProvider: modelProvider,
-            defaultModel: resolvedModels.first
+            defaultModel: modelProvider?.models.first ?? resolvedModels.first
         )
         let schema = Self.loadSchemaSQL()
         self.store = SQLiteStore(path: config.sqlitePath, schemaSQL: schema)
@@ -89,6 +92,88 @@ public actor CoreService {
     /// Returns currently active runtime config snapshot.
     public func getConfig() -> CoreConfig {
         currentConfig
+    }
+
+    /// Returns OpenAI model catalog using API key auth or environment fallback.
+    public func listOpenAIModels(request: OpenAIProviderModelsRequest) async -> OpenAIProviderModelsResponse {
+        let primaryOpenAIConfig = currentConfig.models.first {
+            Self.resolvedIdentifier(for: $0).hasPrefix("openai:")
+        }
+
+        let configuredURL = primaryOpenAIConfig?.apiUrl.trimmingCharacters(in: .whitespacesAndNewlines)
+        let requestedURL = request.apiUrl?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let baseURL = Self.parseURL(requestedURL) ?? Self.parseURL(configuredURL) ?? URL(string: "https://api.openai.com/v1")
+
+        let configuredKey = primaryOpenAIConfig?.apiKey.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let envKey = ProcessInfo.processInfo.environment["OPENAI_API_KEY"]?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let requestKey = request.apiKey?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+
+        var usedEnvironmentKey = false
+        let resolvedKey: String? = {
+            switch request.authMethod {
+            case .apiKey:
+                if !requestKey.isEmpty {
+                    return requestKey
+                }
+                if !configuredKey.isEmpty {
+                    return configuredKey
+                }
+                if !envKey.isEmpty {
+                    usedEnvironmentKey = true
+                    return envKey
+                }
+                return nil
+            case .deeplink:
+                if !envKey.isEmpty {
+                    usedEnvironmentKey = true
+                    return envKey
+                }
+                return nil
+            }
+        }()
+
+        guard let apiKey = resolvedKey, !apiKey.isEmpty, let baseURL else {
+            return OpenAIProviderModelsResponse(
+                provider: "openai",
+                authMethod: request.authMethod,
+                usedEnvironmentKey: usedEnvironmentKey,
+                source: "fallback",
+                warning: "OpenAI API key is missing. Provide API key or set OPENAI_API_KEY.",
+                models: Self.fallbackOpenAIModels
+            )
+        }
+
+        do {
+            let models = try await Self.fetchOpenAIModels(apiKey: apiKey, baseURL: baseURL)
+            if models.isEmpty {
+                return OpenAIProviderModelsResponse(
+                    provider: "openai",
+                    authMethod: request.authMethod,
+                    usedEnvironmentKey: usedEnvironmentKey,
+                    source: "fallback",
+                    warning: "Provider returned empty model list.",
+                    models: Self.fallbackOpenAIModels
+                )
+            }
+
+            return OpenAIProviderModelsResponse(
+                provider: "openai",
+                authMethod: request.authMethod,
+                usedEnvironmentKey: usedEnvironmentKey,
+                source: "remote",
+                warning: nil,
+                models: models
+            )
+        } catch {
+            return OpenAIProviderModelsResponse(
+                provider: "openai",
+                authMethod: request.authMethod,
+                usedEnvironmentKey: usedEnvironmentKey,
+                source: "fallback",
+                warning: "Failed to fetch OpenAI models: \(error.localizedDescription)",
+                models: Self.fallbackOpenAIModels
+            )
+        }
     }
 
     /// Persists config to file and updates in-memory snapshot.
@@ -172,13 +257,23 @@ public actor CoreService {
             return .init()
         }()
 
-        guard openAISettings != nil || ollamaSettings != nil else {
+        let availableModels = resolvedModels.filter { model in
+            if model.hasPrefix("openai:") {
+                return openAISettings != nil
+            }
+            if model.hasPrefix("ollama:") {
+                return ollamaSettings != nil
+            }
+            return openAISettings != nil || ollamaSettings != nil
+        }
+
+        guard !availableModels.isEmpty else {
             return nil
         }
 
         return AnyLanguageModelProviderPlugin(
             id: "any-language-model",
-            models: resolvedModels,
+            models: availableModels,
             openAI: openAISettings,
             ollama: ollamaSettings,
             systemInstructions: "You are SlopOverlord core channel assistant."
@@ -186,7 +281,16 @@ public actor CoreService {
     }
 
     private static func resolveModelIdentifiers(config: CoreConfig) -> [String] {
-        config.models.map(resolvedIdentifier(for:))
+        var identifiers = config.models.map(resolvedIdentifier(for:))
+        let hasOpenAI = identifiers.contains { $0.hasPrefix("openai:") }
+        let environmentKey = ProcessInfo.processInfo.environment["OPENAI_API_KEY"]?
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+
+        if !hasOpenAI, !environmentKey.isEmpty {
+            identifiers.append("openai:gpt-4.1-mini")
+        }
+
+        return identifiers
     }
 
     private static func resolvedIdentifier(for model: CoreConfig.ModelConfig) -> String {
@@ -223,6 +327,59 @@ public actor CoreService {
             return nil
         }
         return URL(string: raw)
+    }
+
+    private struct OpenAIModelsResponse: Decodable {
+        struct ModelItem: Decodable {
+            let id: String
+        }
+
+        let data: [ModelItem]
+    }
+
+    private static let fallbackOpenAIModels: [ProviderModelOption] = [
+        .init(id: "gpt-4.1", title: "gpt-4.1"),
+        .init(id: "gpt-4.1-mini", title: "gpt-4.1-mini"),
+        .init(id: "gpt-4o", title: "gpt-4o"),
+        .init(id: "gpt-4o-mini", title: "gpt-4o-mini"),
+        .init(id: "o4-mini", title: "o4-mini")
+    ]
+
+    private static func fetchOpenAIModels(apiKey: String, baseURL: URL) async throws -> [ProviderModelOption] {
+        let endpoint = openAIModelsURL(baseURL: baseURL)
+        var request = URLRequest(url: endpoint)
+        request.httpMethod = "GET"
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard let http = response as? HTTPURLResponse else {
+            throw URLError(.badServerResponse)
+        }
+
+        guard (200..<300).contains(http.statusCode) else {
+            throw URLError(.userAuthenticationRequired)
+        }
+
+        let decoded = try JSONDecoder().decode(OpenAIModelsResponse.self, from: data)
+        return decoded.data
+            .map(\.id)
+            .filter { !$0.isEmpty }
+            .sorted()
+            .map { ProviderModelOption(id: $0, title: $0) }
+    }
+
+    private static func openAIModelsURL(baseURL: URL) -> URL {
+        if baseURL.path.isEmpty || baseURL.path == "/" {
+            return baseURL.appendingPathComponent("models")
+        }
+
+        let normalizedPath = baseURL.path.hasSuffix("/") ? String(baseURL.path.dropLast()) : baseURL.path
+        if normalizedPath.hasSuffix("/models") {
+            return baseURL
+        }
+
+        return baseURL.appendingPathComponent("models")
     }
 
     /// Subscribes to runtime event stream and persists events in background.

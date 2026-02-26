@@ -5,6 +5,10 @@ services:
       dockerfile: utils/docker/core.Dockerfile
       args:
         SWIFT_BUILD_CONFIGURATION: ${SWIFT_BUILD_CONFIGURATION:-release}
+    env_file:
+      - ../../.env
+    environment:
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
     ports:
       - "25101:25101"
     volumes:
@@ -14,6 +18,8 @@ services:
     build:
       context: ../..
       dockerfile: utils/docker/dashboard.Dockerfile
+    env_file:
+      - ../../.env
     ports:
       - "25102:25102"
     depends_on:

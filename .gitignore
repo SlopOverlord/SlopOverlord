@@ -6,3 +6,4 @@ Dashboard/dist/
 workspace/
 /core.sqlite
 /core.sqlite-*
+.env

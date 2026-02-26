@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { fetchRuntimeConfig, updateRuntimeConfig } from "../api";
+import { fetchOpenAIModels, fetchRuntimeConfig, updateRuntimeConfig } from "../api";
 
 const SETTINGS_ITEMS = [
   { id: "logging", title: "Logging", icon: "LG" },
@@ -69,6 +69,27 @@ function normalizeModel(item, index) {
   };
 }
 
+function inferModelProvider(model) {
+  const apiUrl = String(model?.apiUrl || "").toLowerCase();
+  const title = String(model?.title || "").toLowerCase();
+  const modelName = String(model?.model || "").toLowerCase();
+
+  if (
+    apiUrl.includes("openai") ||
+    title.includes("openai") ||
+    modelName.startsWith("gpt-") ||
+    /^o\d/.test(modelName)
+  ) {
+    return "openai";
+  }
+
+  if (apiUrl.includes("ollama") || apiUrl.includes("11434") || title.includes("ollama")) {
+    return "ollama";
+  }
+
+  return "custom";
+}
+
 function normalizePlugin(item, index) {
   if (typeof item === "string") {
     return {
@@ -130,6 +151,10 @@ export function ConfigView() {
   const [statusText, setStatusText] = useState("Loading config...");
   const [selectedModelIndex, setSelectedModelIndex] = useState(0);
   const [selectedPluginIndex, setSelectedPluginIndex] = useState(0);
+  const [openAIAuthMode, setOpenAIAuthMode] = useState("api_key");
+  const [openAIAuthKey, setOpenAIAuthKey] = useState("");
+  const [openAIModelOptions, setOpenAIModelOptions] = useState([]);
+  const [openAIModelStatus, setOpenAIModelStatus] = useState("OpenAI provider is not loaded.");
 
   useEffect(() => {
     loadConfig().catch(() => {
@@ -184,9 +209,14 @@ export function ConfigView() {
     }
 
     const normalized = normalizeConfig(config);
+    const firstOpenAIModel = normalized.models.find((model) => inferModelProvider(model) === "openai");
+
     setDraftConfig(normalized);
     setSavedConfig(normalized);
     setRawConfig(JSON.stringify(normalized, null, 2));
+    setOpenAIAuthKey(firstOpenAIModel?.apiKey || "");
+    setOpenAIModelOptions([]);
+    setOpenAIModelStatus("OpenAI provider is not loaded.");
     setStatusText("Config loaded");
   }
 
@@ -200,9 +230,12 @@ export function ConfigView() {
       }
 
       const normalized = normalizeConfig(response);
+      const firstOpenAIModel = normalized.models.find((model) => inferModelProvider(model) === "openai");
+
       setDraftConfig(normalized);
       setSavedConfig(normalized);
       setRawConfig(JSON.stringify(normalized, null, 2));
+      setOpenAIAuthKey(firstOpenAIModel?.apiKey || openAIAuthKey);
       setStatusText("Config saved");
     } catch {
       setStatusText("Invalid raw JSON");
@@ -218,106 +251,256 @@ export function ConfigView() {
     });
   }
 
+  function applyOpenAIKeyToModels() {
+    const key = openAIAuthKey.trim();
+    mutateDraft((draft) => {
+      const openAIIndexes = draft.models
+        .map((model, index) => ({ model, index }))
+        .filter((entry) => inferModelProvider(entry.model) === "openai")
+        .map((entry) => entry.index);
+
+      if (openAIIndexes.length === 0) {
+        draft.models.push({
+          title: "openai-main",
+          apiKey: key,
+          apiUrl: "https://api.openai.com/v1",
+          model: "gpt-4.1-mini"
+        });
+        return;
+      }
+
+      for (const index of openAIIndexes) {
+        draft.models[index].apiKey = key;
+      }
+    });
+    setStatusText("Applied API key to OpenAI models");
+  }
+
+  function openCodexOpenAIDeepLink() {
+    window.location.href = "codex://auth/openai?source=slopoverlord";
+    setOpenAIModelStatus("Codex deeplink opened. Complete auth there, then reload model list.");
+  }
+
+  async function loadOpenAIProviderModels() {
+    setOpenAIModelStatus("Loading OpenAI models...");
+    const primaryOpenAIModel = draftConfig.models.find((model) => inferModelProvider(model) === "openai");
+    const response = await fetchOpenAIModels({
+      authMethod: openAIAuthMode,
+      apiKey: openAIAuthMode === "api_key" ? openAIAuthKey : undefined,
+      apiUrl: primaryOpenAIModel?.apiUrl || "https://api.openai.com/v1"
+    });
+
+    if (!response) {
+      setOpenAIModelStatus("Failed to load models from Core");
+      return;
+    }
+
+    setOpenAIModelOptions(Array.isArray(response.models) ? response.models : []);
+
+    if (response.warning) {
+      setOpenAIModelStatus(response.warning);
+    } else if (response.source === "remote") {
+      setOpenAIModelStatus(`Loaded ${response.models.length} models from OpenAI`);
+    } else {
+      setOpenAIModelStatus(`Loaded fallback catalog (${response.models.length} models)`);
+    }
+  }
+
   function renderModelEditor() {
     const current = draftConfig.models[selectedModelIndex] || emptyModel();
+    const currentProvider = inferModelProvider(current);
+    const hasOpenAIModels = openAIModelOptions.length > 0;
 
     return (
-      <div className="entry-editor-layout">
-        <div className="entry-list">
-          <div className="entry-list-head">
-            <h4>Custom entries</h4>
-            <button
-              type="button"
-              onClick={() => {
-                mutateDraft((draft) => {
-                  draft.models.push(emptyModel());
-                });
-                setSelectedModelIndex(draftConfig.models.length);
-              }}
-            >
-              + Add Entry
-            </button>
-          </div>
-          <div className="entry-list-scroll">
-            {draftConfig.models.map((item, index) => (
-              <button
-                key={`${item.title}-${index}`}
-                type="button"
-                className={`entry-list-item ${index === selectedModelIndex ? "active" : ""}`}
-                onClick={() => setSelectedModelIndex(index)}
-              >
-                {item.title || `model-${index + 1}`}
-              </button>
-            ))}
-          </div>
-        </div>
-
-        <section className="entry-editor-card">
-          <div className="entry-editor-head">
-            <h3>{current.title || "Model entry"}</h3>
-            <button
-              type="button"
-              className="danger"
-              onClick={() => {
-                mutateDraft((draft) => {
-                  draft.models.splice(selectedModelIndex, 1);
-                  if (draft.models.length === 0) {
-                    draft.models.push(emptyModel());
-                  }
-                });
-              }}
-            >
-              Delete
+      <div className="entry-models-shell">
+        <section className="entry-editor-card provider-auth-card">
+          <div className="provider-auth-head">
+            <h3>OpenAI Provider</h3>
+            <button type="button" onClick={loadOpenAIProviderModels}>
+              Refresh models
             </button>
           </div>
 
-          <div className="entry-form-grid">
+          <div className="provider-auth-grid">
             <label>
-              Title
-              <input
-                value={current.title}
-                onChange={(event) =>
-                  mutateDraft((draft) => {
-                    draft.models[selectedModelIndex].title = event.target.value;
-                  })
-                }
-              />
+              Auth Flow
+              <select value={openAIAuthMode} onChange={(event) => setOpenAIAuthMode(event.target.value)}>
+                <option value="api_key">API Key</option>
+                <option value="deeplink">Codex Deeplink</option>
+              </select>
             </label>
-            <label>
-              Model
-              <input
-                value={current.model}
-                onChange={(event) =>
-                  mutateDraft((draft) => {
-                    draft.models[selectedModelIndex].model = event.target.value;
-                  })
-                }
-              />
-            </label>
-            <label>
-              API URL
-              <input
-                value={current.apiUrl}
-                onChange={(event) =>
-                  mutateDraft((draft) => {
-                    draft.models[selectedModelIndex].apiUrl = event.target.value;
-                  })
-                }
-              />
-            </label>
-            <label>
-              API Key
-              <input
-                value={current.apiKey}
-                onChange={(event) =>
-                  mutateDraft((draft) => {
-                    draft.models[selectedModelIndex].apiKey = event.target.value;
-                  })
-                }
-              />
-            </label>
+
+            {openAIAuthMode === "api_key" ? (
+              <label>
+                API Key
+                <input
+                  type="password"
+                  value={openAIAuthKey}
+                  onChange={(event) => setOpenAIAuthKey(event.target.value)}
+                  placeholder="sk-..."
+                />
+              </label>
+            ) : (
+              <div className="provider-auth-note">
+                <p>Authenticate OpenAI in Codex, then reload models.</p>
+                <button type="button" onClick={openCodexOpenAIDeepLink}>
+                  Open Codex Deeplink
+                </button>
+              </div>
+            )}
+          </div>
+
+          <div className="provider-auth-actions">
+            <button type="button" onClick={applyOpenAIKeyToModels} disabled={openAIAuthMode !== "api_key"}>
+              Apply Key To OpenAI Models
+            </button>
+            <span className="placeholder-text">{openAIModelStatus}</span>
           </div>
         </section>
+
+        <div className="entry-editor-layout">
+          <div className="entry-list">
+            <div className="entry-list-head">
+              <h4>Custom entries</h4>
+              <button
+                type="button"
+                onClick={() => {
+                  mutateDraft((draft) => {
+                    draft.models.push(emptyModel());
+                  });
+                  setSelectedModelIndex(draftConfig.models.length);
+                }}
+              >
+                + Add Entry
+              </button>
+            </div>
+            <div className="entry-list-scroll">
+              {draftConfig.models.map((item, index) => (
+                <button
+                  key={`${item.title}-${index}`}
+                  type="button"
+                  className={`entry-list-item ${index === selectedModelIndex ? "active" : ""}`}
+                  onClick={() => setSelectedModelIndex(index)}
+                >
+                  {item.title || `model-${index + 1}`}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <section className="entry-editor-card">
+            <div className="entry-editor-head">
+              <h3>{current.title || "Model entry"}</h3>
+              <button
+                type="button"
+                className="danger"
+                onClick={() => {
+                  mutateDraft((draft) => {
+                    draft.models.splice(selectedModelIndex, 1);
+                    if (draft.models.length === 0) {
+                      draft.models.push(emptyModel());
+                    }
+                  });
+                }}
+              >
+                Delete
+              </button>
+            </div>
+
+            <div className="entry-form-grid">
+              <label>
+                Provider
+                <select
+                  value={currentProvider}
+                  onChange={(event) => {
+                    const provider = event.target.value;
+                    mutateDraft((draft) => {
+                      const model = draft.models[selectedModelIndex];
+                      if (provider === "openai") {
+                        model.title = model.title || "openai-main";
+                        model.apiUrl = "https://api.openai.com/v1";
+                        model.model = model.model || "gpt-4.1-mini";
+                      } else if (provider === "ollama") {
+                        model.title = model.title || "ollama-local";
+                        model.apiUrl = "http://127.0.0.1:11434";
+                        model.model = model.model || "qwen3";
+                      } else {
+                        model.apiUrl = model.apiUrl || "";
+                      }
+                    });
+                  }}
+                >
+                  <option value="openai">OpenAI</option>
+                  <option value="ollama">Ollama</option>
+                  <option value="custom">Custom</option>
+                </select>
+              </label>
+              <label>
+                Title
+                <input
+                  value={current.title}
+                  onChange={(event) =>
+                    mutateDraft((draft) => {
+                      draft.models[selectedModelIndex].title = event.target.value;
+                    })
+                  }
+                />
+              </label>
+              <label>
+                Model
+                {currentProvider === "openai" && hasOpenAIModels ? (
+                  <select
+                    value={current.model}
+                    onChange={(event) =>
+                      mutateDraft((draft) => {
+                        draft.models[selectedModelIndex].model = event.target.value;
+                      })
+                    }
+                  >
+                    <option value="">Select model</option>
+                    {openAIModelOptions.map((model) => (
+                      <option key={model.id} value={model.id}>
+                        {model.title}
+                      </option>
+                    ))}
+                  </select>
+                ) : (
+                  <input
+                    value={current.model}
+                    onChange={(event) =>
+                      mutateDraft((draft) => {
+                        draft.models[selectedModelIndex].model = event.target.value;
+                      })
+                    }
+                  />
+                )}
+              </label>
+              <label>
+                API URL
+                <input
+                  value={current.apiUrl}
+                  onChange={(event) =>
+                    mutateDraft((draft) => {
+                      draft.models[selectedModelIndex].apiUrl = event.target.value;
+                    })
+                  }
+                />
+              </label>
+              <label>
+                API Key
+                <input
+                  type="password"
+                  value={current.apiKey}
+                  onChange={(event) =>
+                    mutateDraft((draft) => {
+                      draft.models[selectedModelIndex].apiKey = event.target.value;
+                    })
+                  }
+                />
+              </label>
+            </div>
+          </section>
+        </div>
       </div>
     );
   }

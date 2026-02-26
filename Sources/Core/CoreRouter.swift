@@ -41,6 +41,9 @@ private enum RoutePath {
 
 private enum RouteSegment {
     static let v1 = "v1"
+    static let providers = "providers"
+    static let openAI = "openai"
+    static let models = "models"
     static let channels = "channels"
     static let messages = "messages"
     static let route = "route"
@@ -127,6 +130,12 @@ public actor CoreRouter {
 
         case let route where route.count == 2 &&
             route[0] == RouteSegment.v1 &&
+            route[1] == RouteSegment.workers:
+            let workers = await service.workerSnapshots()
+            return encodable(status: HTTPStatus.ok, payload: workers)
+
+        case let route where route.count == 2 &&
+            route[0] == RouteSegment.v1 &&
             route[1] == RouteSegment.config:
             let config = await service.getConfig()
             return encodable(status: HTTPStatus.ok, payload: config)
@@ -173,6 +182,20 @@ public actor CoreRouter {
     /// Handles all `POST` routes under `/v1`.
     private func handlePost(segments: [String], body: Data?) async -> CoreRouterResponse {
         switch segments {
+        case let route where route.count == 4 &&
+            route[0] == RouteSegment.v1 &&
+            route[1] == RouteSegment.providers &&
+            route[2] == RouteSegment.openAI &&
+            route[3] == RouteSegment.models:
+            guard let body,
+                  let request = try? decoder.decode(OpenAIProviderModelsRequest.self, from: body)
+            else {
+                return json(status: HTTPStatus.badRequest, payload: ["error": ErrorCode.invalidBody])
+            }
+
+            let response = await service.listOpenAIModels(request: request)
+            return encodable(status: HTTPStatus.ok, payload: response)
+
         case let route where route.count == 4 &&
             route[0] == RouteSegment.v1 &&
             route[1] == RouteSegment.channels &&
