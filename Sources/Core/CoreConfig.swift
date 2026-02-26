@@ -2,6 +2,10 @@ import Foundation
 
 public struct CoreConfig: Codable, Sendable {
     public static let defaultConfigPath = "slopoverlord.config.json"
+    public static let defaultWorkspaceName = "workspace"
+    public static let defaultWorkspaceBasePath = "~"
+    public static let defaultSQLiteFileName = "core.sqlite"
+    public static let legacyDefaultSQLitePath = "./.data/core.sqlite"
 
     public struct ModelConfig: Codable, Sendable, Equatable {
         public var title: String
@@ -41,6 +45,19 @@ public struct CoreConfig: Codable, Sendable {
         }
     }
 
+    public struct Workspace: Codable, Sendable {
+        public var name: String
+        public var basePath: String
+
+        public init(
+            name: String = CoreConfig.defaultWorkspaceName,
+            basePath: String = CoreConfig.defaultWorkspaceBasePath
+        ) {
+            self.name = name
+            self.basePath = basePath
+        }
+    }
+
     public struct Memory: Codable, Sendable {
         public var backend: String
 
@@ -58,6 +75,7 @@ public struct CoreConfig: Codable, Sendable {
     }
 
     public var listen: Listen
+    public var workspace: Workspace
     public var auth: Auth
     public var models: [ModelConfig]
     public var memory: Memory
@@ -68,6 +86,7 @@ public struct CoreConfig: Codable, Sendable {
 
     public init(
         listen: Listen,
+        workspace: Workspace,
         auth: Auth,
         models: [ModelConfig],
         memory: Memory,
@@ -77,6 +96,7 @@ public struct CoreConfig: Codable, Sendable {
         sqlitePath: String
     ) {
         self.listen = listen
+        self.workspace = workspace
         self.auth = auth
         self.models = models
         self.memory = memory
@@ -89,6 +109,7 @@ public struct CoreConfig: Codable, Sendable {
     public static var `default`: CoreConfig {
         CoreConfig(
             listen: .init(host: "0.0.0.0", port: 25101),
+            workspace: .init(),
             auth: .init(token: "dev-token"),
             models: [
                 .init(
@@ -108,7 +129,7 @@ public struct CoreConfig: Codable, Sendable {
             nodes: ["local"],
             gateways: [],
             plugins: [],
-            sqlitePath: "./.data/core.sqlite"
+            sqlitePath: CoreConfig.defaultSQLiteFileName
         )
     }
 
@@ -124,6 +145,7 @@ public struct CoreConfig: Codable, Sendable {
 
     private enum CodingKeys: String, CodingKey {
         case listen
+        case workspace
         case auth
         case models
         case memory
@@ -137,11 +159,15 @@ public struct CoreConfig: Codable, Sendable {
         let container = try decoder.container(keyedBy: CodingKeys.self)
 
         listen = try container.decode(Listen.self, forKey: .listen)
+        workspace = try container.decodeIfPresent(Workspace.self, forKey: .workspace) ?? .init()
         auth = try container.decode(Auth.self, forKey: .auth)
         memory = try container.decode(Memory.self, forKey: .memory)
         nodes = try container.decodeIfPresent([String].self, forKey: .nodes) ?? []
         gateways = try container.decodeIfPresent([String].self, forKey: .gateways) ?? []
         sqlitePath = try container.decode(String.self, forKey: .sqlitePath)
+        if sqlitePath == CoreConfig.legacyDefaultSQLitePath {
+            sqlitePath = CoreConfig.defaultSQLiteFileName
+        }
 
         if let decodedModels = try? container.decode([ModelConfig].self, forKey: .models) {
             models = decodedModels
@@ -191,5 +217,57 @@ public struct CoreConfig: Codable, Sendable {
 
         let title = provider.isEmpty ? model : "\(provider)-\(model)"
         return ModelConfig(title: title, apiKey: "", apiUrl: apiUrl, model: model)
+    }
+
+    public func resolvedWorkspaceRootURL(currentDirectory: String = FileManager.default.currentDirectoryPath) -> URL {
+        let cwd = URL(fileURLWithPath: currentDirectory, isDirectory: true)
+        return Self.resolvePath(workspace.basePath, currentDirectory: cwd)
+            .appendingPathComponent(workspace.name, isDirectory: true)
+    }
+
+    public func resolvedSQLiteURL(currentDirectory: String = FileManager.default.currentDirectoryPath) -> URL {
+        if Self.isAbsolutePath(sqlitePath) {
+            return URL(fileURLWithPath: sqlitePath)
+        }
+
+        return resolvedWorkspaceRootURL(currentDirectory: currentDirectory)
+            .appendingPathComponent(sqlitePath)
+    }
+
+    private static func resolvePath(_ rawPath: String, currentDirectory: URL) -> URL {
+        if let expandedHome = expandHomeShortcut(rawPath) {
+            return URL(fileURLWithPath: expandedHome, isDirectory: true)
+        }
+        if isAbsolutePath(rawPath) {
+            return URL(fileURLWithPath: rawPath, isDirectory: true)
+        }
+        return currentDirectory.appendingPathComponent(rawPath, isDirectory: true)
+    }
+
+    private static func expandHomeShortcut(_ rawPath: String) -> String? {
+        let homePath = FileManager.default.homeDirectoryForCurrentUser.path
+        if rawPath == "~" {
+            return homePath
+        }
+        if rawPath.hasPrefix("~/") {
+            let suffix = String(rawPath.dropFirst(2))
+            return URL(fileURLWithPath: homePath, isDirectory: true)
+                .appendingPathComponent(suffix, isDirectory: true)
+                .path
+        }
+        if rawPath == "$HOME" {
+            return homePath
+        }
+        if rawPath.hasPrefix("$HOME/") {
+            let suffix = String(rawPath.dropFirst("$HOME/".count))
+            return URL(fileURLWithPath: homePath, isDirectory: true)
+                .appendingPathComponent(suffix, isDirectory: true)
+                .path
+        }
+        return nil
+    }
+
+    private static func isAbsolutePath(_ rawPath: String) -> Bool {
+        rawPath.hasPrefix("/")
     }
 }

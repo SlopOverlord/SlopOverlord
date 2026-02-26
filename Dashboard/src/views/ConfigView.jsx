@@ -36,13 +36,14 @@ function emptyPlugin() {
 
 const EMPTY_CONFIG = {
   listen: { host: "0.0.0.0", port: 25101 },
+  workspace: { name: "workspace", basePath: "~" },
   auth: { token: "dev-token" },
   models: [emptyModel()],
   memory: { backend: "sqlite-local-vectors" },
   nodes: ["local"],
   gateways: [],
   plugins: [],
-  sqlitePath: "./.data/core.sqlite"
+  sqlitePath: "core.sqlite"
 };
 
 function clone(value) {
@@ -91,6 +92,8 @@ function normalizeConfig(config) {
 
   normalized.listen.host = config?.listen?.host || normalized.listen.host;
   normalized.listen.port = Number.parseInt(String(config?.listen?.port ?? normalized.listen.port), 10) || normalized.listen.port;
+  normalized.workspace.name = config?.workspace?.name || normalized.workspace.name;
+  normalized.workspace.basePath = config?.workspace?.basePath || normalized.workspace.basePath;
   normalized.auth.token = config?.auth?.token || normalized.auth.token;
   normalized.memory.backend = config?.memory?.backend || normalized.memory.backend;
   normalized.sqlitePath = config?.sqlitePath || normalized.sqlitePath;
@@ -455,6 +458,28 @@ export function ConfigView() {
               onChange={(event) =>
                 mutateDraft((draft) => {
                   draft.listen.port = Number.parseInt(event.target.value, 10) || 25101;
+                })
+              }
+            />
+          </label>
+          <label>
+            Workspace Name
+            <input
+              value={draftConfig.workspace.name}
+              onChange={(event) =>
+                mutateDraft((draft) => {
+                  draft.workspace.name = event.target.value;
+                })
+              }
+            />
+          </label>
+          <label>
+            Workspace Base Path
+            <input
+              value={draftConfig.workspace.basePath}
+              onChange={(event) =>
+                mutateDraft((draft) => {
+                  draft.workspace.basePath = event.target.value;
                 })
               }
             />

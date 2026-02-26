@@ -36,9 +36,21 @@ struct CoreMain: AsyncParsableCommand {
             config = CoreConfig.load(from: resolvedConfigPath)
             config.listen.host = envConfig.string(forKey: "core.listen.host", default: config.listen.host)
             config.listen.port = envConfig.int(forKey: "core.listen.port", default: config.listen.port)
+            config.workspace.name = envConfig.string(forKey: "core.workspace.name", default: config.workspace.name)
+            let workspaceBasePath = envConfig.string(
+                forKey: "core.workspace.base_path",
+                default: config.workspace.basePath
+            )
+            config.workspace.basePath = envConfig.string(
+                forKey: "core.workspace.basePath",
+                default: workspaceBasePath
+            )
             config.auth.token = envConfig.string(forKey: "core.auth.token", default: config.auth.token)
             config.sqlitePath = envConfig.string(forKey: "core.sqlite.path", default: config.sqlitePath)
         }
+
+        let workspaceRoot = try prepareWorkspace(config: &config, logger: logger)
+        logger.info("Workspace prepared at \(workspaceRoot.path)")
 
         let service = CoreService(config: config, configPath: resolvedConfigPath)
         let router = CoreRouter(service: service)
@@ -85,6 +97,52 @@ struct CoreMain: AsyncParsableCommand {
             try server.waitUntilClosed()
         }
     }
+}
+
+private func prepareWorkspace(config: inout CoreConfig, logger: Logger) throws -> URL {
+    let workspaceRoot = config.resolvedWorkspaceRootURL()
+
+    do {
+        try createWorkspaceDirectories(at: workspaceRoot)
+        config.sqlitePath = resolveSQLitePath(sqlitePath: config.sqlitePath, workspaceRoot: workspaceRoot)
+        return workspaceRoot
+    } catch {
+        let fallbackBasePath = "/tmp/slopoverlord"
+        let fallbackRoot = URL(fileURLWithPath: fallbackBasePath, isDirectory: true)
+            .appendingPathComponent(config.workspace.name, isDirectory: true)
+
+        logger.warning(
+            "Failed to create workspace at \(workspaceRoot.path), falling back to \(fallbackRoot.path): \(error)"
+        )
+
+        try createWorkspaceDirectories(at: fallbackRoot)
+        config.workspace.basePath = fallbackBasePath
+        config.sqlitePath = resolveSQLitePath(sqlitePath: config.sqlitePath, workspaceRoot: fallbackRoot)
+        return fallbackRoot
+    }
+}
+
+private func createWorkspaceDirectories(at workspaceRoot: URL) throws {
+    let fileManager = FileManager.default
+    let directories = [
+        workspaceRoot,
+        workspaceRoot.appendingPathComponent("sessions", isDirectory: true),
+        workspaceRoot.appendingPathComponent("artifacts", isDirectory: true),
+        workspaceRoot.appendingPathComponent("memory", isDirectory: true),
+        workspaceRoot.appendingPathComponent("logs", isDirectory: true),
+        workspaceRoot.appendingPathComponent("tmp", isDirectory: true)
+    ]
+
+    for directory in directories {
+        try fileManager.createDirectory(at: directory, withIntermediateDirectories: true)
+    }
+}
+
+private func resolveSQLitePath(sqlitePath: String, workspaceRoot: URL) -> String {
+    if sqlitePath.hasPrefix("/") {
+        return sqlitePath
+    }
+    return workspaceRoot.appendingPathComponent(sqlitePath).path
 }
 
 private actor LoggingBootstrapper {

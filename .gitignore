@@ -3,3 +3,6 @@
 .DS_Store
 Dashboard/node_modules/
 Dashboard/dist/
+workspace/
+/core.sqlite
+/core.sqlite-*

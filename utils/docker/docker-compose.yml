@@ -8,7 +8,7 @@ services:
     ports:
       - "25101:25101"
     volumes:
-      - core_data:/app/.data
+      - core_data:/root/workspace
 
   dashboard:
     build:
