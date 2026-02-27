@@ -158,14 +158,18 @@ export async function postAgentSessionControl(agentId, sessionId, payload) {
 }
 
 export async function deleteAgentSession(agentId, sessionId) {
-  const response = await fetch(
-    `${API_BASE}/v1/agents/${encodeURIComponent(agentId)}/sessions/${encodeURIComponent(sessionId)}`,
-    { method: "DELETE" }
-  );
-  if (!response.ok) {
+  try {
+    const response = await fetch(
+      `${API_BASE}/v1/agents/${encodeURIComponent(agentId)}/sessions/${encodeURIComponent(sessionId)}`,
+      { method: "DELETE" }
+    );
+    if (!response.ok) {
+      return false;
+    }
+    return true;
+  } catch {
     return false;
   }
-  return true;
 }
 
 export async function fetchAgentConfig(agentId) {

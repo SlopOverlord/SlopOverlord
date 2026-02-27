@@ -314,6 +314,18 @@ func agentSessionLifecycleEndpoints() async throws {
     let sessionSummary = try decoder.decode(AgentSessionSummary.self, from: createSessionResponse.body)
     #expect(sessionSummary.agentId == "agent-chat")
 
+    let bootstrapChannelID = "agent:agent-chat:session:\(sessionSummary.id)"
+    let bootstrapSnapshot = await service.getChannelState(channelId: bootstrapChannelID)
+    #expect(bootstrapSnapshot != nil)
+    let bootstrapMessage = bootstrapSnapshot?.messages.first(where: {
+        $0.userId == "system" && $0.content.contains("[agent_session_context_bootstrap_v1]")
+    })
+    #expect(bootstrapMessage != nil)
+    #expect(bootstrapMessage?.content.contains("[Agents.md]") == true)
+    #expect(bootstrapMessage?.content.contains("[User.md]") == true)
+    #expect(bootstrapMessage?.content.contains("[Identity.md]") == true)
+    #expect(bootstrapMessage?.content.contains("[Soul.md]") == true)
+
     let sessionFileURL = config
         .resolvedWorkspaceRootURL()
         .appendingPathComponent("agents", isDirectory: true)

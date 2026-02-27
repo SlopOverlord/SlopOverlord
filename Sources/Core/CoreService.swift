@@ -7,6 +7,8 @@ import PluginSDK
 import Protocols
 
 public actor CoreService {
+    private static let sessionContextBootstrapMarker = "[agent_session_context_bootstrap_v1]"
+
     public enum AgentStorageError: Error {
         case invalidID
         case invalidPayload
@@ -326,7 +328,7 @@ public actor CoreService {
     }
 
     /// Creates a session for a given agent.
-    public func createAgentSession(agentID: String, request: AgentSessionCreateRequest) throws -> AgentSessionSummary {
+    public func createAgentSession(agentID: String, request: AgentSessionCreateRequest) async throws -> AgentSessionSummary {
         guard let normalizedAgentID = normalizedAgentID(agentID) else {
             throw AgentSessionError.invalidAgentID
         }
@@ -334,7 +336,14 @@ public actor CoreService {
         _ = try getAgent(id: normalizedAgentID)
 
         do {
-            return try sessionStore.createSession(agentID: normalizedAgentID, request: request)
+            let summary = try sessionStore.createSession(agentID: normalizedAgentID, request: request)
+            do {
+                try await ensureSessionContextLoaded(agentID: normalizedAgentID, sessionID: summary.id)
+            } catch {
+                try? sessionStore.deleteSession(agentID: normalizedAgentID, sessionID: summary.id)
+                throw AgentSessionError.storageFailure
+            }
+            return summary
         } catch {
             throw mapSessionStoreError(error)
         }
@@ -393,6 +402,12 @@ public actor CoreService {
         }
 
         _ = try getAgent(id: normalizedAgentID)
+
+        do {
+            try await ensureSessionContextLoaded(agentID: normalizedAgentID, sessionID: normalizedSessionID)
+        } catch {
+            throw AgentSessionError.storageFailure
+        }
 
         let content = request.content.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !content.isEmpty || !request.attachments.isEmpty else {
@@ -493,7 +508,9 @@ public actor CoreService {
         )
 
         let snapshot = await runtime.channelState(channelId: channelID)
-        let assistantText = snapshot?.messages.last(where: { $0.userId == "system" })?.content ?? "Done."
+        let assistantText = snapshot?.messages.reversed().first(where: {
+            $0.userId == "system" && !$0.content.contains(Self.sessionContextBootstrapMarker)
+        })?.content ?? "Done."
         let assistantMessage = AgentSessionMessage(
             role: .assistant,
             segments: [
@@ -525,8 +542,12 @@ public actor CoreService {
                         parentSessionId: normalizedSessionID
                     )
                 )
+                try await ensureSessionContextLoaded(agentID: normalizedAgentID, sessionID: childSummary.id)
             } catch {
-                throw mapSessionStoreError(error)
+                if let storeError = error as? AgentSessionFileStore.StoreError {
+                    throw mapSessionStoreError(storeError)
+                }
+                throw AgentSessionError.storageFailure
             }
 
             events.append(
@@ -1169,6 +1190,53 @@ public actor CoreService {
         let lower = content.lowercased()
         let keywords = ["search", "find", "google", "lookup", "research", "найди", "поиск", "исследуй"]
         return keywords.contains(where: lower.contains)
+    }
+
+    private func sessionChannelID(agentID: String, sessionID: String) -> String {
+        "agent:\(agentID):session:\(sessionID)"
+    }
+
+    private func ensureSessionContextLoaded(agentID: String, sessionID: String) async throws {
+        let channelID = sessionChannelID(agentID: agentID, sessionID: sessionID)
+        if let existingSnapshot = await runtime.channelState(channelId: channelID),
+           existingSnapshot.messages.contains(where: {
+               $0.userId == "system" && $0.content.contains(Self.sessionContextBootstrapMarker)
+           }) {
+            return
+        }
+
+        let documents = try readAgentDocuments(agentID: agentID)
+        let bootstrapMessage = sessionBootstrapContextMessage(
+            agentID: agentID,
+            sessionID: sessionID,
+            documents: documents
+        )
+        await runtime.appendSystemMessage(channelId: channelID, content: bootstrapMessage)
+    }
+
+    private func sessionBootstrapContextMessage(
+        agentID: String,
+        sessionID: String,
+        documents: AgentDocumentBundle
+    ) -> String {
+        """
+        \(Self.sessionContextBootstrapMarker)
+        Session context initialized.
+        Agent: \(agentID)
+        Session: \(sessionID)
+
+        [Agents.md]
+        \(documents.agentsMarkdown)
+
+        [User.md]
+        \(documents.userMarkdown)
+
+        [Identity.md]
+        \(documents.identityMarkdown)
+
+        [Soul.md]
+        \(documents.soulMarkdown)
+        """
     }
 
     private func mapSessionStoreError(_ error: Error) -> AgentSessionError {

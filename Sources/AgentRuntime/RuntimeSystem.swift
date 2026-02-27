@@ -138,6 +138,11 @@ public actor RuntimeSystem {
         await channels.snapshot(channelId: channelId)
     }
 
+    /// Appends one synthetic system message into channel context.
+    public func appendSystemMessage(channelId: String, content: String) async {
+        await channels.appendSystemMessage(channelId: channelId, content: content)
+    }
+
     /// Returns artifact content by identifier.
     public func artifactContent(id: String) async -> String? {
         await workers.artifactContent(id: id)

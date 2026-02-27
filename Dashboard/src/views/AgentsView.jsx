@@ -8,7 +8,6 @@ import {
   fetchAgentSession,
   fetchAgentSessions,
   fetchAgents,
-  postAgentSessionControl,
   postAgentSessionMessage,
   updateAgentConfig
 } from "../api";
@@ -98,11 +97,9 @@ function AgentChatTab({ agentId }) {
   const [isLoadingSessions, setIsLoadingSessions] = useState(true);
   const [isLoadingSession, setIsLoadingSession] = useState(false);
   const [isSending, setIsSending] = useState(false);
-  const [liveStage, setLiveStage] = useState(null);
   const [isDragOver, setIsDragOver] = useState(false);
   const [inputText, setInputText] = useState("");
   const [pendingFiles, setPendingFiles] = useState([]);
-  const [spawnSubSession, setSpawnSubSession] = useState(false);
   const [statusText, setStatusText] = useState("Loading sessions...");
   const fileInputRef = useRef(null);
 
@@ -115,7 +112,6 @@ function AgentChatTab({ agentId }) {
       setActiveSession(null);
       setPendingFiles([]);
       setInputText("");
-      setSpawnSubSession(false);
 
       const response = await fetchAgentSessions(agentId);
       if (isCancelled) {
@@ -244,7 +240,6 @@ function AgentChatTab({ agentId }) {
     }
 
     setIsSending(true);
-    setLiveStage("thinking");
     setStatusText("Sending message...");
 
     let oversizedCount = 0;
@@ -280,32 +275,21 @@ function AgentChatTab({ agentId }) {
       })
     );
 
-    const lower = trimmed.toLowerCase();
-    const shouldSearch =
-      uploads.length > 0 ||
-      ["search", "find", "google", "lookup", "research", "найди", "поиск", "исследуй"].some((keyword) =>
-        lower.includes(keyword)
-      );
-    setLiveStage(shouldSearch ? "searching" : "responding");
-
     const response = await postAgentSessionMessage(agentId, sessionId, {
       userId: "dashboard",
       content: trimmed,
       attachments: uploads,
-      spawnSubSession
+      spawnSubSession: false
     });
 
     if (!response) {
       setStatusText("Failed to send message.");
       setIsSending(false);
-      setLiveStage(null);
       return;
     }
 
-    setLiveStage("responding");
     setInputText("");
     setPendingFiles([]);
-    setSpawnSubSession(false);
     await refreshSessions(sessionId);
 
     if (oversizedCount > 0) {
@@ -315,26 +299,6 @@ function AgentChatTab({ agentId }) {
     }
 
     setIsSending(false);
-    setLiveStage(null);
-  }
-
-  async function sendControl(action) {
-    if (!activeSessionId) {
-      return;
-    }
-
-    const response = await postAgentSessionControl(agentId, activeSessionId, {
-      action,
-      requestedBy: "dashboard"
-    });
-
-    if (!response) {
-      setStatusText("Failed to send control command.");
-      return;
-    }
-
-    await refreshSessions(activeSessionId);
-    setStatusText(`Control sent: ${action}`);
   }
 
   async function handleDeleteActiveSession() {
@@ -356,6 +320,15 @@ function AgentChatTab({ agentId }) {
 
   const activeSummary = activeSession?.summary || sessions.find((item) => item.id === activeSessionId) || null;
   const events = Array.isArray(activeSession?.events) ? activeSession.events : [];
+  const chatMessages = events.filter(
+    (eventItem) =>
+      eventItem.type === "message" &&
+      eventItem.message &&
+      (eventItem.message.role === "user" || eventItem.message.role === "assistant")
+  );
+  const latestRunStatus = [...events]
+    .reverse()
+    .find((eventItem) => eventItem.type === "run_status" && eventItem.runStatus)?.runStatus;
 
   return (
     <section className="agent-chat-shell">
@@ -422,15 +395,6 @@ function AgentChatTab({ agentId }) {
                 Back To Parent
               </button>
             ) : null}
-            <button type="button" onClick={() => sendControl("pause")} disabled={!activeSessionId}>
-              Pause
-            </button>
-            <button type="button" onClick={() => sendControl("resume")} disabled={!activeSessionId}>
-              Resume
-            </button>
-            <button type="button" onClick={() => sendControl("interrupt")} disabled={!activeSessionId}>
-              Interrupt
-            </button>
             <button type="button" className="danger" onClick={handleDeleteActiveSession} disabled={!activeSessionId}>
               Delete
             </button>
@@ -440,20 +404,18 @@ function AgentChatTab({ agentId }) {
         <div className="agent-chat-events">
           {isLoadingSession ? (
             <p className="placeholder-text">Loading session...</p>
-          ) : events.length === 0 && !isSending ? (
+          ) : chatMessages.length === 0 && !isSending ? (
             <p className="placeholder-text">No messages yet.</p>
           ) : (
             <>
-              {isSending && liveStage ? (
-                <article className={`agent-chat-status ${liveStage}`}>
-                  <div className="agent-chat-status-head">
-                    <strong>{liveStage === "searching" ? "Searching" : liveStage === "responding" ? "Responding" : "Thinking"}</strong>
-                    <span>live</span>
-                  </div>
-                </article>
+              {latestRunStatus ? (
+                <p className="placeholder-text">
+                  Status: {latestRunStatus.label}
+                  {latestRunStatus.details ? ` - ${latestRunStatus.details}` : ""}
+                </p>
               ) : null}
-              {events.map((eventItem, index) => {
-              if (eventItem.type === "message" && eventItem.message) {
+
+              {chatMessages.map((eventItem, index) => {
                 const role = eventItem.message.role || "system";
                 return (
                   <article key={extractEventKey(eventItem, index)} className={`agent-chat-message ${role}`}>
@@ -487,50 +449,7 @@ function AgentChatTab({ agentId }) {
                     </div>
                   </article>
                 );
-              }
-
-              if (eventItem.type === "run_status" && eventItem.runStatus) {
-                const status = eventItem.runStatus;
-                return (
-                  <article key={extractEventKey(eventItem, index)} className={`agent-chat-status ${status.stage}`}>
-                    <div className="agent-chat-status-head">
-                      <strong>{status.label}</strong>
-                      <span>{formatEventTime(status.createdAt || eventItem.createdAt)}</span>
-                    </div>
-                    {status.details ? <p>{status.details}</p> : null}
-                    {status.expandedText ? (
-                      <details className="agent-chat-thinking">
-                        <summary>Open details</summary>
-                        <pre>{status.expandedText}</pre>
-                      </details>
-                    ) : null}
-                  </article>
-                );
-              }
-
-              if (eventItem.type === "sub_session" && eventItem.subSession) {
-                return (
-                  <article key={extractEventKey(eventItem, index)} className="agent-chat-subsession">
-                    <p>Sub-session spawned: {eventItem.subSession.title}</p>
-                    <button type="button" onClick={() => openSession(eventItem.subSession.childSessionId)}>
-                      Open Sub-session
-                    </button>
-                  </article>
-                );
-              }
-
-              if (eventItem.type === "run_control" && eventItem.runControl) {
-                return (
-                  <article key={extractEventKey(eventItem, index)} className="agent-chat-control">
-                    <p>
-                      Control: <strong>{eventItem.runControl.action}</strong> by {eventItem.runControl.requestedBy}
-                    </p>
-                  </article>
-                );
-              }
-
-              return null;
-            })}
+              })}
             </>
           )}
         </div>
@@ -567,14 +486,6 @@ function AgentChatTab({ agentId }) {
             <button type="button" onClick={() => fileInputRef.current?.click()}>
               Attach Files
             </button>
-            <label className="agent-chat-subsession-toggle">
-              <input
-                type="checkbox"
-                checked={spawnSubSession}
-                onChange={(event) => setSpawnSubSession(event.target.checked)}
-              />
-              Spawn sub-session
-            </label>
             <button type="submit" disabled={isSending}>
               {isSending ? "Sending..." : "Send"}
             </button>
