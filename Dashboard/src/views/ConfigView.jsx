@@ -5,7 +5,7 @@ const SETTINGS_ITEMS = [
   { id: "logging", title: "Logging", icon: "LG" },
   { id: "browser", title: "Browser", icon: "BR" },
   { id: "ui", title: "Ui", icon: "UI" },
-  { id: "models", title: "Models", icon: "MD" },
+  { id: "providers", title: "Providers", icon: "PR" },
   { id: "nodehost", title: "NodeHost", icon: "NH" },
   { id: "bindings", title: "Bindings", icon: "BD" },
   { id: "broadcast", title: "Broadcast", icon: "BC" },
@@ -16,12 +16,60 @@ const SETTINGS_ITEMS = [
   { id: "plugins", title: "Plugins", icon: "PL" }
 ];
 
+const PROVIDER_CATALOG = [
+  {
+    id: "openai-api",
+    title: "OpenAI API",
+    description: "OpenAI via API key authentication.",
+    modelHint: "gpt-4.1-mini",
+    authMethod: "api_key",
+    requiresApiKey: true,
+    supportsModelCatalog: true,
+    defaultEntry: {
+      title: "openai-api",
+      apiKey: "",
+      apiUrl: "https://api.openai.com/v1",
+      model: "gpt-4.1-mini"
+    }
+  },
+  {
+    id: "openai-oauth",
+    title: "OpenAI OAuth",
+    description: "OpenAI via OAuth/Codex deeplink.",
+    modelHint: "gpt-4.1-mini",
+    authMethod: "deeplink",
+    requiresApiKey: false,
+    supportsModelCatalog: true,
+    defaultEntry: {
+      title: "openai-oauth",
+      apiKey: "",
+      apiUrl: "https://api.openai.com/v1",
+      model: "gpt-4.1-mini"
+    }
+  },
+  {
+    id: "ollama",
+    title: "Ollama",
+    description: "Local provider served by Ollama.",
+    modelHint: "qwen3",
+    authMethod: "none",
+    requiresApiKey: false,
+    supportsModelCatalog: false,
+    defaultEntry: {
+      title: "ollama-local",
+      apiKey: "",
+      apiUrl: "http://127.0.0.1:11434",
+      model: "qwen3"
+    }
+  }
+];
+
 function emptyModel() {
   return {
-    title: "new-model",
+    title: "openai-api",
     apiKey: "",
-    apiUrl: "",
-    model: ""
+    apiUrl: "https://api.openai.com/v1",
+    model: "gpt-4.1-mini"
   };
 }
 
@@ -90,6 +138,48 @@ function inferModelProvider(model) {
   return "custom";
 }
 
+function isOpenAIOAuthEntry(model) {
+  const title = String(model?.title || "").toLowerCase();
+  return title.includes("oauth") || title.includes("deeplink");
+}
+
+function findProviderModelIndex(models, providerId) {
+  if (providerId === "openai-api") {
+    return models.findIndex((item) => inferModelProvider(item) === "openai" && !isOpenAIOAuthEntry(item));
+  }
+  if (providerId === "openai-oauth") {
+    return models.findIndex((item) => inferModelProvider(item) === "openai" && isOpenAIOAuthEntry(item));
+  }
+  if (providerId === "ollama") {
+    return models.findIndex((item) => inferModelProvider(item) === "ollama");
+  }
+  return -1;
+}
+
+function getProviderDefinition(providerId) {
+  return PROVIDER_CATALOG.find((provider) => provider.id === providerId) || PROVIDER_CATALOG[0];
+}
+
+function getProviderEntry(models, providerId) {
+  const index = findProviderModelIndex(models, providerId);
+  if (index < 0) {
+    return null;
+  }
+  return { index, entry: models[index] };
+}
+
+function providerIsConfigured(provider, entry) {
+  if (!entry) {
+    return false;
+  }
+  const hasModel = Boolean(String(entry.model || "").trim());
+  const hasURL = Boolean(String(entry.apiUrl || "").trim());
+  if (provider.requiresApiKey) {
+    return hasModel && hasURL && Boolean(String(entry.apiKey || "").trim());
+  }
+  return hasModel && hasURL;
+}
+
 function normalizePlugin(item, index) {
   if (typeof item === "string") {
     return {
@@ -125,7 +215,7 @@ function normalizeConfig(config) {
   const models = Array.isArray(config?.models) ? config.models : [];
   normalized.models = models.map(normalizeModel);
   if (normalized.models.length === 0) {
-    normalized.models.push(emptyModel());
+    normalized.models.push(clone(PROVIDER_CATALOG[0].defaultEntry));
   }
 
   const plugins = Array.isArray(config?.plugins) ? config.plugins : [];
@@ -141,20 +231,24 @@ function parseLines(value) {
     .filter(Boolean);
 }
 
-export function ConfigView() {
+function isSettingsSection(id) {
+  return SETTINGS_ITEMS.some((item) => item.id === id);
+}
+
+export function ConfigView({ sectionId = "providers", onSectionChange = null }) {
+  const initialSectionId = isSettingsSection(sectionId) ? sectionId : "providers";
   const [mode, setMode] = useState("form");
   const [query, setQuery] = useState("");
-  const [selectedSettings, setSelectedSettings] = useState("models");
+  const [selectedSettings, setSelectedSettings] = useState(initialSectionId);
   const [draftConfig, setDraftConfig] = useState(clone(EMPTY_CONFIG));
   const [savedConfig, setSavedConfig] = useState(clone(EMPTY_CONFIG));
   const [rawConfig, setRawConfig] = useState(JSON.stringify(EMPTY_CONFIG, null, 2));
   const [statusText, setStatusText] = useState("Loading config...");
-  const [selectedModelIndex, setSelectedModelIndex] = useState(0);
   const [selectedPluginIndex, setSelectedPluginIndex] = useState(0);
-  const [openAIAuthMode, setOpenAIAuthMode] = useState("api_key");
-  const [openAIAuthKey, setOpenAIAuthKey] = useState("");
-  const [openAIModelOptions, setOpenAIModelOptions] = useState([]);
-  const [openAIModelStatus, setOpenAIModelStatus] = useState("OpenAI provider is not loaded.");
+  const [providerModalId, setProviderModalId] = useState(null);
+  const [providerForm, setProviderForm] = useState(null);
+  const [providerModelOptions, setProviderModelOptions] = useState({});
+  const [providerModelStatus, setProviderModelStatus] = useState({});
 
   useEffect(() => {
     loadConfig().catch(() => {
@@ -163,16 +257,26 @@ export function ConfigView() {
   }, []);
 
   useEffect(() => {
-    if (selectedModelIndex >= draftConfig.models.length) {
-      setSelectedModelIndex(Math.max(0, draftConfig.models.length - 1));
-    }
-  }, [draftConfig.models.length, selectedModelIndex]);
-
-  useEffect(() => {
     if (selectedPluginIndex >= draftConfig.plugins.length) {
       setSelectedPluginIndex(Math.max(0, draftConfig.plugins.length - 1));
     }
   }, [draftConfig.plugins.length, selectedPluginIndex]);
+
+  useEffect(() => {
+    if (!isSettingsSection(sectionId)) {
+      return;
+    }
+    setSelectedSettings((current) => (current === sectionId ? current : sectionId));
+  }, [sectionId]);
+
+  useEffect(() => {
+    if (typeof onSectionChange !== "function") {
+      return;
+    }
+    if (selectedSettings !== sectionId) {
+      onSectionChange(selectedSettings);
+    }
+  }, [onSectionChange, selectedSettings, sectionId]);
 
   const filteredSettings = useMemo(() => {
     const needle = query.trim().toLowerCase();
@@ -201,6 +305,20 @@ export function ConfigView() {
     }
   }, [mode, rawConfig]);
 
+  const providerModalMeta = useMemo(() => {
+    if (!providerModalId) {
+      return null;
+    }
+    return getProviderDefinition(providerModalId);
+  }, [providerModalId]);
+
+  const customModelsCount = useMemo(() => {
+    const providerIndexes = new Set(
+      PROVIDER_CATALOG.map((provider) => findProviderModelIndex(draftConfig.models, provider.id)).filter((index) => index >= 0)
+    );
+    return draftConfig.models.filter((_, index) => !providerIndexes.has(index)).length;
+  }, [draftConfig.models]);
+
   async function loadConfig() {
     const config = await fetchRuntimeConfig();
     if (!config) {
@@ -209,14 +327,14 @@ export function ConfigView() {
     }
 
     const normalized = normalizeConfig(config);
-    const firstOpenAIModel = normalized.models.find((model) => inferModelProvider(model) === "openai");
 
     setDraftConfig(normalized);
     setSavedConfig(normalized);
     setRawConfig(JSON.stringify(normalized, null, 2));
-    setOpenAIAuthKey(firstOpenAIModel?.apiKey || "");
-    setOpenAIModelOptions([]);
-    setOpenAIModelStatus("OpenAI provider is not loaded.");
+    setProviderModalId(null);
+    setProviderForm(null);
+    setProviderModelOptions({});
+    setProviderModelStatus({});
     setStatusText("Config loaded");
   }
 
@@ -230,12 +348,10 @@ export function ConfigView() {
       }
 
       const normalized = normalizeConfig(response);
-      const firstOpenAIModel = normalized.models.find((model) => inferModelProvider(model) === "openai");
 
       setDraftConfig(normalized);
       setSavedConfig(normalized);
       setRawConfig(JSON.stringify(normalized, null, 2));
-      setOpenAIAuthKey(firstOpenAIModel?.apiKey || openAIAuthKey);
       setStatusText("Config saved");
     } catch {
       setStatusText("Invalid raw JSON");
@@ -251,256 +367,255 @@ export function ConfigView() {
     });
   }
 
-  function applyOpenAIKeyToModels() {
-    const key = openAIAuthKey.trim();
-    mutateDraft((draft) => {
-      const openAIIndexes = draft.models
-        .map((model, index) => ({ model, index }))
-        .filter((entry) => inferModelProvider(entry.model) === "openai")
-        .map((entry) => entry.index);
-
-      if (openAIIndexes.length === 0) {
-        draft.models.push({
-          title: "openai-main",
-          apiKey: key,
-          apiUrl: "https://api.openai.com/v1",
-          model: "gpt-4.1-mini"
-        });
-        return;
-      }
-
-      for (const index of openAIIndexes) {
-        draft.models[index].apiKey = key;
-      }
-    });
-    setStatusText("Applied API key to OpenAI models");
-  }
-
   function openCodexOpenAIDeepLink() {
     window.location.href = "codex://auth/openai?source=slopoverlord";
-    setOpenAIModelStatus("Codex deeplink opened. Complete auth there, then reload model list.");
+    setProviderStatus("openai-oauth", "Codex deeplink opened. Complete auth there, then refresh models.");
   }
 
-  async function loadOpenAIProviderModels() {
-    setOpenAIModelStatus("Loading OpenAI models...");
-    const primaryOpenAIModel = draftConfig.models.find((model) => inferModelProvider(model) === "openai");
-    const response = await fetchOpenAIModels({
-      authMethod: openAIAuthMode,
-      apiKey: openAIAuthMode === "api_key" ? openAIAuthKey : undefined,
-      apiUrl: primaryOpenAIModel?.apiUrl || "https://api.openai.com/v1"
-    });
+  function setProviderStatus(providerId, message) {
+    setProviderModelStatus((previous) => ({
+      ...previous,
+      [providerId]: message
+    }));
+  }
 
-    if (!response) {
-      setOpenAIModelStatus("Failed to load models from Core");
+  function openProviderModal(providerId) {
+    const provider = getProviderDefinition(providerId);
+    const existing = getProviderEntry(draftConfig.models, provider.id)?.entry;
+    const initial = existing ? clone(existing) : clone(provider.defaultEntry);
+
+    setProviderModalId(provider.id);
+    setProviderForm({
+      apiKey: initial.apiKey,
+      apiUrl: initial.apiUrl,
+      model: initial.model
+    });
+  }
+
+  function closeProviderModal() {
+    setProviderModalId(null);
+    setProviderForm(null);
+  }
+
+  function updateProviderForm(field, value) {
+    setProviderForm((previous) => {
+      if (!previous) {
+        return previous;
+      }
+      return {
+        ...previous,
+        [field]: value
+      };
+    });
+  }
+
+  async function loadProviderModels(providerId, entryOverride = null) {
+    const provider = getProviderDefinition(providerId);
+    if (!provider.supportsModelCatalog) {
       return;
     }
 
-    setOpenAIModelOptions(Array.isArray(response.models) ? response.models : []);
+    const entryFromConfig = getProviderEntry(draftConfig.models, provider.id)?.entry || provider.defaultEntry;
+    const entry = entryOverride || entryFromConfig;
+    setProviderStatus(provider.id, "Loading provider models...");
+
+    const response = await fetchOpenAIModels({
+      authMethod: provider.authMethod,
+      apiKey: provider.authMethod === "api_key" ? entry.apiKey : undefined,
+      apiUrl: entry.apiUrl || provider.defaultEntry.apiUrl
+    });
+
+    if (!response) {
+      setProviderStatus(provider.id, "Failed to load models from Core");
+      return;
+    }
+
+    setProviderModelOptions((previous) => ({
+      ...previous,
+      [provider.id]: Array.isArray(response.models) ? response.models : []
+    }));
 
     if (response.warning) {
-      setOpenAIModelStatus(response.warning);
+      setProviderStatus(provider.id, response.warning);
     } else if (response.source === "remote") {
-      setOpenAIModelStatus(`Loaded ${response.models.length} models from OpenAI`);
+      setProviderStatus(provider.id, `Loaded ${response.models.length} models from OpenAI`);
     } else {
-      setOpenAIModelStatus(`Loaded fallback catalog (${response.models.length} models)`);
+      setProviderStatus(provider.id, `Loaded fallback catalog (${response.models.length} models)`);
     }
   }
 
-  function renderModelEditor() {
-    const current = draftConfig.models[selectedModelIndex] || emptyModel();
-    const currentProvider = inferModelProvider(current);
-    const hasOpenAIModels = openAIModelOptions.length > 0;
+  function saveProviderFromModal() {
+    if (!providerModalMeta || !providerForm) {
+      return;
+    }
+
+    const provider = providerModalMeta;
+    const nextEntry = {
+      title: provider.defaultEntry.title,
+      apiKey: provider.requiresApiKey ? providerForm.apiKey.trim() : "",
+      apiUrl: providerForm.apiUrl.trim() || provider.defaultEntry.apiUrl,
+      model: providerForm.model.trim() || provider.defaultEntry.model
+    };
+
+    mutateDraft((draft) => {
+      const index = findProviderModelIndex(draft.models, provider.id);
+      if (index >= 0) {
+        draft.models[index] = nextEntry;
+      } else {
+        draft.models.push(nextEntry);
+      }
+    });
+
+    setStatusText(`${provider.title} updated in draft`);
+    closeProviderModal();
+  }
+
+  function removeProviderFromModal() {
+    if (!providerModalMeta) {
+      return;
+    }
+
+    const provider = providerModalMeta;
+    mutateDraft((draft) => {
+      const index = findProviderModelIndex(draft.models, provider.id);
+      if (index >= 0) {
+        draft.models.splice(index, 1);
+      }
+    });
+
+    setStatusText(`${provider.title} removed from draft`);
+    closeProviderModal();
+  }
+
+  function renderProviderEditor() {
+    const activeProviderStatus = providerModalMeta ? providerModelStatus[providerModalMeta.id] : "";
+    const activeProviderModels = providerModalMeta ? providerModelOptions[providerModalMeta.id] || [] : [];
+    const activeProviderEntry = providerModalMeta ? getProviderEntry(draftConfig.models, providerModalMeta.id) : null;
 
     return (
-      <div className="entry-models-shell">
-        <section className="entry-editor-card provider-auth-card">
-          <div className="provider-auth-head">
-            <h3>OpenAI Provider</h3>
-            <button type="button" onClick={loadOpenAIProviderModels}>
-              Refresh models
-            </button>
-          </div>
-
-          <div className="provider-auth-grid">
-            <label>
-              Auth Flow
-              <select value={openAIAuthMode} onChange={(event) => setOpenAIAuthMode(event.target.value)}>
-                <option value="api_key">API Key</option>
-                <option value="deeplink">Codex Deeplink</option>
-              </select>
-            </label>
-
-            {openAIAuthMode === "api_key" ? (
-              <label>
-                API Key
-                <input
-                  type="password"
-                  value={openAIAuthKey}
-                  onChange={(event) => setOpenAIAuthKey(event.target.value)}
-                  placeholder="sk-..."
-                />
-              </label>
-            ) : (
-              <div className="provider-auth-note">
-                <p>Authenticate OpenAI in Codex, then reload models.</p>
-                <button type="button" onClick={openCodexOpenAIDeepLink}>
-                  Open Codex Deeplink
-                </button>
-              </div>
-            )}
-          </div>
-
-          <div className="provider-auth-actions">
-            <button type="button" onClick={applyOpenAIKeyToModels} disabled={openAIAuthMode !== "api_key"}>
-              Apply Key To OpenAI Models
-            </button>
-            <span className="placeholder-text">{openAIModelStatus}</span>
-          </div>
+      <div className="providers-shell">
+        <section className="entry-editor-card">
+          <h3>Providers</h3>
+          <p className="placeholder-text">Choose a provider to configure API key and model in a modal dialog.</p>
+          {customModelsCount > 0 ? (
+            <p className="placeholder-text">
+              Config has {customModelsCount} custom model entries. They are preserved and available in raw mode.
+            </p>
+          ) : null}
         </section>
 
-        <div className="entry-editor-layout">
-          <div className="entry-list">
-            <div className="entry-list-head">
-              <h4>Custom entries</h4>
+        <section className="providers-grid">
+          {PROVIDER_CATALOG.map((provider) => {
+            const providerEntry = getProviderEntry(draftConfig.models, provider.id)?.entry;
+            const configured = providerIsConfigured(provider, providerEntry);
+            const actionText = configured ? "Configure" : provider.requiresApiKey ? "Add Key" : "Setup";
+
+            return (
               <button
+                key={provider.id}
                 type="button"
-                onClick={() => {
-                  mutateDraft((draft) => {
-                    draft.models.push(emptyModel());
-                  });
-                  setSelectedModelIndex(draftConfig.models.length);
-                }}
+                className={`provider-card ${configured ? "configured" : ""}`}
+                onClick={() => openProviderModal(provider.id)}
               >
-                + Add Entry
+                <div className="provider-card-head">
+                  <h4>{provider.title}</h4>
+                  <span className={`provider-state ${configured ? "on" : "off"}`}>{configured ? "configured" : "not set"}</span>
+                </div>
+                <p>{provider.description}</p>
+                <span className="provider-model-line">
+                  Model: {providerEntry?.model || provider.modelHint}
+                </span>
+                <span className="provider-card-action">{actionText}</span>
               </button>
-            </div>
-            <div className="entry-list-scroll">
-              {draftConfig.models.map((item, index) => (
-                <button
-                  key={`${item.title}-${index}`}
-                  type="button"
-                  className={`entry-list-item ${index === selectedModelIndex ? "active" : ""}`}
-                  onClick={() => setSelectedModelIndex(index)}
-                >
-                  {item.title || `model-${index + 1}`}
+            );
+          })}
+        </section>
+
+        {providerModalMeta && providerForm ? (
+          <div className="provider-modal-overlay" onClick={closeProviderModal}>
+            <section className="provider-modal-card" onClick={(event) => event.stopPropagation()}>
+              <div className="provider-modal-head">
+                <h3>{providerModalMeta.title}</h3>
+                <button type="button" className="provider-close-button" onClick={closeProviderModal}>
+                  x
                 </button>
-              ))}
-            </div>
-          </div>
+              </div>
+              <p className="placeholder-text">{providerModalMeta.description}</p>
 
-          <section className="entry-editor-card">
-            <div className="entry-editor-head">
-              <h3>{current.title || "Model entry"}</h3>
-              <button
-                type="button"
-                className="danger"
-                onClick={() => {
-                  mutateDraft((draft) => {
-                    draft.models.splice(selectedModelIndex, 1);
-                    if (draft.models.length === 0) {
-                      draft.models.push(emptyModel());
-                    }
-                  });
-                }}
-              >
-                Delete
-              </button>
-            </div>
+              <div className="provider-modal-form">
+                {providerModalMeta.requiresApiKey ? (
+                  <label>
+                    API Key
+                    <input
+                      type="password"
+                      value={providerForm.apiKey}
+                      onChange={(event) => updateProviderForm("apiKey", event.target.value)}
+                      placeholder="sk-..."
+                    />
+                  </label>
+                ) : null}
 
-            <div className="entry-form-grid">
-              <label>
-                Provider
-                <select
-                  value={currentProvider}
-                  onChange={(event) => {
-                    const provider = event.target.value;
-                    mutateDraft((draft) => {
-                      const model = draft.models[selectedModelIndex];
-                      if (provider === "openai") {
-                        model.title = model.title || "openai-main";
-                        model.apiUrl = "https://api.openai.com/v1";
-                        model.model = model.model || "gpt-4.1-mini";
-                      } else if (provider === "ollama") {
-                        model.title = model.title || "ollama-local";
-                        model.apiUrl = "http://127.0.0.1:11434";
-                        model.model = model.model || "qwen3";
-                      } else {
-                        model.apiUrl = model.apiUrl || "";
-                      }
-                    });
-                  }}
-                >
-                  <option value="openai">OpenAI</option>
-                  <option value="ollama">Ollama</option>
-                  <option value="custom">Custom</option>
-                </select>
-              </label>
-              <label>
-                Title
-                <input
-                  value={current.title}
-                  onChange={(event) =>
-                    mutateDraft((draft) => {
-                      draft.models[selectedModelIndex].title = event.target.value;
-                    })
-                  }
-                />
-              </label>
-              <label>
-                Model
-                {currentProvider === "openai" && hasOpenAIModels ? (
-                  <select
-                    value={current.model}
-                    onChange={(event) =>
-                      mutateDraft((draft) => {
-                        draft.models[selectedModelIndex].model = event.target.value;
-                      })
-                    }
-                  >
-                    <option value="">Select model</option>
-                    {openAIModelOptions.map((model) => (
-                      <option key={model.id} value={model.id}>
-                        {model.title}
-                      </option>
-                    ))}
-                  </select>
+                <label>
+                  API URL
+                  <input value={providerForm.apiUrl} onChange={(event) => updateProviderForm("apiUrl", event.target.value)} />
+                </label>
+
+                <label>
+                  Model
+                  <input value={providerForm.model} onChange={(event) => updateProviderForm("model", event.target.value)} />
+                </label>
+              </div>
+
+              {providerModalMeta.supportsModelCatalog ? (
+                <div className="provider-modal-catalog">
+                  <div className="provider-modal-actions">
+                    <button type="button" onClick={() => loadProviderModels(providerModalMeta.id, providerForm)}>
+                      Refresh models
+                    </button>
+                    {providerModalMeta.id === "openai-oauth" ? (
+                      <button type="button" onClick={openCodexOpenAIDeepLink}>
+                        Open OAuth in Codex
+                      </button>
+                    ) : null}
+                  </div>
+                  <p className="placeholder-text">{activeProviderStatus || "Model catalog is not loaded yet."}</p>
+                  {activeProviderModels.length > 0 ? (
+                    <div className="provider-model-options">
+                      {activeProviderModels.map((model) => (
+                        <button
+                          key={model.id}
+                          type="button"
+                          className={`provider-model-option ${providerForm.model === model.id ? "active" : ""}`}
+                          onClick={() => updateProviderForm("model", model.id)}
+                        >
+                          <strong>{model.title}</strong>
+                          <span>{model.id}</span>
+                        </button>
+                      ))}
+                    </div>
+                  ) : null}
+                </div>
+              ) : null}
+              <div className="provider-modal-footer">
+                {activeProviderEntry ? (
+                  <button type="button" className="danger" onClick={removeProviderFromModal}>
+                    Remove Provider
+                  </button>
                 ) : (
-                  <input
-                    value={current.model}
-                    onChange={(event) =>
-                      mutateDraft((draft) => {
-                        draft.models[selectedModelIndex].model = event.target.value;
-                      })
-                    }
-                  />
+                  <span />
                 )}
-              </label>
-              <label>
-                API URL
-                <input
-                  value={current.apiUrl}
-                  onChange={(event) =>
-                    mutateDraft((draft) => {
-                      draft.models[selectedModelIndex].apiUrl = event.target.value;
-                    })
-                  }
-                />
-              </label>
-              <label>
-                API Key
-                <input
-                  type="password"
-                  value={current.apiKey}
-                  onChange={(event) =>
-                    mutateDraft((draft) => {
-                      draft.models[selectedModelIndex].apiKey = event.target.value;
-                    })
-                  }
-                />
-              </label>
-            </div>
-          </section>
-        </div>
+                <div className="provider-modal-footer-actions">
+                  <button type="button" onClick={closeProviderModal}>
+                    Cancel
+                  </button>
+                  <button type="button" onClick={saveProviderFromModal}>
+                    Save Provider
+                  </button>
+                </div>
+              </div>
+            </section>
+          </div>
+        ) : null}
       </div>
     );
   }
@@ -730,8 +845,8 @@ export function ConfigView() {
   }
 
   function renderSettingsContent() {
-    if (selectedSettings === "models") {
-      return renderModelEditor();
+    if (selectedSettings === "providers") {
+      return renderProviderEditor();
     }
     if (selectedSettings === "plugins") {
       return renderPluginEditor();

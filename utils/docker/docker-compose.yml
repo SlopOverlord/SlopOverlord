@@ -22,6 +22,8 @@ services:
       - ../../.env
     ports:
       - "25102:25102"
+    environment:
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
     depends_on:
       - core
 

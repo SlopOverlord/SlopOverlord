@@ -7,9 +7,35 @@ import { ProjectsView } from "./views/ProjectsView";
 import { RuntimeOverviewView } from "./views/RuntimeOverviewView";
 
 const CHANNEL_ID = "general";
+const DEFAULT_SECTION_ID = "overview";
+const TOP_LEVEL_SECTIONS = new Set([
+  "chats",
+  "projects",
+  "sessions",
+  "overview",
+  "agents",
+  "usafe",
+  "nodes",
+  "config",
+  "logs"
+]);
+
+function resolveRouteFromPath(pathname) {
+  const [sectionRaw = "", configSectionRaw = ""] = pathname
+    .split("/")
+    .map((part) => part.trim())
+    .filter(Boolean);
+
+  const section = TOP_LEVEL_SECTIONS.has(sectionRaw) ? sectionRaw : DEFAULT_SECTION_ID;
+  const configSection = section === "config" && configSectionRaw ? configSectionRaw : null;
+
+  return { section, configSection };
+}
 
 export function App() {
-  const [activeItemId, setActiveItemId] = useState("overview");
+  const initialRoute = useMemo(() => resolveRouteFromPath(window.location.pathname), []);
+  const [activeItemId, setActiveItemId] = useState(initialRoute.section);
+  const [configSectionPath, setConfigSectionPath] = useState(initialRoute.configSection);
   const [sidebarCompact, setSidebarCompact] = useState(false);
   const [text, setText] = useState("Implement branch workflow and review");
   const [messages, setMessages] = useState([]);
@@ -71,6 +97,28 @@ export function App() {
     refreshRuntime().catch(() => {});
   }, []);
 
+  useEffect(() => {
+    const onPopState = () => {
+      const nextRoute = resolveRouteFromPath(window.location.pathname);
+      setActiveItemId(nextRoute.section);
+      setConfigSectionPath(nextRoute.configSection);
+    };
+
+    window.addEventListener("popstate", onPopState);
+    return () => window.removeEventListener("popstate", onPopState);
+  }, []);
+
+  useEffect(() => {
+    let nextPathname = `/${activeItemId}`;
+    if (activeItemId === "config" && configSectionPath) {
+      nextPathname = `${nextPathname}/${configSectionPath}`;
+    }
+
+    if (window.location.pathname !== nextPathname) {
+      window.history.pushState({}, "", `${nextPathname}${window.location.search}${window.location.hash}`);
+    }
+  }, [activeItemId, configSectionPath]);
+
   const runtimeContent = (
     <RuntimeOverviewView
       title={activeItemId === "chats" ? "Chats" : "Overview"}
@@ -126,7 +174,7 @@ export function App() {
     {
       id: "config",
       label: { icon: "CF", title: "Config" },
-      content: <ConfigView />
+      content: <ConfigView sectionId={configSectionPath} onSectionChange={setConfigSectionPath} />
     },
     {
       id: "logs",

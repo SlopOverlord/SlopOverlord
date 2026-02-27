@@ -472,58 +472,204 @@ body {
   gap: 12px;
 }
 
-.entry-models-shell {
+.providers-shell {
   display: grid;
   gap: 12px;
 }
 
-.provider-auth-card {
+.providers-grid {
   display: grid;
-  gap: 10px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
 }
 
-.provider-auth-head {
+.provider-card {
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 12px;
+  padding: 14px;
+  background: rgba(9, 19, 31, 0.8);
+  color: var(--text);
+  display: grid;
+  gap: 10px;
+  text-align: left;
+}
+
+.provider-card:hover {
+  border-color: rgba(64, 223, 159, 0.5);
+}
+
+.provider-card.configured {
+  border-color: rgba(64, 223, 159, 0.5);
+  background: rgba(10, 30, 32, 0.64);
+}
+
+.provider-card-head {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 10px;
 }
 
-.provider-auth-head h3 {
+.provider-card-head h4 {
   margin: 0;
 }
 
-.provider-auth-grid {
+.provider-card p {
+  margin: 0;
+  color: var(--muted);
+}
+
+.provider-state {
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 999px;
+  font-size: 0.75rem;
+  padding: 2px 10px;
+  text-transform: lowercase;
+}
+
+.provider-state.on {
+  border-color: rgba(113, 255, 188, 0.5);
+  color: #7ff2c4;
+}
+
+.provider-state.off {
+  border-color: rgba(255, 141, 141, 0.44);
+  color: #ff9a9a;
+}
+
+.provider-model-line {
+  font-size: 0.88rem;
+  color: #cbe3f2;
+}
+
+.provider-card-action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: fit-content;
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  border-radius: 10px;
+  padding: 5px 10px;
+  font-size: 0.85rem;
+  color: var(--text);
+}
+
+.provider-modal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  padding: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(2, 8, 15, 0.72);
+}
+
+.provider-modal-card {
+  width: min(760px, 100%);
+  max-height: calc(100vh - 40px);
+  overflow: auto;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 14px;
+  background: rgba(6, 14, 24, 0.96);
+  padding: 14px;
+  display: grid;
+  gap: 10px;
+}
+
+.provider-modal-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.provider-modal-head h3 {
+  margin: 0;
+}
+
+.provider-close-button {
+  min-width: auto;
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  background: rgba(8, 19, 31, 0.8);
+  color: var(--text);
+}
+
+.provider-modal-form {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 10px;
 }
 
-.provider-auth-grid label {
+.provider-modal-form label {
   display: grid;
   gap: 6px;
   color: var(--muted);
   font-size: 0.88rem;
 }
 
-.provider-auth-note {
+.provider-modal-catalog {
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 12px;
+  padding: 10px;
+  background: rgba(8, 18, 30, 0.8);
+  display: grid;
+  gap: 10px;
+}
+
+.provider-modal-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.provider-model-options {
   display: grid;
   gap: 8px;
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  max-height: 220px;
+  overflow: auto;
+}
+
+.provider-model-option {
+  border: 1px solid rgba(255, 255, 255, 0.12);
   border-radius: 10px;
-  padding: 10px;
   background: rgba(7, 16, 29, 0.88);
+  color: var(--text);
+  text-align: left;
+  display: grid;
+  gap: 4px;
 }
 
-.provider-auth-note p {
-  margin: 0;
+.provider-model-option strong {
+  font-size: 0.94rem;
+}
+
+.provider-model-option span {
   color: var(--muted);
+  font-size: 0.82rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
-.provider-auth-actions {
+.provider-model-option.active {
+  border-color: rgba(64, 223, 159, 0.6);
+  background: rgba(9, 36, 33, 0.8);
+}
+
+.provider-modal-footer {
   display: flex;
   align-items: center;
-  gap: 12px;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.provider-modal-footer-actions {
+  display: flex;
+  gap: 8px;
 }
 
 .entry-list {
@@ -716,8 +862,21 @@ pre {
     grid-template-columns: 1fr;
   }
 
-  .provider-auth-grid {
+  .providers-grid {
     grid-template-columns: 1fr;
+  }
+
+  .provider-modal-form {
+    grid-template-columns: 1fr;
+  }
+
+  .provider-modal-footer {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .provider-modal-footer-actions {
+    justify-content: flex-end;
   }
 
   .project-details-grid {
