@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { fetchArtifact, fetchBulletins, fetchChannelState, fetchWorkers, sendChannelMessage } from "./api";
 import { SidebarView } from "./components/SidebarView";
+import { AgentsView } from "./views/AgentsView";
 import { ConfigView } from "./views/ConfigView";
 import { PlaceholderView } from "./views/PlaceholderView";
 import { ProjectsView } from "./views/ProjectsView";
@@ -8,6 +9,7 @@ import { RuntimeOverviewView } from "./views/RuntimeOverviewView";
 
 const CHANNEL_ID = "general";
 const DEFAULT_SECTION_ID = "overview";
+const DEFAULT_AGENT_TAB = "overview";
 const TOP_LEVEL_SECTIONS = new Set([
   "chats",
   "projects",
@@ -19,23 +21,43 @@ const TOP_LEVEL_SECTIONS = new Set([
   "config",
   "logs"
 ]);
+const AGENT_TABS = new Set(["overview", "chat", "memories", "tasks", "skills", "cron", "config"]);
+
+function decodePathSegment(value) {
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return value;
+  }
+}
 
 function resolveRouteFromPath(pathname) {
-  const [sectionRaw = "", configSectionRaw = ""] = pathname
+  const [sectionRaw = "", sectionArgRaw = "", sectionArg2Raw = ""] = pathname
     .split("/")
     .map((part) => part.trim())
     .filter(Boolean);
 
   const section = TOP_LEVEL_SECTIONS.has(sectionRaw) ? sectionRaw : DEFAULT_SECTION_ID;
-  const configSection = section === "config" && configSectionRaw ? configSectionRaw : null;
+  const sectionArg = decodePathSegment(sectionArgRaw);
+  const sectionArg2 = decodePathSegment(sectionArg2Raw).toLowerCase();
 
-  return { section, configSection };
+  const configSection = section === "config" && sectionArg ? sectionArg : null;
+  const agentId = section === "agents" && sectionArg ? sectionArg : null;
+  const agentTab = section === "agents" && agentId
+    ? AGENT_TABS.has(sectionArg2)
+      ? sectionArg2
+      : DEFAULT_AGENT_TAB
+    : null;
+
+  return { section, configSection, agentId, agentTab };
 }
 
 export function App() {
   const initialRoute = useMemo(() => resolveRouteFromPath(window.location.pathname), []);
   const [activeItemId, setActiveItemId] = useState(initialRoute.section);
   const [configSectionPath, setConfigSectionPath] = useState(initialRoute.configSection);
+  const [agentIdPath, setAgentIdPath] = useState(initialRoute.agentId);
+  const [agentTabPath, setAgentTabPath] = useState(initialRoute.agentTab);
   const [sidebarCompact, setSidebarCompact] = useState(false);
   const [text, setText] = useState("Implement branch workflow and review");
   const [messages, setMessages] = useState([]);
@@ -102,22 +124,43 @@ export function App() {
       const nextRoute = resolveRouteFromPath(window.location.pathname);
       setActiveItemId(nextRoute.section);
       setConfigSectionPath(nextRoute.configSection);
+      setAgentIdPath(nextRoute.agentId);
+      setAgentTabPath(nextRoute.agentTab);
     };
 
     window.addEventListener("popstate", onPopState);
     return () => window.removeEventListener("popstate", onPopState);
   }, []);
 
+  function setAgentRoute(agentId, agentTab = DEFAULT_AGENT_TAB) {
+    setActiveItemId("agents");
+    setAgentIdPath(agentId);
+    setAgentTabPath(agentId ? agentTab : null);
+  }
+
+  function onSelectSidebar(nextSection) {
+    setActiveItemId(nextSection);
+  }
+
   useEffect(() => {
     let nextPathname = `/${activeItemId}`;
     if (activeItemId === "config" && configSectionPath) {
       nextPathname = `${nextPathname}/${configSectionPath}`;
     }
+    if (activeItemId === "agents") {
+      nextPathname = "/agents";
+      if (agentIdPath) {
+        nextPathname = `/agents/${encodeURIComponent(agentIdPath)}`;
+        if (agentTabPath && agentTabPath !== DEFAULT_AGENT_TAB) {
+          nextPathname = `${nextPathname}/${agentTabPath}`;
+        }
+      }
+    }
 
     if (window.location.pathname !== nextPathname) {
       window.history.pushState({}, "", `${nextPathname}${window.location.search}${window.location.hash}`);
     }
-  }, [activeItemId, configSectionPath]);
+  }, [activeItemId, configSectionPath, agentIdPath, agentTabPath]);
 
   const runtimeContent = (
     <RuntimeOverviewView
@@ -159,7 +202,7 @@ export function App() {
     {
       id: "agents",
       label: { icon: "AG", title: "Agents" },
-      content: <PlaceholderView title="Agents" />
+      content: <AgentsView routeAgentId={agentIdPath} routeTab={agentTabPath} onRouteChange={setAgentRoute} />
     },
     {
       id: "usafe",
@@ -192,10 +235,10 @@ export function App() {
         activeItemId={activeItem.id}
         isCompact={sidebarCompact}
         onToggleCompact={() => setSidebarCompact((value) => !value)}
-        onSelect={setActiveItemId}
+        onSelect={onSelectSidebar}
       />
 
-      <div className="page">
+      <div className={`page ${activeItem.id === "config" ? "page-config" : ""}`}>
         <header className="hero">
           <h1>SlopOverlord Dashboard</h1>
           <p>Section: {activeItem.label.title}</p>

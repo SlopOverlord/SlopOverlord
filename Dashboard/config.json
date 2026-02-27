@@ -1,3 +1,4 @@
 {
-  "apiBase": "http://localhost:25101"
+  "apiBase": "http://localhost:25101",
+  "accentColor": "#7fff00"
 }

@@ -126,6 +126,7 @@ private func createWorkspaceDirectories(at workspaceRoot: URL) throws {
     let fileManager = FileManager.default
     let directories = [
         workspaceRoot,
+        workspaceRoot.appendingPathComponent("agents", isDirectory: true),
         workspaceRoot.appendingPathComponent("sessions", isDirectory: true),
         workspaceRoot.appendingPathComponent("artifacts", isDirectory: true),
         workspaceRoot.appendingPathComponent("memory", isDirectory: true),

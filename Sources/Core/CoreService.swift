@@ -7,9 +7,18 @@ import PluginSDK
 import Protocols
 
 public actor CoreService {
+    public enum AgentStorageError: Error {
+        case invalidID
+        case invalidPayload
+        case alreadyExists
+        case notFound
+    }
+
     private let runtime: RuntimeSystem
     private let store: any PersistenceStore
     private let configPath: String
+    private let fileManager: FileManager
+    private var agentsRootURL: URL
     private var currentConfig: CoreConfig
     private var eventTask: Task<Void, Never>?
 
@@ -24,6 +33,10 @@ public actor CoreService {
         let schema = Self.loadSchemaSQL()
         self.store = SQLiteStore(path: config.sqlitePath, schemaSQL: schema)
         self.configPath = configPath
+        self.fileManager = FileManager.default
+        self.agentsRootURL = config
+            .resolvedWorkspaceRootURL(currentDirectory: FileManager.default.currentDirectoryPath)
+            .appendingPathComponent("agents", isDirectory: true)
         self.currentConfig = config
         Task {
             await self.startEventPersistence()
@@ -92,6 +105,85 @@ public actor CoreService {
     /// Returns currently active runtime config snapshot.
     public func getConfig() -> CoreConfig {
         currentConfig
+    }
+
+    /// Lists all persisted agents from workspace `/agents`.
+    public func listAgents() throws -> [AgentSummary] {
+        try ensureAgentsRootDirectory()
+
+        let entries = try fileManager.contentsOfDirectory(
+            at: agentsRootURL,
+            includingPropertiesForKeys: [.isDirectoryKey],
+            options: [.skipsHiddenFiles]
+        )
+
+        var agents: [AgentSummary] = []
+        for entry in entries {
+            let values = try? entry.resourceValues(forKeys: [.isDirectoryKey])
+            guard values?.isDirectory == true else {
+                continue
+            }
+
+            let agentID = entry.lastPathComponent
+            if let summary = try? readAgentSummary(id: agentID) {
+                agents.append(summary)
+            }
+        }
+
+        agents.sort {
+            $0.displayName.localizedCaseInsensitiveCompare($1.displayName) == .orderedAscending
+        }
+        return agents
+    }
+
+    /// Returns one persisted agent by id.
+    public func getAgent(id: String) throws -> AgentSummary {
+        guard let normalizedID = normalizedAgentID(id) else {
+            throw AgentStorageError.invalidID
+        }
+
+        guard fileManager.fileExists(atPath: agentDirectoryURL(for: normalizedID).path) else {
+            throw AgentStorageError.notFound
+        }
+
+        return try readAgentSummary(id: normalizedID)
+    }
+
+    /// Creates an agent and provisions `/workspace/agents/<agent_id>` directory.
+    public func createAgent(_ request: AgentCreateRequest) throws -> AgentSummary {
+        guard let normalizedID = normalizedAgentID(request.id) else {
+            throw AgentStorageError.invalidID
+        }
+
+        let displayName = request.displayName.trimmingCharacters(in: .whitespacesAndNewlines)
+        let role = request.role.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !displayName.isEmpty, !role.isEmpty else {
+            throw AgentStorageError.invalidPayload
+        }
+
+        try ensureAgentsRootDirectory()
+
+        let directoryURL = agentDirectoryURL(for: normalizedID)
+        if fileManager.fileExists(atPath: directoryURL.path) {
+            throw AgentStorageError.alreadyExists
+        }
+
+        try fileManager.createDirectory(at: directoryURL, withIntermediateDirectories: false)
+        let summary = AgentSummary(
+            id: normalizedID,
+            displayName: displayName,
+            role: role,
+            createdAt: Date()
+        )
+
+        do {
+            try writeAgentSummary(summary)
+            try writeAgentScaffoldFiles(for: summary)
+            return summary
+        } catch {
+            try? fileManager.removeItem(at: directoryURL)
+            throw error
+        }
     }
 
     /// Returns OpenAI model catalog using API key auth or environment fallback.
@@ -187,6 +279,9 @@ public actor CoreService {
         try payload.write(to: url, options: .atomic)
 
         currentConfig = config
+        agentsRootURL = config
+            .resolvedWorkspaceRootURL(currentDirectory: FileManager.default.currentDirectoryPath)
+            .appendingPathComponent("agents", isDirectory: true)
         return currentConfig
     }
 
@@ -327,6 +422,130 @@ public actor CoreService {
             return nil
         }
         return URL(string: raw)
+    }
+
+    private func ensureAgentsRootDirectory() throws {
+        try fileManager.createDirectory(at: agentsRootURL, withIntermediateDirectories: true)
+    }
+
+    private func agentDirectoryURL(for id: String) -> URL {
+        agentsRootURL.appendingPathComponent(id, isDirectory: true)
+    }
+
+    private func agentMetadataURL(for id: String) -> URL {
+        agentDirectoryURL(for: id).appendingPathComponent("agent.json")
+    }
+
+    private func readAgentSummary(id: String) throws -> AgentSummary {
+        let metadataURL = agentMetadataURL(for: id)
+        guard fileManager.fileExists(atPath: metadataURL.path) else {
+            throw AgentStorageError.notFound
+        }
+
+        let data = try Data(contentsOf: metadataURL)
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        return try decoder.decode(AgentSummary.self, from: data)
+    }
+
+    private func writeAgentSummary(_ summary: AgentSummary) throws {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        encoder.dateEncodingStrategy = .iso8601
+        let payload = try encoder.encode(summary) + Data("\n".utf8)
+        try payload.write(to: agentMetadataURL(for: summary.id), options: .atomic)
+    }
+
+    private struct AgentConfigFile: Encodable {
+        let id: String
+        let displayName: String
+        let role: String
+        let createdAt: Date
+    }
+
+    private func writeAgentScaffoldFiles(for summary: AgentSummary) throws {
+        let agentDirectory = agentDirectoryURL(for: summary.id)
+
+        let agentsMarkdown =
+            """
+            # Agent
+
+            - ID: \(summary.id)
+            - Display Name: \(summary.displayName)
+            - Role: \(summary.role)
+            """
+        try writeTextFile(
+            contents: agentsMarkdown + "\n",
+            at: agentDirectory.appendingPathComponent("Agents.md")
+        )
+
+        let userMarkdown =
+            """
+            # User
+
+            Describe the expected user profile, tone, and communication preferences for this agent.
+            """
+        try writeTextFile(
+            contents: userMarkdown + "\n",
+            at: agentDirectory.appendingPathComponent("User.md")
+        )
+
+        let soulMarkdown =
+            """
+            # Soul
+
+            Define the core principles, values, and behavioral constraints of this agent.
+            """
+        try writeTextFile(
+            contents: soulMarkdown + "\n",
+            at: agentDirectory.appendingPathComponent("Soul.md")
+        )
+
+        try writeTextFile(
+            contents: summary.id + "\n",
+            at: agentDirectory.appendingPathComponent("Identity.id")
+        )
+
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        encoder.dateEncodingStrategy = .iso8601
+        let configPayload = try encoder.encode(
+            AgentConfigFile(
+                id: summary.id,
+                displayName: summary.displayName,
+                role: summary.role,
+                createdAt: summary.createdAt
+            )
+        ) + Data("\n".utf8)
+        try configPayload.write(
+            to: agentDirectory.appendingPathComponent("config.json"),
+            options: .atomic
+        )
+    }
+
+    private func writeTextFile(contents: String, at url: URL) throws {
+        guard let data = contents.data(using: .utf8) else {
+            throw AgentStorageError.invalidPayload
+        }
+        try data.write(to: url, options: .atomic)
+    }
+
+    private func normalizedAgentID(_ raw: String) -> String? {
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            return nil
+        }
+
+        let allowed = CharacterSet(charactersIn: "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_.")
+        if trimmed.rangeOfCharacter(from: allowed.inverted) != nil {
+            return nil
+        }
+
+        guard trimmed.count <= 120 else {
+            return nil
+        }
+
+        return trimmed
     }
 
     private struct OpenAIModelsResponse: Decodable {

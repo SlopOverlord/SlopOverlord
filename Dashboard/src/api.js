@@ -66,3 +66,33 @@ export async function fetchOpenAIModels(payload) {
 
   return response.json();
 }
+
+export async function fetchAgents() {
+  const response = await fetch(`${API_BASE}/v1/agents`);
+  if (!response.ok) {
+    return null;
+  }
+  return response.json();
+}
+
+export async function fetchAgent(agentId) {
+  const response = await fetch(`${API_BASE}/v1/agents/${encodeURIComponent(agentId)}`);
+  if (!response.ok) {
+    return null;
+  }
+  return response.json();
+}
+
+export async function createAgent(payload) {
+  const response = await fetch(`${API_BASE}/v1/agents`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(payload)
+  });
+
+  if (!response.ok) {
+    return null;
+  }
+
+  return response.json();
+}

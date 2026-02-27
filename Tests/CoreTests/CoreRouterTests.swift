@@ -125,3 +125,83 @@ func artifactContentNotFound() async {
     let response = await router.handle(method: "GET", path: "/v1/artifacts/missing/content", body: nil)
     #expect(response.status == 404)
 }
+
+@Test
+func createListAndGetAgentsEndpoints() async throws {
+    let workspaceName = "workspace-agents-\(UUID().uuidString)"
+    let sqlitePath = FileManager.default.temporaryDirectory
+        .appendingPathComponent("core-agents-\(UUID().uuidString).sqlite")
+        .path
+
+    var config = CoreConfig.default
+    config.workspace = .init(name: workspaceName, basePath: FileManager.default.temporaryDirectory.path)
+    config.sqlitePath = sqlitePath
+
+    let service = CoreService(config: config)
+    let router = CoreRouter(service: service)
+
+    let request = AgentCreateRequest(
+        id: "agent-dev",
+        displayName: "Dev Agent",
+        role: "Builds and debugs features."
+    )
+    let createBody = try JSONEncoder().encode(request)
+    let createResponse = await router.handle(method: "POST", path: "/v1/agents", body: createBody)
+    #expect(createResponse.status == 201)
+
+    let decoder = JSONDecoder()
+    decoder.dateDecodingStrategy = .iso8601
+
+    let createdAgent = try decoder.decode(AgentSummary.self, from: createResponse.body)
+    #expect(createdAgent.id == "agent-dev")
+    #expect(createdAgent.displayName == "Dev Agent")
+
+    let listResponse = await router.handle(method: "GET", path: "/v1/agents", body: nil)
+    #expect(listResponse.status == 200)
+    let list = try decoder.decode([AgentSummary].self, from: listResponse.body)
+    #expect(list.contains(where: { $0.id == "agent-dev" }))
+
+    let getResponse = await router.handle(method: "GET", path: "/v1/agents/agent-dev", body: nil)
+    #expect(getResponse.status == 200)
+    let fetched = try decoder.decode(AgentSummary.self, from: getResponse.body)
+    #expect(fetched.id == "agent-dev")
+
+    let workspaceAgentsURL = config
+        .resolvedWorkspaceRootURL()
+        .appendingPathComponent("agents", isDirectory: true)
+        .appendingPathComponent("agent-dev", isDirectory: true)
+    #expect(FileManager.default.fileExists(atPath: workspaceAgentsURL.path))
+
+    let scaffoldFiles = ["Agents.md", "User.md", "Soul.md", "Identity.id", "config.json", "agent.json"]
+    for file in scaffoldFiles {
+        let fileURL = workspaceAgentsURL.appendingPathComponent(file)
+        #expect(FileManager.default.fileExists(atPath: fileURL.path))
+    }
+}
+
+@Test
+func createAgentDuplicateIDReturnsConflict() async throws {
+    let workspaceName = "workspace-agents-\(UUID().uuidString)"
+    let sqlitePath = FileManager.default.temporaryDirectory
+        .appendingPathComponent("core-agents-\(UUID().uuidString).sqlite")
+        .path
+
+    var config = CoreConfig.default
+    config.workspace = .init(name: workspaceName, basePath: FileManager.default.temporaryDirectory.path)
+    config.sqlitePath = sqlitePath
+
+    let service = CoreService(config: config)
+    let router = CoreRouter(service: service)
+
+    let request = AgentCreateRequest(
+        id: "agent-same",
+        displayName: "Agent Same",
+        role: "Role"
+    )
+    let body = try JSONEncoder().encode(request)
+    let firstResponse = await router.handle(method: "POST", path: "/v1/agents", body: body)
+    #expect(firstResponse.status == 201)
+
+    let secondResponse = await router.handle(method: "POST", path: "/v1/agents", body: body)
+    #expect(secondResponse.status == 409)
+}

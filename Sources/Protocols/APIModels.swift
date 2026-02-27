@@ -36,6 +36,32 @@ public struct ArtifactContentResponse: Codable, Sendable {
     }
 }
 
+public struct AgentCreateRequest: Codable, Sendable {
+    public var id: String
+    public var displayName: String
+    public var role: String
+
+    public init(id: String, displayName: String, role: String) {
+        self.id = id
+        self.displayName = displayName
+        self.role = role
+    }
+}
+
+public struct AgentSummary: Codable, Sendable, Equatable {
+    public var id: String
+    public var displayName: String
+    public var role: String
+    public var createdAt: Date
+
+    public init(id: String, displayName: String, role: String, createdAt: Date = Date()) {
+        self.id = id
+        self.displayName = displayName
+        self.role = role
+        self.createdAt = createdAt
+    }
+}
+
 public enum ProviderAuthMethod: String, Codable, Sendable {
     case apiKey = "api_key"
     case deeplink

@@ -31,6 +31,7 @@ private enum HTTPStatus {
     static let ok = 200
     static let created = 201
     static let badRequest = 400
+    static let conflict = 409
     static let notFound = 404
     static let internalServerError = 500
 }
@@ -42,6 +43,7 @@ private enum RoutePath {
 private enum RouteSegment {
     static let v1 = "v1"
     static let providers = "providers"
+    static let agents = "agents"
     static let openAI = "openai"
     static let models = "models"
     static let channels = "channels"
@@ -61,6 +63,12 @@ private enum ErrorCode {
     static let channelNotFound = "channel_not_found"
     static let artifactNotFound = "artifact_not_found"
     static let configWriteFailed = "config_write_failed"
+    static let invalidAgentId = "invalid_agent_id"
+    static let invalidAgentPayload = "invalid_agent_payload"
+    static let agentAlreadyExists = "agent_already_exists"
+    static let agentNotFound = "agent_not_found"
+    static let agentCreateFailed = "agent_create_failed"
+    static let agentsListFailed = "agents_list_failed"
 }
 
 private struct AcceptResponse: Encodable {
@@ -140,6 +148,31 @@ public actor CoreRouter {
             let config = await service.getConfig()
             return encodable(status: HTTPStatus.ok, payload: config)
 
+        case let route where route.count == 2 &&
+            route[0] == RouteSegment.v1 &&
+            route[1] == RouteSegment.agents:
+            do {
+                let agents = try await service.listAgents()
+                return encodable(status: HTTPStatus.ok, payload: agents)
+            } catch {
+                return json(status: HTTPStatus.internalServerError, payload: ["error": ErrorCode.agentsListFailed])
+            }
+
+        case let route where route.count == 3 &&
+            route[0] == RouteSegment.v1 &&
+            route[1] == RouteSegment.agents:
+            let agentId = route[2]
+            do {
+                let agent = try await service.getAgent(id: agentId)
+                return encodable(status: HTTPStatus.ok, payload: agent)
+            } catch CoreService.AgentStorageError.invalidID {
+                return json(status: HTTPStatus.badRequest, payload: ["error": ErrorCode.invalidAgentId])
+            } catch CoreService.AgentStorageError.notFound {
+                return json(status: HTTPStatus.notFound, payload: ["error": ErrorCode.agentNotFound])
+            } catch {
+                return json(status: HTTPStatus.internalServerError, payload: ["error": ErrorCode.agentNotFound])
+            }
+
         case let route where route.count == 4 &&
             route[0] == RouteSegment.v1 &&
             route[1] == RouteSegment.artifacts &&
@@ -195,6 +228,28 @@ public actor CoreRouter {
 
             let response = await service.listOpenAIModels(request: request)
             return encodable(status: HTTPStatus.ok, payload: response)
+
+        case let route where route.count == 2 &&
+            route[0] == RouteSegment.v1 &&
+            route[1] == RouteSegment.agents:
+            guard let body,
+                  let request = try? decoder.decode(AgentCreateRequest.self, from: body)
+            else {
+                return json(status: HTTPStatus.badRequest, payload: ["error": ErrorCode.invalidBody])
+            }
+
+            do {
+                let agent = try await service.createAgent(request)
+                return encodable(status: HTTPStatus.created, payload: agent)
+            } catch CoreService.AgentStorageError.invalidID {
+                return json(status: HTTPStatus.badRequest, payload: ["error": ErrorCode.invalidAgentId])
+            } catch CoreService.AgentStorageError.invalidPayload {
+                return json(status: HTTPStatus.badRequest, payload: ["error": ErrorCode.invalidAgentPayload])
+            } catch CoreService.AgentStorageError.alreadyExists {
+                return json(status: HTTPStatus.conflict, payload: ["error": ErrorCode.agentAlreadyExists])
+            } catch {
+                return json(status: HTTPStatus.internalServerError, payload: ["error": ErrorCode.agentCreateFailed])
+            }
 
         case let route where route.count == 4 &&
             route[0] == RouteSegment.v1 &&
