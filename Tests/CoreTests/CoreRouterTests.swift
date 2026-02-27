@@ -1,5 +1,4 @@
 import Foundation
-import Foundation
 import Testing
 @testable import AgentRuntime
 @testable import Core
@@ -172,11 +171,82 @@ func createListAndGetAgentsEndpoints() async throws {
         .appendingPathComponent("agent-dev", isDirectory: true)
     #expect(FileManager.default.fileExists(atPath: workspaceAgentsURL.path))
 
-    let scaffoldFiles = ["Agents.md", "User.md", "Soul.md", "Identity.id", "config.json", "agent.json"]
+    let scaffoldFiles = ["Agents.md", "User.md", "Soul.md", "Identity.id", "Identity.md", "config.json", "agent.json"]
     for file in scaffoldFiles {
         let fileURL = workspaceAgentsURL.appendingPathComponent(file)
         #expect(FileManager.default.fileExists(atPath: fileURL.path))
     }
+}
+
+@Test
+func agentConfigEndpointsReadAndUpdate() async throws {
+    let workspaceName = "workspace-agent-config-\(UUID().uuidString)"
+    let sqlitePath = FileManager.default.temporaryDirectory
+        .appendingPathComponent("core-agent-config-\(UUID().uuidString).sqlite")
+        .path
+
+    var config = CoreConfig.default
+    config.workspace = .init(name: workspaceName, basePath: FileManager.default.temporaryDirectory.path)
+    config.sqlitePath = sqlitePath
+
+    let service = CoreService(config: config)
+    let router = CoreRouter(service: service)
+
+    let createBody = try JSONEncoder().encode(
+        AgentCreateRequest(
+            id: "agent-config",
+            displayName: "Agent Config",
+            role: "Tests model and markdown config endpoints"
+        )
+    )
+    let createResponse = await router.handle(method: "POST", path: "/v1/agents", body: createBody)
+    #expect(createResponse.status == 201)
+
+    let decoder = JSONDecoder()
+    decoder.dateDecodingStrategy = .iso8601
+
+    let getResponse = await router.handle(method: "GET", path: "/v1/agents/agent-config/config", body: nil)
+    #expect(getResponse.status == 200)
+    let fetched = try decoder.decode(AgentConfigDetail.self, from: getResponse.body)
+    #expect(fetched.agentId == "agent-config")
+    #expect(!fetched.selectedModel.isEmpty)
+    #expect(!fetched.availableModels.isEmpty)
+
+    let nextModel = fetched.availableModels.last?.id ?? fetched.selectedModel
+    let updateRequest = AgentConfigUpdateRequest(
+        selectedModel: nextModel,
+        documents: AgentDocumentBundle(
+            userMarkdown: "# User\nUpdated user profile\n",
+            agentsMarkdown: "# Agent\nUpdated orchestration guidance\n",
+            soulMarkdown: "# Soul\nUpdated values and boundaries\n",
+            identityMarkdown: "# Identity\nagent-config-v2\n"
+        )
+    )
+    let updateBody = try JSONEncoder().encode(updateRequest)
+    let updateResponse = await router.handle(method: "PUT", path: "/v1/agents/agent-config/config", body: updateBody)
+    #expect(updateResponse.status == 200)
+
+    let updated = try decoder.decode(AgentConfigDetail.self, from: updateResponse.body)
+    #expect(updated.selectedModel == nextModel)
+    #expect(updated.documents.userMarkdown.contains("Updated user profile"))
+    #expect(updated.documents.agentsMarkdown.contains("Updated orchestration guidance"))
+    #expect(updated.documents.soulMarkdown.contains("Updated values and boundaries"))
+    #expect(updated.documents.identityMarkdown.contains("agent-config-v2"))
+
+    let agentDirectory = config
+        .resolvedWorkspaceRootURL()
+        .appendingPathComponent("agents", isDirectory: true)
+        .appendingPathComponent("agent-config", isDirectory: true)
+    let identityPath = agentDirectory.appendingPathComponent("Identity.id")
+    let userPath = agentDirectory.appendingPathComponent("User.md")
+    let configPath = agentDirectory.appendingPathComponent("config.json")
+
+    let identityFileText = try String(contentsOf: identityPath, encoding: .utf8)
+    let userFileText = try String(contentsOf: userPath, encoding: .utf8)
+    let configFileText = try String(contentsOf: configPath, encoding: .utf8)
+    #expect(identityFileText == "agent-config-v2\n")
+    #expect(userFileText.contains("Updated user profile"))
+    #expect(configFileText.contains(nextModel))
 }
 
 @Test
@@ -204,4 +274,114 @@ func createAgentDuplicateIDReturnsConflict() async throws {
 
     let secondResponse = await router.handle(method: "POST", path: "/v1/agents", body: body)
     #expect(secondResponse.status == 409)
+}
+
+@Test
+func agentSessionLifecycleEndpoints() async throws {
+    let workspaceName = "workspace-sessions-\(UUID().uuidString)"
+    let sqlitePath = FileManager.default.temporaryDirectory
+        .appendingPathComponent("core-sessions-\(UUID().uuidString).sqlite")
+        .path
+
+    var config = CoreConfig.default
+    config.workspace = .init(name: workspaceName, basePath: FileManager.default.temporaryDirectory.path)
+    config.sqlitePath = sqlitePath
+
+    let service = CoreService(config: config)
+    let router = CoreRouter(service: service)
+
+    let createAgentBody = try JSONEncoder().encode(
+        AgentCreateRequest(
+            id: "agent-chat",
+            displayName: "Agent Chat",
+            role: "Handles chat session tests"
+        )
+    )
+    let createAgentResponse = await router.handle(method: "POST", path: "/v1/agents", body: createAgentBody)
+    #expect(createAgentResponse.status == 201)
+
+    let sessionRequest = AgentSessionCreateRequest(title: "Main Session")
+    let createSessionBody = try JSONEncoder().encode(sessionRequest)
+    let createSessionResponse = await router.handle(
+        method: "POST",
+        path: "/v1/agents/agent-chat/sessions",
+        body: createSessionBody
+    )
+    #expect(createSessionResponse.status == 201)
+
+    let decoder = JSONDecoder()
+    decoder.dateDecodingStrategy = .iso8601
+    let sessionSummary = try decoder.decode(AgentSessionSummary.self, from: createSessionResponse.body)
+    #expect(sessionSummary.agentId == "agent-chat")
+
+    let sessionFileURL = config
+        .resolvedWorkspaceRootURL()
+        .appendingPathComponent("agents", isDirectory: true)
+        .appendingPathComponent("agent-chat", isDirectory: true)
+        .appendingPathComponent("sessions", isDirectory: true)
+        .appendingPathComponent("\(sessionSummary.id).jsonl")
+    #expect(FileManager.default.fileExists(atPath: sessionFileURL.path))
+
+    let listResponse = await router.handle(method: "GET", path: "/v1/agents/agent-chat/sessions", body: nil)
+    #expect(listResponse.status == 200)
+    let sessions = try decoder.decode([AgentSessionSummary].self, from: listResponse.body)
+    #expect(sessions.contains(where: { $0.id == sessionSummary.id }))
+
+    let attachmentPayload = AgentAttachmentUpload(
+        name: "note.txt",
+        mimeType: "text/plain",
+        sizeBytes: 4,
+        contentBase64: Data("demo".utf8).base64EncodedString()
+    )
+    let messageRequest = AgentSessionPostMessageRequest(
+        userId: "dashboard",
+        content: "search this request and reply",
+        attachments: [attachmentPayload],
+        spawnSubSession: true
+    )
+    let messageBody = try JSONEncoder().encode(messageRequest)
+    let messageResponse = await router.handle(
+        method: "POST",
+        path: "/v1/agents/agent-chat/sessions/\(sessionSummary.id)/messages",
+        body: messageBody
+    )
+    #expect(messageResponse.status == 200)
+
+    let messageResult = try decoder.decode(AgentSessionMessageResponse.self, from: messageResponse.body)
+    #expect(!messageResult.appendedEvents.isEmpty)
+    #expect(messageResult.routeDecision != nil)
+
+    let getSessionResponse = await router.handle(
+        method: "GET",
+        path: "/v1/agents/agent-chat/sessions/\(sessionSummary.id)",
+        body: nil
+    )
+    #expect(getSessionResponse.status == 200)
+
+    let detail = try decoder.decode(AgentSessionDetail.self, from: getSessionResponse.body)
+    #expect(detail.events.count >= messageResult.appendedEvents.count)
+
+    let controlBody = try JSONEncoder().encode(
+        AgentSessionControlRequest(action: .pause, requestedBy: "dashboard", reason: "manual pause")
+    )
+    let controlResponse = await router.handle(
+        method: "POST",
+        path: "/v1/agents/agent-chat/sessions/\(sessionSummary.id)/control",
+        body: controlBody
+    )
+    #expect(controlResponse.status == 200)
+
+    let deleteResponse = await router.handle(
+        method: "DELETE",
+        path: "/v1/agents/agent-chat/sessions/\(sessionSummary.id)",
+        body: nil
+    )
+    #expect(deleteResponse.status == 200)
+
+    let getDeletedResponse = await router.handle(
+        method: "GET",
+        path: "/v1/agents/agent-chat/sessions/\(sessionSummary.id)",
+        body: nil
+    )
+    #expect(getDeletedResponse.status == 404)
 }

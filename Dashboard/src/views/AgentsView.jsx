@@ -1,5 +1,17 @@
-import React, { useEffect, useMemo, useState } from "react";
-import { createAgent as createAgentRequest, fetchAgent, fetchAgents } from "../api";
+import React, { useEffect, useMemo, useRef, useState } from "react";
+import {
+  createAgent as createAgentRequest,
+  createAgentSession,
+  deleteAgentSession,
+  fetchAgent,
+  fetchAgentConfig,
+  fetchAgentSession,
+  fetchAgentSessions,
+  fetchAgents,
+  postAgentSessionControl,
+  postAgentSessionMessage,
+  updateAgentConfig
+} from "../api";
 
 const AGENT_TABS = [
   { id: "overview", title: "Overview" },
@@ -40,6 +52,737 @@ function mergeAgent(previousAgents, incomingAgent) {
 
 function tabTitle(tabId) {
   return AGENT_TABS.find((tab) => tab.id === tabId)?.title || "Overview";
+}
+
+const INLINE_ATTACHMENT_MAX_BYTES = 2 * 1024 * 1024;
+
+function formatEventTime(value) {
+  if (!value) {
+    return "";
+  }
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return "";
+  }
+  return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+}
+
+async function encodeFileBase64(file) {
+  const buffer = await file.arrayBuffer();
+  const bytes = new Uint8Array(buffer);
+  const chunkSize = 0x8000;
+  let binary = "";
+  for (let index = 0; index < bytes.length; index += chunkSize) {
+    const chunk = bytes.subarray(index, index + chunkSize);
+    binary += String.fromCharCode(...chunk);
+  }
+  return btoa(binary);
+}
+
+function sortSessionsByUpdate(list) {
+  return [...list].sort((left, right) => {
+    const leftDate = new Date(left?.updatedAt || 0).getTime();
+    const rightDate = new Date(right?.updatedAt || 0).getTime();
+    return rightDate - leftDate;
+  });
+}
+
+function extractEventKey(event, index) {
+  return event?.id || `${event?.type || "event"}-${index}`;
+}
+
+function AgentChatTab({ agentId }) {
+  const [sessions, setSessions] = useState([]);
+  const [activeSessionId, setActiveSessionId] = useState(null);
+  const [activeSession, setActiveSession] = useState(null);
+  const [isLoadingSessions, setIsLoadingSessions] = useState(true);
+  const [isLoadingSession, setIsLoadingSession] = useState(false);
+  const [isSending, setIsSending] = useState(false);
+  const [liveStage, setLiveStage] = useState(null);
+  const [isDragOver, setIsDragOver] = useState(false);
+  const [inputText, setInputText] = useState("");
+  const [pendingFiles, setPendingFiles] = useState([]);
+  const [spawnSubSession, setSpawnSubSession] = useState(false);
+  const [statusText, setStatusText] = useState("Loading sessions...");
+  const fileInputRef = useRef(null);
+
+  useEffect(() => {
+    let isCancelled = false;
+
+    async function bootstrap() {
+      setIsLoadingSessions(true);
+      setActiveSessionId(null);
+      setActiveSession(null);
+      setPendingFiles([]);
+      setInputText("");
+      setSpawnSubSession(false);
+
+      const response = await fetchAgentSessions(agentId);
+      if (isCancelled) {
+        return;
+      }
+
+      const nextSessions = Array.isArray(response) ? sortSessionsByUpdate(response) : [];
+      setSessions(nextSessions);
+      setIsLoadingSessions(false);
+
+      if (!Array.isArray(response)) {
+        setStatusText("Failed to load sessions.");
+        return;
+      }
+
+      if (nextSessions.length === 0) {
+        setStatusText("No sessions yet. Create one.");
+        return;
+      }
+
+      setStatusText(`Loaded ${nextSessions.length} sessions`);
+      const nextSessionID = nextSessions[0].id;
+      setActiveSessionId(nextSessionID);
+      await openSession(nextSessionID, isCancelled);
+    }
+
+    bootstrap().catch(() => {
+      if (!isCancelled) {
+        setStatusText("Failed to initialize chat.");
+        setIsLoadingSessions(false);
+      }
+    });
+
+    return () => {
+      isCancelled = true;
+    };
+  }, [agentId]);
+
+  async function openSession(sessionId, isCancelled = false) {
+    if (!sessionId) {
+      return;
+    }
+    setIsLoadingSession(true);
+    const detail = await fetchAgentSession(agentId, sessionId);
+    if (!isCancelled) {
+      if (detail) {
+        setActiveSession(detail);
+        setActiveSessionId(sessionId);
+      } else {
+        setStatusText("Failed to load session.");
+      }
+      setIsLoadingSession(false);
+    }
+  }
+
+  async function refreshSessions(preferredSessionId = null) {
+    const response = await fetchAgentSessions(agentId);
+    if (!Array.isArray(response)) {
+      setStatusText("Failed to refresh sessions.");
+      return;
+    }
+
+    const nextSessions = sortSessionsByUpdate(response);
+    setSessions(nextSessions);
+
+    if (nextSessions.length === 0) {
+      setActiveSessionId(null);
+      setActiveSession(null);
+      setStatusText("No sessions yet. Create one.");
+      return;
+    }
+
+    const targetId =
+      preferredSessionId && nextSessions.some((item) => item.id === preferredSessionId)
+        ? preferredSessionId
+        : nextSessions[0].id;
+    setActiveSessionId(targetId);
+    await openSession(targetId);
+  }
+
+  async function createSession(parentSessionId = null) {
+    const response = await createAgentSession(agentId, parentSessionId ? { parentSessionId } : {});
+    if (!response) {
+      setStatusText("Failed to create session.");
+      return null;
+    }
+
+    setSessions((previous) => sortSessionsByUpdate([response, ...previous.filter((item) => item.id !== response.id)]));
+    setActiveSessionId(response.id);
+    await openSession(response.id);
+    setStatusText(`Session ${response.id} created`);
+    return response;
+  }
+
+  function addFiles(fileList) {
+    const next = Array.from(fileList || []);
+    if (next.length === 0) {
+      return;
+    }
+    setPendingFiles((previous) => [...previous, ...next]);
+    setStatusText(`${next.length} file(s) attached`);
+  }
+
+  function removePendingFile(index) {
+    setPendingFiles((previous) => previous.filter((_, itemIndex) => itemIndex !== index));
+  }
+
+  async function handleSend(event) {
+    event.preventDefault();
+    if (isSending) {
+      return;
+    }
+
+    const trimmed = String(inputText || "").trim();
+    if (!trimmed && pendingFiles.length === 0) {
+      return;
+    }
+
+    let sessionId = activeSessionId;
+    if (!sessionId) {
+      const created = await createSession();
+      if (!created) {
+        return;
+      }
+      sessionId = created.id;
+    }
+
+    setIsSending(true);
+    setLiveStage("thinking");
+    setStatusText("Sending message...");
+
+    let oversizedCount = 0;
+    const uploads = await Promise.all(
+      pendingFiles.map(async (file) => {
+        const mimeType = file.type || "application/octet-stream";
+        if (file.size > INLINE_ATTACHMENT_MAX_BYTES) {
+          oversizedCount += 1;
+          return {
+            name: file.name,
+            mimeType,
+            sizeBytes: file.size,
+            contentBase64: null
+          };
+        }
+
+        try {
+          const contentBase64 = await encodeFileBase64(file);
+          return {
+            name: file.name,
+            mimeType,
+            sizeBytes: file.size,
+            contentBase64
+          };
+        } catch {
+          return {
+            name: file.name,
+            mimeType,
+            sizeBytes: file.size,
+            contentBase64: null
+          };
+        }
+      })
+    );
+
+    const lower = trimmed.toLowerCase();
+    const shouldSearch =
+      uploads.length > 0 ||
+      ["search", "find", "google", "lookup", "research", "найди", "поиск", "исследуй"].some((keyword) =>
+        lower.includes(keyword)
+      );
+    setLiveStage(shouldSearch ? "searching" : "responding");
+
+    const response = await postAgentSessionMessage(agentId, sessionId, {
+      userId: "dashboard",
+      content: trimmed,
+      attachments: uploads,
+      spawnSubSession
+    });
+
+    if (!response) {
+      setStatusText("Failed to send message.");
+      setIsSending(false);
+      setLiveStage(null);
+      return;
+    }
+
+    setLiveStage("responding");
+    setInputText("");
+    setPendingFiles([]);
+    setSpawnSubSession(false);
+    await refreshSessions(sessionId);
+
+    if (oversizedCount > 0) {
+      setStatusText(`Message sent. ${oversizedCount} file(s) saved without inline preview (size limit).`);
+    } else {
+      setStatusText("Message sent.");
+    }
+
+    setIsSending(false);
+    setLiveStage(null);
+  }
+
+  async function sendControl(action) {
+    if (!activeSessionId) {
+      return;
+    }
+
+    const response = await postAgentSessionControl(agentId, activeSessionId, {
+      action,
+      requestedBy: "dashboard"
+    });
+
+    if (!response) {
+      setStatusText("Failed to send control command.");
+      return;
+    }
+
+    await refreshSessions(activeSessionId);
+    setStatusText(`Control sent: ${action}`);
+  }
+
+  async function handleDeleteActiveSession() {
+    if (!activeSessionId) {
+      return;
+    }
+    if (!window.confirm("Delete this session?")) {
+      return;
+    }
+
+    const success = await deleteAgentSession(agentId, activeSessionId);
+    if (!success) {
+      setStatusText("Failed to delete session.");
+      return;
+    }
+    await refreshSessions(null);
+    setStatusText("Session deleted.");
+  }
+
+  const activeSummary = activeSession?.summary || sessions.find((item) => item.id === activeSessionId) || null;
+  const events = Array.isArray(activeSession?.events) ? activeSession.events : [];
+
+  return (
+    <section className="agent-chat-shell">
+      <aside className="agent-chat-sessions">
+        <div className="agent-chat-sessions-head">
+          <h4>Sessions</h4>
+          <button type="button" onClick={() => createSession()}>
+            New
+          </button>
+        </div>
+
+        {isLoadingSessions ? (
+          <p className="placeholder-text">Loading...</p>
+        ) : sessions.length === 0 ? (
+          <div className="agent-chat-empty-sessions">
+            <p className="placeholder-text">No sessions</p>
+            <button type="button" onClick={() => createSession()}>
+              Create Session
+            </button>
+          </div>
+        ) : (
+          <div className="agent-chat-session-list">
+            {sessions.map((session) => (
+              <button
+                key={session.id}
+                type="button"
+                className={`agent-chat-session-item ${activeSessionId === session.id ? "active" : ""}`}
+                onClick={() => openSession(session.id)}
+              >
+                <strong>{session.title}</strong>
+                <span>{session.messageCount} msg</span>
+                <p>{session.lastMessagePreview || session.id}</p>
+              </button>
+            ))}
+          </div>
+        )}
+      </aside>
+
+      <div
+        className={`agent-chat-main ${isDragOver ? "drag-over" : ""}`}
+        onDragOver={(event) => {
+          event.preventDefault();
+          setIsDragOver(true);
+        }}
+        onDragLeave={(event) => {
+          if (!event.currentTarget.contains(event.relatedTarget)) {
+            setIsDragOver(false);
+          }
+        }}
+        onDrop={(event) => {
+          event.preventDefault();
+          setIsDragOver(false);
+          addFiles(event.dataTransfer?.files);
+        }}
+      >
+        <div className="agent-chat-main-head">
+          <div>
+            <h4>{activeSummary?.title || "Chat"}</h4>
+            <p className="placeholder-text">{activeSummary?.id || "Select or create a session"}</p>
+          </div>
+          <div className="agent-chat-actions">
+            {activeSummary?.parentSessionId ? (
+              <button type="button" onClick={() => openSession(activeSummary.parentSessionId)}>
+                Back To Parent
+              </button>
+            ) : null}
+            <button type="button" onClick={() => sendControl("pause")} disabled={!activeSessionId}>
+              Pause
+            </button>
+            <button type="button" onClick={() => sendControl("resume")} disabled={!activeSessionId}>
+              Resume
+            </button>
+            <button type="button" onClick={() => sendControl("interrupt")} disabled={!activeSessionId}>
+              Interrupt
+            </button>
+            <button type="button" className="danger" onClick={handleDeleteActiveSession} disabled={!activeSessionId}>
+              Delete
+            </button>
+          </div>
+        </div>
+
+        <div className="agent-chat-events">
+          {isLoadingSession ? (
+            <p className="placeholder-text">Loading session...</p>
+          ) : events.length === 0 && !isSending ? (
+            <p className="placeholder-text">No messages yet.</p>
+          ) : (
+            <>
+              {isSending && liveStage ? (
+                <article className={`agent-chat-status ${liveStage}`}>
+                  <div className="agent-chat-status-head">
+                    <strong>{liveStage === "searching" ? "Searching" : liveStage === "responding" ? "Responding" : "Thinking"}</strong>
+                    <span>live</span>
+                  </div>
+                </article>
+              ) : null}
+              {events.map((eventItem, index) => {
+              if (eventItem.type === "message" && eventItem.message) {
+                const role = eventItem.message.role || "system";
+                return (
+                  <article key={extractEventKey(eventItem, index)} className={`agent-chat-message ${role}`}>
+                    <div className="agent-chat-message-head">
+                      <strong>{role}</strong>
+                      <span>{formatEventTime(eventItem.message.createdAt || eventItem.createdAt)}</span>
+                    </div>
+                    <div className="agent-chat-message-body">
+                      {(eventItem.message.segments || []).map((segment, segmentIndex) => {
+                        const key = `${extractEventKey(eventItem, index)}-segment-${segmentIndex}`;
+                        if (segment.kind === "thinking") {
+                          return (
+                            <details key={key} className="agent-chat-thinking">
+                              <summary>Thinking</summary>
+                              <pre>{segment.text || ""}</pre>
+                            </details>
+                          );
+                        }
+
+                        if (segment.kind === "attachment" && segment.attachment) {
+                          return (
+                            <div key={key} className="agent-chat-attachment">
+                              <strong>{segment.attachment.name}</strong>
+                              <span>{segment.attachment.mimeType}</span>
+                            </div>
+                          );
+                        }
+
+                        return <p key={key}>{segment.text || ""}</p>;
+                      })}
+                    </div>
+                  </article>
+                );
+              }
+
+              if (eventItem.type === "run_status" && eventItem.runStatus) {
+                const status = eventItem.runStatus;
+                return (
+                  <article key={extractEventKey(eventItem, index)} className={`agent-chat-status ${status.stage}`}>
+                    <div className="agent-chat-status-head">
+                      <strong>{status.label}</strong>
+                      <span>{formatEventTime(status.createdAt || eventItem.createdAt)}</span>
+                    </div>
+                    {status.details ? <p>{status.details}</p> : null}
+                    {status.expandedText ? (
+                      <details className="agent-chat-thinking">
+                        <summary>Open details</summary>
+                        <pre>{status.expandedText}</pre>
+                      </details>
+                    ) : null}
+                  </article>
+                );
+              }
+
+              if (eventItem.type === "sub_session" && eventItem.subSession) {
+                return (
+                  <article key={extractEventKey(eventItem, index)} className="agent-chat-subsession">
+                    <p>Sub-session spawned: {eventItem.subSession.title}</p>
+                    <button type="button" onClick={() => openSession(eventItem.subSession.childSessionId)}>
+                      Open Sub-session
+                    </button>
+                  </article>
+                );
+              }
+
+              if (eventItem.type === "run_control" && eventItem.runControl) {
+                return (
+                  <article key={extractEventKey(eventItem, index)} className="agent-chat-control">
+                    <p>
+                      Control: <strong>{eventItem.runControl.action}</strong> by {eventItem.runControl.requestedBy}
+                    </p>
+                  </article>
+                );
+              }
+
+              return null;
+            })}
+            </>
+          )}
+        </div>
+
+        <form className="agent-chat-compose" onSubmit={handleSend}>
+          <textarea
+            rows={3}
+            value={inputText}
+            onChange={(event) => setInputText(event.target.value)}
+            placeholder="Type a message to your agent..."
+          />
+
+          {pendingFiles.length > 0 ? (
+            <div className="agent-chat-pending-files">
+              {pendingFiles.map((file, index) => (
+                <button key={`${file.name}-${index}`} type="button" onClick={() => removePendingFile(index)}>
+                  {file.name}
+                </button>
+              ))}
+            </div>
+          ) : null}
+
+          <div className="agent-chat-compose-actions">
+            <input
+              ref={fileInputRef}
+              type="file"
+              multiple
+              className="agent-chat-file-input"
+              onChange={(event) => {
+                addFiles(event.target.files);
+                event.target.value = "";
+              }}
+            />
+            <button type="button" onClick={() => fileInputRef.current?.click()}>
+              Attach Files
+            </button>
+            <label className="agent-chat-subsession-toggle">
+              <input
+                type="checkbox"
+                checked={spawnSubSession}
+                onChange={(event) => setSpawnSubSession(event.target.checked)}
+              />
+              Spawn sub-session
+            </label>
+            <button type="submit" disabled={isSending}>
+              {isSending ? "Sending..." : "Send"}
+            </button>
+          </div>
+        </form>
+
+        <p className="agent-chat-status-line placeholder-text">{statusText}</p>
+      </div>
+    </section>
+  );
+}
+
+function emptyAgentConfigDraft(agentId) {
+  return {
+    agentId,
+    selectedModel: "",
+    availableModels: [],
+    documents: {
+      userMarkdown: "",
+      agentsMarkdown: "",
+      soulMarkdown: "",
+      identityMarkdown: ""
+    }
+  };
+}
+
+function AgentConfigTab({ agentId }) {
+  const [draft, setDraft] = useState(() => emptyAgentConfigDraft(agentId));
+  const [isLoading, setIsLoading] = useState(true);
+  const [isSaving, setIsSaving] = useState(false);
+  const [statusText, setStatusText] = useState("Loading agent config...");
+
+  useEffect(() => {
+    let isCancelled = false;
+
+    async function load() {
+      setIsLoading(true);
+      setStatusText("Loading agent config...");
+      const response = await fetchAgentConfig(agentId);
+      if (isCancelled) {
+        return;
+      }
+
+      if (!response) {
+        setDraft(emptyAgentConfigDraft(agentId));
+        setStatusText("Failed to load config.");
+        setIsLoading(false);
+        return;
+      }
+
+      setDraft({
+        agentId: response.agentId || agentId,
+        selectedModel: response.selectedModel || "",
+        availableModels: Array.isArray(response.availableModels) ? response.availableModels : [],
+        documents: {
+          userMarkdown: String(response.documents?.userMarkdown || ""),
+          agentsMarkdown: String(response.documents?.agentsMarkdown || ""),
+          soulMarkdown: String(response.documents?.soulMarkdown || ""),
+          identityMarkdown: String(response.documents?.identityMarkdown || "")
+        }
+      });
+      setStatusText("Config loaded.");
+      setIsLoading(false);
+    }
+
+    load().catch(() => {
+      if (!isCancelled) {
+        setStatusText("Failed to load config.");
+        setIsLoading(false);
+      }
+    });
+
+    return () => {
+      isCancelled = true;
+    };
+  }, [agentId]);
+
+  function updateField(field, value) {
+    setDraft((previous) => ({
+      ...previous,
+      [field]: value
+    }));
+  }
+
+  function updateDocumentField(field, value) {
+    setDraft((previous) => ({
+      ...previous,
+      documents: {
+        ...previous.documents,
+        [field]: value
+      }
+    }));
+  }
+
+  async function saveConfig(event) {
+    event.preventDefault();
+    if (isSaving) {
+      return;
+    }
+
+    const selectedModel = String(draft.selectedModel || "").trim();
+    if (!selectedModel) {
+      setStatusText("Model is required.");
+      return;
+    }
+
+    const payload = {
+      selectedModel,
+      documents: {
+        userMarkdown: String(draft.documents.userMarkdown || ""),
+        agentsMarkdown: String(draft.documents.agentsMarkdown || ""),
+        soulMarkdown: String(draft.documents.soulMarkdown || ""),
+        identityMarkdown: String(draft.documents.identityMarkdown || "")
+      }
+    };
+
+    setIsSaving(true);
+    const response = await updateAgentConfig(agentId, payload);
+    if (!response) {
+      setStatusText("Failed to save config.");
+      setIsSaving(false);
+      return;
+    }
+
+    setDraft({
+      agentId: response.agentId || agentId,
+      selectedModel: response.selectedModel || "",
+      availableModels: Array.isArray(response.availableModels) ? response.availableModels : [],
+      documents: {
+        userMarkdown: String(response.documents?.userMarkdown || ""),
+        agentsMarkdown: String(response.documents?.agentsMarkdown || ""),
+        soulMarkdown: String(response.documents?.soulMarkdown || ""),
+        identityMarkdown: String(response.documents?.identityMarkdown || "")
+      }
+    });
+    setStatusText("Config saved.");
+    setIsSaving(false);
+  }
+
+  return (
+    <section className="agent-config-shell">
+      <div className="agent-config-head">
+        <h3>Agent Config</h3>
+        <span className="placeholder-text">{statusText}</span>
+      </div>
+
+      {isLoading ? (
+        <p className="placeholder-text">Loading...</p>
+      ) : (
+        <form className="agent-config-form" onSubmit={saveConfig}>
+          <label>
+            Model
+            <select
+              value={draft.selectedModel}
+              onChange={(event) => updateField("selectedModel", event.target.value)}
+            >
+              {draft.availableModels.map((model) => (
+                <option key={model.id} value={model.id}>
+                  {model.title}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <div className="agent-config-docs">
+            <label>
+              User.md
+              <textarea
+                rows={8}
+                value={draft.documents.userMarkdown}
+                onChange={(event) => updateDocumentField("userMarkdown", event.target.value)}
+              />
+            </label>
+            <label>
+              Agents.md
+              <textarea
+                rows={8}
+                value={draft.documents.agentsMarkdown}
+                onChange={(event) => updateDocumentField("agentsMarkdown", event.target.value)}
+              />
+            </label>
+            <label>
+              Soul.md
+              <textarea
+                rows={8}
+                value={draft.documents.soulMarkdown}
+                onChange={(event) => updateDocumentField("soulMarkdown", event.target.value)}
+              />
+            </label>
+            <label>
+              Identity.md
+              <textarea
+                rows={8}
+                value={draft.documents.identityMarkdown}
+                onChange={(event) => updateDocumentField("identityMarkdown", event.target.value)}
+              />
+            </label>
+          </div>
+
+          <div className="agent-config-actions">
+            <button type="submit" disabled={isSaving}>
+              {isSaving ? "Saving..." : "Save Config"}
+            </button>
+          </div>
+        </form>
+      )}
+    </section>
+  );
 }
 
 export function AgentsView({ routeAgentId = null, routeTab = "overview", onRouteChange = null }) {
@@ -182,8 +925,7 @@ export function AgentsView({ routeAgentId = null, routeTab = "overview", onRoute
     if (tab === "chat") {
       return (
         <section className="entry-editor-card agent-content-card">
-          <h3>Chat</h3>
-          <p className="placeholder-text">Agent chat UI will be connected here.</p>
+          <AgentChatTab agentId={agent.id} />
         </section>
       );
     }
@@ -226,8 +968,7 @@ export function AgentsView({ routeAgentId = null, routeTab = "overview", onRoute
 
     return (
       <section className="entry-editor-card agent-content-card">
-        <h3>Config</h3>
-        <p className="placeholder-text">Agent-specific runtime config and provider overrides.</p>
+        <AgentConfigTab agentId={agent.id} />
       </section>
     );
   }
@@ -257,7 +998,7 @@ export function AgentsView({ routeAgentId = null, routeTab = "overview", onRoute
           <header className="agents-index-head">
             <h2>Agents</h2>
             {agents.length > 0 && !isLoadingAgents ? (
-              <button type="button" onClick={openCreateModal}>
+              <button type="button" className="agents-create-inline" onClick={openCreateModal}>
                 Create Agent
               </button>
             ) : null}
@@ -278,8 +1019,11 @@ export function AgentsView({ routeAgentId = null, routeTab = "overview", onRoute
             <div className="agent-list">
               {agents.map((agent) => (
                 <button key={agent.id} type="button" className="agent-list-item" onClick={() => navigateToAgent(agent.id)}>
-                  <strong>{agent.displayName}</strong>
-                  <span>{agent.id}</span>
+                  <div className="agent-list-main">
+                    <strong>{agent.displayName}</strong>
+                    <span>{agent.id}</span>
+                  </div>
+                  <span className="agent-list-open">›</span>
                   <p>{agent.role}</p>
                 </button>
               ))}

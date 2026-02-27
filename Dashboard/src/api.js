@@ -96,3 +96,94 @@ export async function createAgent(payload) {
 
   return response.json();
 }
+
+export async function fetchAgentSessions(agentId) {
+  const response = await fetch(`${API_BASE}/v1/agents/${encodeURIComponent(agentId)}/sessions`);
+  if (!response.ok) {
+    return null;
+  }
+  return response.json();
+}
+
+export async function createAgentSession(agentId, payload = {}) {
+  const response = await fetch(`${API_BASE}/v1/agents/${encodeURIComponent(agentId)}/sessions`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(payload)
+  });
+  if (!response.ok) {
+    return null;
+  }
+  return response.json();
+}
+
+export async function fetchAgentSession(agentId, sessionId) {
+  const response = await fetch(
+    `${API_BASE}/v1/agents/${encodeURIComponent(agentId)}/sessions/${encodeURIComponent(sessionId)}`
+  );
+  if (!response.ok) {
+    return null;
+  }
+  return response.json();
+}
+
+export async function postAgentSessionMessage(agentId, sessionId, payload) {
+  const response = await fetch(
+    `${API_BASE}/v1/agents/${encodeURIComponent(agentId)}/sessions/${encodeURIComponent(sessionId)}/messages`,
+    {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(payload)
+    }
+  );
+  if (!response.ok) {
+    return null;
+  }
+  return response.json();
+}
+
+export async function postAgentSessionControl(agentId, sessionId, payload) {
+  const response = await fetch(
+    `${API_BASE}/v1/agents/${encodeURIComponent(agentId)}/sessions/${encodeURIComponent(sessionId)}/control`,
+    {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(payload)
+    }
+  );
+  if (!response.ok) {
+    return null;
+  }
+  return response.json();
+}
+
+export async function deleteAgentSession(agentId, sessionId) {
+  const response = await fetch(
+    `${API_BASE}/v1/agents/${encodeURIComponent(agentId)}/sessions/${encodeURIComponent(sessionId)}`,
+    { method: "DELETE" }
+  );
+  if (!response.ok) {
+    return false;
+  }
+  return true;
+}
+
+export async function fetchAgentConfig(agentId) {
+  const response = await fetch(`${API_BASE}/v1/agents/${encodeURIComponent(agentId)}/config`);
+  if (!response.ok) {
+    return null;
+  }
+  return response.json();
+}
+
+export async function updateAgentConfig(agentId, payload) {
+  const response = await fetch(`${API_BASE}/v1/agents/${encodeURIComponent(agentId)}/config`, {
+    method: "PUT",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(payload)
+  });
+  if (!response.ok) {
+    return null;
+  }
+  return response.json();
+}
