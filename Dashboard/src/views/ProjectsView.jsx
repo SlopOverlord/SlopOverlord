@@ -1,5 +1,6 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
+  fetchActorsBoard,
   fetchChannelState,
   fetchProjects as fetchProjectsRequest,
   createProject as createProjectRequest,
@@ -294,9 +295,62 @@ function emptyProjectDraft(index = 1) {
   };
 }
 
-function ProjectCreateModal({ isOpen, draft, onChange, onClose, onCreate }) {
+function ProjectCreateModal({ isOpen, draft, onChange, onClose, onCreate, actors = [], teams = [] }) {
+  const [actorSearch, setActorSearch] = useState("");
+  const [actorDropdownOpen, setActorDropdownOpen] = useState(false);
+  const actorSearchRef = useRef(null);
+  const [teamSearch, setTeamSearch] = useState("");
+  const [teamDropdownOpen, setTeamDropdownOpen] = useState(false);
+  const teamSearchRef = useRef(null);
+
+  const selectedActorIds = parseListInput(draft?.actors ?? "");
+  const q = actorSearch.trim().toLowerCase();
+  const filtered = actors.filter(
+    (node) =>
+      node.displayName.toLowerCase().includes(q) || node.id.toLowerCase().includes(q)
+  );
+  const listToShow = q && filtered.length > 0 ? filtered : actors;
+
+  const selectedTeamIds = parseListInput(draft?.teams ?? "");
+  const tq = teamSearch.trim().toLowerCase();
+  const filteredTeams = teams.filter(
+    (team) =>
+      team.name.toLowerCase().includes(tq) || team.id.toLowerCase().includes(tq)
+  );
+  const listToShowTeams = tq && filteredTeams.length > 0 ? filteredTeams : teams;
+
   if (!isOpen) {
     return null;
+  }
+
+  function addActor(node) {
+    const next = selectedActorIds.includes(node.id)
+      ? selectedActorIds
+      : [...selectedActorIds, node.id];
+    onChange("actors", next.join(", "));
+    setActorSearch("");
+  }
+
+  function removeActor(actorId) {
+    onChange(
+      "actors",
+      selectedActorIds.filter((id) => id !== actorId).join(", ")
+    );
+  }
+
+  function addTeam(team) {
+    const next = selectedTeamIds.includes(team.id)
+      ? selectedTeamIds
+      : [...selectedTeamIds, team.id];
+    onChange("teams", next.join(", "));
+    setTeamSearch("");
+  }
+
+  function removeTeam(teamId) {
+    onChange(
+      "teams",
+      selectedTeamIds.filter((id) => id !== teamId).join(", ")
+    );
   }
 
   return (
@@ -342,22 +396,146 @@ function ProjectCreateModal({ isOpen, draft, onChange, onClose, onCreate }) {
           <div className="project-task-form-grid">
             <label>
               Actors
-              <textarea
-                value={draft.actors}
-                onChange={(event) => onChange("actors", event.target.value)}
-                rows={3}
-                placeholder="actor.one, actor.two"
-              />
+              <div className="actor-team-members-picker">
+                <div className="actor-team-search-wrap">
+                  <input
+                    ref={actorSearchRef}
+                    className="actor-team-search"
+                    value={actorSearch}
+                    onChange={(event) => {
+                      setActorSearch(event.target.value);
+                      setActorDropdownOpen(true);
+                    }}
+                    onFocus={() => setActorDropdownOpen(true)}
+                    onBlur={() => setTimeout(() => setActorDropdownOpen(false), 150)}
+                    placeholder="Search actors…"
+                    autoComplete="off"
+                  />
+                  {actorDropdownOpen ? (
+                    <ul className="actor-team-dropdown">
+                      {listToShow.length === 0 ? (
+                        <li className="actor-team-dropdown-empty">No actors</li>
+                      ) : (
+                        listToShow.map((node) => {
+                          const isSelected = selectedActorIds.includes(node.id);
+                          return (
+                            <li
+                              key={node.id}
+                              className={`actor-team-dropdown-item ${isSelected ? "selected" : ""}`}
+                              onMouseDown={(event) => {
+                                event.preventDefault();
+                                addActor(node);
+                              }}
+                            >
+                              <span className="actor-team-dropdown-name">{node.displayName}</span>
+                              <span className="actor-team-dropdown-id">{node.id}</span>
+                              {isSelected ? (
+                                <span className="actor-team-dropdown-check">✓</span>
+                              ) : null}
+                            </li>
+                          );
+                        })
+                      )}
+                    </ul>
+                  ) : null}
+                </div>
+                {selectedActorIds.length > 0 ? (
+                  <div className="actor-team-tags">
+                    {selectedActorIds.map((id) => {
+                      const node = actors.find((n) => n.id === id);
+                      const label = node ? node.displayName : id;
+                      return (
+                        <span key={id} className="actor-team-tag">
+                          {label}
+                          <button
+                            type="button"
+                            className="actor-team-tag-remove"
+                            aria-label={`Remove ${label}`}
+                            onMouseDown={(e) => {
+                              e.preventDefault();
+                              removeActor(id);
+                            }}
+                          >
+                            ×
+                          </button>
+                        </span>
+                      );
+                    })}
+                  </div>
+                ) : null}
+              </div>
             </label>
 
             <label>
               Teams
-              <textarea
-                value={draft.teams}
-                onChange={(event) => onChange("teams", event.target.value)}
-                rows={3}
-                placeholder="Team Red, Team Blue"
-              />
+              <div className="actor-team-members-picker">
+                <div className="actor-team-search-wrap">
+                  <input
+                    ref={teamSearchRef}
+                    className="actor-team-search"
+                    value={teamSearch}
+                    onChange={(event) => {
+                      setTeamSearch(event.target.value);
+                      setTeamDropdownOpen(true);
+                    }}
+                    onFocus={() => setTeamDropdownOpen(true)}
+                    onBlur={() => setTimeout(() => setTeamDropdownOpen(false), 150)}
+                    placeholder="Search teams…"
+                    autoComplete="off"
+                  />
+                  {teamDropdownOpen ? (
+                    <ul className="actor-team-dropdown">
+                      {listToShowTeams.length === 0 ? (
+                        <li className="actor-team-dropdown-empty">No teams</li>
+                      ) : (
+                        listToShowTeams.map((team) => {
+                          const isSelected = selectedTeamIds.includes(team.id);
+                          return (
+                            <li
+                              key={team.id}
+                              className={`actor-team-dropdown-item ${isSelected ? "selected" : ""}`}
+                              onMouseDown={(event) => {
+                                event.preventDefault();
+                                addTeam(team);
+                              }}
+                            >
+                              <span className="actor-team-dropdown-name">{team.name}</span>
+                              <span className="actor-team-dropdown-id">{team.id}</span>
+                              {isSelected ? (
+                                <span className="actor-team-dropdown-check">✓</span>
+                              ) : null}
+                            </li>
+                          );
+                        })
+                      )}
+                    </ul>
+                  ) : null}
+                </div>
+                {selectedTeamIds.length > 0 ? (
+                  <div className="actor-team-tags">
+                    {selectedTeamIds.map((id) => {
+                      const team = teams.find((t) => t.id === id);
+                      const label = team ? team.name : id;
+                      return (
+                        <span key={id} className="actor-team-tag">
+                          {label}
+                          <button
+                            type="button"
+                            className="actor-team-tag-remove"
+                            aria-label={`Remove ${label}`}
+                            onMouseDown={(e) => {
+                              e.preventDefault();
+                              removeTeam(id);
+                            }}
+                          >
+                            ×
+                          </button>
+                        </span>
+                      );
+                    })}
+                  </div>
+                ) : null}
+              </div>
             </label>
           </div>
 
@@ -560,6 +738,8 @@ export function ProjectsView({
   const [editingTask, setEditingTask] = useState(null);
   const [editDraft, setEditDraft] = useState(emptyTaskDraft);
   const [projectNameDraft, setProjectNameDraft] = useState("");
+  const [createModalActors, setCreateModalActors] = useState([]);
+  const [createModalTeams, setCreateModalTeams] = useState([]);
 
   const selectedProject = useMemo(
     () => projects.find((project) => project.id === routeProjectId) || null,
@@ -572,6 +752,36 @@ export function ProjectsView({
       setIsLoadingProjects(false);
     });
   }, []);
+
+  useEffect(() => {
+    if (!isCreateProjectModalOpen) {
+      return;
+    }
+    let isCancelled = false;
+    (async () => {
+      const raw = await fetchActorsBoard();
+      if (isCancelled || !raw) {
+        return;
+      }
+      const nodes = Array.isArray(raw.nodes)
+        ? raw.nodes.map((n) => ({
+            id: String(n?.id ?? ""),
+            displayName: String(n?.displayName ?? n?.id ?? "")
+          }))
+        : [];
+      const teamList = Array.isArray(raw.teams)
+        ? raw.teams.map((t) => ({
+            id: String(t?.id ?? ""),
+            name: String(t?.name ?? t?.id ?? "")
+          }))
+        : [];
+      setCreateModalActors(nodes);
+      setCreateModalTeams(teamList);
+    })();
+    return () => {
+      isCancelled = true;
+    };
+  }, [isCreateProjectModalOpen]);
 
   useEffect(() => {
     if (!selectedProject) {
@@ -712,8 +922,14 @@ export function ProjectsView({
       normalizeProjectIdentifier(projectDraft.projectId) ||
       normalizeProjectIdentifier(toSlug(displayName)) ||
       `project-${nextIndex}`;
-    const actors = parseListInput(projectDraft.actors);
-    const teams = parseListInput(projectDraft.teams);
+    const actorIds = parseListInput(projectDraft.actors);
+    const teamIds = parseListInput(projectDraft.teams);
+    const actors = actorIds.map(
+      (id) => createModalActors.find((a) => a.id === id)?.displayName ?? id
+    );
+    const teams = teamIds.map(
+      (id) => createModalTeams.find((t) => t.id === id)?.name ?? id
+    );
 
     const created = await createProjectRequest({
       id: projectId,
@@ -1015,9 +1231,9 @@ export function ProjectsView({
         <section className="project-board-list project-board-list--empty">
           <article className="project-board-empty">
             <div className="project-board-empty-actions">
-              <button type="button" className="project-new-action project-new-action--hero" onClick={openCreateProjectModal}>
+              <p className="project-new-action project-new-action--hero" onClick={openCreateProjectModal}>
                 Start your first project!
-              </button>
+              </p>
               <button type="button" className="project-new-action" onClick={openCreateProjectModal}>
                 New Projects
               </button>
@@ -1485,16 +1701,19 @@ export function ProjectsView({
 
   return (
     <main className="projects-shell">
-      <header className="projects-head">
-        <h2>Projects</h2>
-        <button type="button" className="project-new-action" onClick={openCreateProjectModal}>
-          New Project
-        </button>
-      </header>
+      {projects.length > 0 && (
+        <div className="projects-head">
+          <button type="button" className="project-new-action" onClick={openCreateProjectModal}>
+            New Project
+          </button>
+        </div>
+      )}
 
       {selectedProject ? renderProjectDetails(selectedProject) : renderProjectList()}
 
-      <p className="placeholder-text">{statusText}</p>
+      {statusText && statusText !== "No projects yet." && statusText !== "Loading projects..." && (
+        <p className="placeholder-text">{statusText}</p>
+      )}
 
       <ProjectCreateModal
         isOpen={isCreateProjectModalOpen}
@@ -1502,6 +1721,8 @@ export function ProjectsView({
         onChange={updateProjectDraft}
         onClose={closeCreateProjectModal}
         onCreate={createProject}
+        actors={createModalActors}
+        teams={createModalTeams}
       />
 
       <ProjectTaskCreateModal
