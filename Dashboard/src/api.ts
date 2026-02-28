@@ -1,0 +1,24 @@
+import { createCoreApi } from "./shared/api/coreApi";
+
+const coreApi = createCoreApi();
+
+export const sendChannelMessage = coreApi.sendChannelMessage;
+export const fetchChannelState = coreApi.fetchChannelState;
+export const fetchBulletins = coreApi.fetchBulletins;
+export const fetchWorkers = coreApi.fetchWorkers;
+export const fetchArtifact = coreApi.fetchArtifact;
+export const fetchRuntimeConfig = coreApi.fetchRuntimeConfig;
+export const updateRuntimeConfig = coreApi.updateRuntimeConfig;
+export const fetchOpenAIModels = coreApi.fetchOpenAIModels;
+export const fetchOpenAIProviderStatus = coreApi.fetchOpenAIProviderStatus;
+export const fetchAgents = coreApi.fetchAgents;
+export const fetchAgent = coreApi.fetchAgent;
+export const createAgent = coreApi.createAgent;
+export const fetchAgentSessions = coreApi.fetchAgentSessions;
+export const createAgentSession = coreApi.createAgentSession;
+export const fetchAgentSession = coreApi.fetchAgentSession;
+export const postAgentSessionMessage = coreApi.postAgentSessionMessage;
+export const postAgentSessionControl = coreApi.postAgentSessionControl;
+export const deleteAgentSession = coreApi.deleteAgentSession;
+export const fetchAgentConfig = coreApi.fetchAgentConfig;
+export const updateAgentConfig = coreApi.updateAgentConfig;
