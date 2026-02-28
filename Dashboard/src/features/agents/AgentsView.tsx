@@ -302,11 +302,7 @@ export function AgentsView({ routeAgentId = null, routeTab = "overview", onRoute
     }
 
     if (tab === "chat") {
-      return (
-        <section className="entry-editor-card agent-content-card">
-          <AgentChatTab agentId={agent.id} />
-        </section>
-      );
+      return <AgentChatTab agentId={agent.id} />;
     }
 
     if (tab === "memories") {

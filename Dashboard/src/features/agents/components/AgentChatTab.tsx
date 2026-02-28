@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   createAgentSession,
   deleteAgentSession,
@@ -45,56 +45,43 @@ function extractEventKey(event, index) {
   return event?.id || `${event?.type || "event"}-${index}`;
 }
 
-function AgentChatSessionPanel({
-  sessions,
-  activeSessionId,
-  isLoadingSessions,
-  isSending,
-  onCreateSession,
-  onOpenSession
-}) {
-  return (
-    <aside className="agent-chat-sessions">
-      <div className="agent-chat-sessions-head">
-        <h4>Sessions</h4>
-        <button type="button" onClick={onCreateSession} disabled={isSending}>
-          New
-        </button>
-      </div>
-
-      {isLoadingSessions ? (
-        <p className="placeholder-text">Loading...</p>
-      ) : sessions.length === 0 ? (
-        <div className="agent-chat-empty-sessions">
-          <p className="placeholder-text">No sessions</p>
-          <button type="button" onClick={onCreateSession} disabled={isSending}>
-            Create Session
-          </button>
-        </div>
-      ) : (
-        <div className="agent-chat-session-list">
-          {sessions.map((session) => (
-            <button
-              key={session.id}
-              type="button"
-              className={`agent-chat-session-item ${activeSessionId === session.id ? "active" : ""}`}
-              onClick={() => onOpenSession(session.id)}
-              disabled={isSending}
-            >
-              <strong>{session.title}</strong>
-              <span>{session.messageCount} msg</span>
-              <p>{session.lastMessagePreview || session.id}</p>
-            </button>
-          ))}
-        </div>
-      )}
-    </aside>
-  );
+function previewText(value, fallback = "No details") {
+  const normalized = String(value || "").replace(/\s+/g, " ").trim();
+  if (!normalized) {
+    return fallback;
+  }
+  if (normalized.length > 100) {
+    return `${normalized.slice(0, 100)}...`;
+  }
+  return normalized;
 }
 
-function AgentChatEvents({ isLoadingSession, isSending, chatMessages, latestRunStatus }) {
+function sortByNewest(list) {
+  return [...list].sort((left, right) => {
+    const leftDate = new Date(left?.createdAt || 0).getTime();
+    const rightDate = new Date(right?.createdAt || 0).getTime();
+    return rightDate - leftDate;
+  });
+}
+
+function AgentChatEvents({
+  isLoadingSession,
+  isSending,
+  chatMessages,
+  latestRunStatus,
+  onOpenThinkingPanel
+}) {
+  const scrollRef = useRef(null);
+
+  useEffect(() => {
+    if (!scrollRef.current) {
+      return;
+    }
+    scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+  }, [chatMessages, isLoadingSession, isSending, latestRunStatus?.id]);
+
   return (
-    <div className="agent-chat-events">
+    <div className="agent-chat-events" ref={scrollRef}>
       {isLoadingSession ? (
         <p className="placeholder-text">Loading session...</p>
       ) : chatMessages.length === 0 && !isSending ? (
@@ -110,24 +97,35 @@ function AgentChatEvents({ isLoadingSession, isSending, chatMessages, latestRunS
 
           {chatMessages.map((eventItem, index) => {
             const role = eventItem.message.role || "system";
+            const eventKey = extractEventKey(eventItem, index);
+            const segments = Array.isArray(eventItem.message?.segments) ? eventItem.message.segments : [];
+            const thinkingSegments = segments
+              .map((segment, segmentIndex) => ({ ...segment, segmentIndex }))
+              .filter((segment) => segment.kind === "thinking");
+            const visibleSegments = segments.filter((segment) => segment.kind !== "thinking");
+
             return (
-              <article key={extractEventKey(eventItem, index)} className={`agent-chat-message ${role}`}>
+              <article key={eventKey} className={`agent-chat-message ${role}`}>
                 <div className="agent-chat-message-head">
                   <strong>{role}</strong>
                   <span>{formatEventTime(eventItem.message.createdAt || eventItem.createdAt)}</span>
                 </div>
                 <div className="agent-chat-message-body">
-                  {(eventItem.message.segments || []).map((segment, segmentIndex) => {
-                    const key = `${extractEventKey(eventItem, index)}-segment-${segmentIndex}`;
-                    if (segment.kind === "thinking") {
-                      return (
-                        <details key={key} className="agent-chat-thinking">
-                          <summary>Thinking</summary>
-                          <pre>{segment.text || ""}</pre>
-                        </details>
-                      );
-                    }
+                  {thinkingSegments.length > 0 ? (
+                    <button
+                      type="button"
+                      className="agent-chat-thinking-link"
+                      onClick={() => onOpenThinkingPanel(`${eventKey}-thinking-${thinkingSegments[0].segmentIndex}`)}
+                    >
+                      <span className="material-symbols-rounded" aria-hidden="true">
+                        psychology_alt
+                      </span>
+                      Thinking &gt;
+                    </button>
+                  ) : null}
 
+                  {visibleSegments.map((segment, segmentIndex) => {
+                    const key = `${eventKey}-segment-${segmentIndex}`;
                     if (segment.kind === "attachment" && segment.attachment) {
                       return (
                         <div key={key} className="agent-chat-attachment">
@@ -140,6 +138,40 @@ function AgentChatEvents({ isLoadingSession, isSending, chatMessages, latestRunS
                     return <p key={key}>{segment.text || ""}</p>;
                   })}
                 </div>
+                {role === "assistant" ? (
+                  <div className="agent-chat-message-actions">
+                    <button type="button" className="agent-chat-action-button" title="Copy">
+                      <span className="material-symbols-rounded" aria-hidden="true">
+                        content_copy
+                      </span>
+                    </button>
+                    <button type="button" className="agent-chat-action-button" title="Like">
+                      <span className="material-symbols-rounded" aria-hidden="true">
+                        thumb_up
+                      </span>
+                    </button>
+                    <button type="button" className="agent-chat-action-button" title="Dislike">
+                      <span className="material-symbols-rounded" aria-hidden="true">
+                        thumb_down
+                      </span>
+                    </button>
+                    <button type="button" className="agent-chat-action-button" title="Reply">
+                      <span className="material-symbols-rounded" aria-hidden="true">
+                        reply
+                      </span>
+                    </button>
+                    <button type="button" className="agent-chat-action-button" title="Regenerate">
+                      <span className="material-symbols-rounded" aria-hidden="true">
+                        refresh
+                      </span>
+                    </button>
+                    <button type="button" className="agent-chat-action-button" title="More">
+                      <span className="material-symbols-rounded" aria-hidden="true">
+                        more_horiz
+                      </span>
+                    </button>
+                  </div>
+                ) : null}
               </article>
             );
           })}
@@ -160,59 +192,179 @@ function AgentChatComposer({
   onAddFiles,
   fileInputRef
 }) {
+  const canSend = String(inputText || "").trim().length > 0 || pendingFiles.length > 0;
+
   return (
     <form className="agent-chat-compose" onSubmit={onSend}>
-      <textarea
-        rows={3}
-        value={inputText}
-        onChange={(event) => onInputTextChange(event.target.value)}
-        disabled={isSending}
-        onKeyDown={(event) => {
-          if (event.key !== "Enter" || event.shiftKey || event.nativeEvent.isComposing) {
-            return;
-          }
-          event.preventDefault();
-          if (!isSending) {
-            onSend();
-          }
+      <input
+        ref={fileInputRef}
+        type="file"
+        multiple
+        className="agent-chat-file-input"
+        onChange={(event) => {
+          onAddFiles(event.target.files);
+          event.target.value = "";
         }}
-        placeholder="Type a message to your agent..."
+        disabled={isSending}
       />
 
       {pendingFiles.length > 0 ? (
         <div className="agent-chat-pending-files">
           {pendingFiles.map((file, index) => (
             <button key={`${file.name}-${index}`} type="button" onClick={() => onRemovePendingFile(index)}>
-              {file.name}
+              <span>{file.name}</span>
+              <span className="material-symbols-rounded" aria-hidden="true">
+                close
+              </span>
             </button>
           ))}
         </div>
       ) : null}
 
-      <div className="agent-chat-compose-actions">
-        <input
-          ref={fileInputRef}
-          type="file"
-          multiple
-          className="agent-chat-file-input"
-          onChange={(event) => {
-            onAddFiles(event.target.files);
-            event.target.value = "";
-          }}
+      <div className="agent-chat-compose-row">
+        <button
+          type="button"
+          className="agent-chat-icon-button"
+          onClick={() => fileInputRef.current?.click()}
           disabled={isSending}
-        />
-        <button type="button" onClick={() => fileInputRef.current?.click()} disabled={isSending}>
-          Attach Files
+          title="Attach files"
+        >
+          <span className="material-symbols-rounded" aria-hidden="true">
+            add
+          </span>
         </button>
-        {isSending ? (
-          <button type="button" className="danger" onClick={onStop}>
-            Stop
+
+        <textarea
+          rows={1}
+          className="agent-chat-compose-input"
+          value={inputText}
+          onChange={(event) => onInputTextChange(event.target.value)}
+          disabled={isSending}
+          onKeyDown={(event) => {
+            if (event.key !== "Enter" || event.shiftKey || event.nativeEvent.isComposing) {
+              return;
+            }
+            event.preventDefault();
+            if (!isSending && canSend) {
+              onSend();
+            }
+          }}
+          placeholder="Чем я могу помочь вам сегодня?"
+        />
+
+        <div className="agent-chat-compose-right">
+          <button type="button" className="agent-chat-mode-button" disabled={isSending}>
+            Автоматический
+            <span className="material-symbols-rounded" aria-hidden="true">
+              expand_more
+            </span>
           </button>
-        ) : (
-          <button type="submit">Send</button>
-        )}
+
+          <button
+            type="button"
+            className="agent-chat-icon-button muted"
+            disabled
+            title="Voice input is not available yet"
+          >
+            <span className="material-symbols-rounded" aria-hidden="true">
+              mic
+            </span>
+          </button>
+
+          {isSending ? (
+            <button type="button" className="agent-chat-icon-button agent-chat-send-button danger" onClick={onStop}>
+              <span className="material-symbols-rounded" aria-hidden="true">
+                stop
+              </span>
+            </button>
+          ) : (
+            <button
+              type="submit"
+              className="agent-chat-icon-button agent-chat-send-button"
+              disabled={!canSend}
+              title="Send"
+            >
+              <span className="material-symbols-rounded" aria-hidden="true">
+                arrow_upward
+              </span>
+            </button>
+          )}
+        </div>
       </div>
     </form>
+  );
+}
+
+function AgentChatInspector({
+  isOpen,
+  records,
+  selectedRecordId,
+  onSelectRecord,
+  onClose,
+  onOpenSession
+}) {
+  const selectedRecord = records.find((record) => record.id === selectedRecordId) || null;
+
+  function groupLabel(group) {
+    if (group === "thinking") {
+      return "Thinking";
+    }
+    if (group === "sub_session") {
+      return "Sub-session";
+    }
+    return "Log";
+  }
+
+  return (
+    <aside className={`agent-chat-inspector ${isOpen ? "open" : ""}`} aria-hidden={!isOpen}>
+      <div className="agent-chat-inspector-head">
+        <h4>Thinking</h4>
+        <button type="button" className="agent-chat-icon-button" onClick={onClose} aria-label="Close panel">
+          <span className="material-symbols-rounded" aria-hidden="true">
+            close
+          </span>
+        </button>
+      </div>
+
+      <div className="agent-chat-inspector-content">
+        {records.length === 0 ? (
+          <p className="placeholder-text">No process details yet.</p>
+        ) : (
+          <div className="agent-chat-inspector-list">
+            {records.map((item) => (
+              <button
+                key={item.id}
+                type="button"
+                className={`agent-chat-inspector-item ${selectedRecordId === item.id ? "active" : ""}`}
+                onClick={() => onSelectRecord(item.id)}
+              >
+                <div className="agent-chat-inspector-item-head">
+                  <strong>{item.title}</strong>
+                  <span>{formatEventTime(item.createdAt)}</span>
+                </div>
+                <p>{item.preview}</p>
+                <small>{groupLabel(item.group)}</small>
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {selectedRecord ? (
+        <article className="agent-chat-inspector-details">
+          <div className="agent-chat-inspector-item-head">
+            <strong>{selectedRecord.title}</strong>
+            <span>{formatEventTime(selectedRecord.createdAt)}</span>
+          </div>
+          <pre>{selectedRecord.text}</pre>
+          {selectedRecord.group === "sub_session" && selectedRecord.childSessionId ? (
+            <button type="button" onClick={() => onOpenSession(selectedRecord.childSessionId)}>
+              Open sub-session
+            </button>
+          ) : null}
+        </article>
+      ) : null}
+    </aside>
   );
 }
 
@@ -229,8 +381,17 @@ export function AgentChatTab({ agentId }) {
   const [statusText, setStatusText] = useState("Loading sessions...");
   const [optimisticUserEvent, setOptimisticUserEvent] = useState(null);
   const [optimisticAssistantText, setOptimisticAssistantText] = useState("");
+  const [isInspectorOpen, setIsInspectorOpen] = useState(false);
+  const [selectedInspectorRecordId, setSelectedInspectorRecordId] = useState(null);
   const fileInputRef = useRef(null);
   const runStateRef = useRef({ watcherId: 0, sessionId: null, abortController: null });
+
+  useEffect(() => {
+    document.body.classList.add("agent-chat-no-page-scroll");
+    return () => {
+      document.body.classList.remove("agent-chat-no-page-scroll");
+    };
+  }, []);
 
   useEffect(() => {
     let isCancelled = false;
@@ -243,6 +404,8 @@ export function AgentChatTab({ agentId }) {
       setInputText("");
       setOptimisticUserEvent(null);
       setOptimisticAssistantText("");
+      setIsInspectorOpen(false);
+      setSelectedInspectorRecordId(null);
       setIsSending(false);
       runStateRef.current.watcherId += 1;
       runStateRef.current.abortController?.abort();
@@ -581,7 +744,6 @@ export function AgentChatTab({ agentId }) {
     setStatusText("Session deleted.");
   }
 
-  const activeSummary = activeSession?.summary || sessions.find((item) => item.id === activeSessionId) || null;
   const events = Array.isArray(activeSession?.events) ? activeSession.events : [];
   const persistedMessages = events.filter(
     (eventItem) =>
@@ -612,77 +774,232 @@ export function AgentChatTab({ agentId }) {
   }
   const latestRunStatus = latestRunStatusFromEvents(events);
 
-  return (
-    <section className="agent-chat-shell">
-      <AgentChatSessionPanel
-        sessions={sessions}
-        activeSessionId={activeSessionId}
-        isLoadingSessions={isLoadingSessions}
-        isSending={isSending}
-        onCreateSession={() => createSession()}
-        onOpenSession={openSession}
-      />
+  const thinkingRecords = useMemo(() => {
+    const list = chatMessages.flatMap((eventItem, index) => {
+      const eventKey = extractEventKey(eventItem, index);
+      const createdAt = eventItem.message?.createdAt || eventItem.createdAt;
+      const thinkingSegments = (eventItem.message?.segments || [])
+        .map((segment, segmentIndex) => ({ ...segment, segmentIndex }))
+        .filter((segment) => segment.kind === "thinking");
 
-      <div
-        className={`agent-chat-main ${isDragOver ? "drag-over" : ""}`}
-        onDragOver={(event) => {
-          event.preventDefault();
-          setIsDragOver(true);
-        }}
-        onDragLeave={(event) => {
-          const relatedTarget = event.relatedTarget;
-          if (!(relatedTarget instanceof Node) || !event.currentTarget.contains(relatedTarget)) {
-            setIsDragOver(false);
-          }
-        }}
-        onDrop={(event) => {
-          event.preventDefault();
+      return thinkingSegments.map((segment) => {
+        const text = String(segment.text || "").trim();
+        return {
+          id: `${eventKey}-thinking-${segment.segmentIndex}`,
+          group: "thinking",
+          sourceEventKey: eventKey,
+          createdAt,
+          title: thinkingSegments.length > 1 ? `Thought #${segment.segmentIndex + 1}` : "Thought",
+          preview: previewText(text),
+          text: text || "No details"
+        };
+      });
+    });
+
+    return sortByNewest(list);
+  }, [chatMessages]);
+
+  const subSessionRecords = useMemo(() => {
+    const list = events
+      .filter((eventItem) => eventItem.type === "sub_session" && eventItem.subSession)
+      .map((eventItem, index) => ({
+        id: `sub-session-${eventItem.id || index}`,
+        group: "sub_session",
+        createdAt: eventItem.createdAt,
+        title: eventItem.subSession.title || "Sub-session",
+        preview: previewText(eventItem.subSession.childSessionId, "Session created"),
+        text: `Session: ${eventItem.subSession.childSessionId}\nTitle: ${eventItem.subSession.title || "-"}`,
+        childSessionId: eventItem.subSession.childSessionId
+      }));
+
+    return sortByNewest(list);
+  }, [events]);
+
+  const logRecords = useMemo(() => {
+    const statusItems = events
+      .filter((eventItem) => eventItem.type === "run_status" && eventItem.runStatus)
+      .map((eventItem, index) => {
+        const label = eventItem.runStatus.label || eventItem.runStatus.stage || "Status";
+        const details = [eventItem.runStatus.details, eventItem.runStatus.expandedText].filter(Boolean).join("\n\n");
+        return {
+          id: `run-status-${eventItem.id || index}`,
+          group: "log",
+          createdAt: eventItem.createdAt || eventItem.runStatus.createdAt,
+          title: label,
+          preview: previewText(eventItem.runStatus.details || eventItem.runStatus.expandedText, label),
+          text: details || label
+        };
+      });
+
+    const controlItems = events
+      .filter((eventItem) => eventItem.type === "run_control" && eventItem.runControl)
+      .map((eventItem, index) => {
+        const label = `Control: ${eventItem.runControl.action}`;
+        return {
+          id: `run-control-${eventItem.id || index}`,
+          group: "log",
+          createdAt: eventItem.createdAt,
+          title: label,
+          preview: previewText(eventItem.runControl.reason, label),
+          text: `Action: ${eventItem.runControl.action}\nRequested by: ${eventItem.runControl.requestedBy}${
+            eventItem.runControl.reason ? `\nReason: ${eventItem.runControl.reason}` : ""
+          }`
+        };
+      });
+
+    return sortByNewest([...statusItems, ...controlItems]);
+  }, [events]);
+
+  const inspectorRecords = useMemo(
+    () => [...thinkingRecords, ...subSessionRecords, ...logRecords],
+    [thinkingRecords, subSessionRecords, logRecords]
+  );
+
+  const hasInspectorRecords = inspectorRecords.length > 0;
+
+  useEffect(() => {
+    if (!hasInspectorRecords) {
+      setSelectedInspectorRecordId(null);
+      return;
+    }
+    if (!inspectorRecords.some((item) => item.id === selectedInspectorRecordId)) {
+      setSelectedInspectorRecordId(inspectorRecords[0].id);
+    }
+  }, [hasInspectorRecords, inspectorRecords, selectedInspectorRecordId]);
+
+  function openInspector(recordId = null) {
+    if (!hasInspectorRecords) {
+      return;
+    }
+    setIsInspectorOpen(true);
+
+    if (recordId && inspectorRecords.some((item) => item.id === recordId)) {
+      setSelectedInspectorRecordId(recordId);
+      return;
+    }
+
+    setSelectedInspectorRecordId((previous) => {
+      if (previous && inspectorRecords.some((item) => item.id === previous)) {
+        return previous;
+      }
+      return inspectorRecords[0].id;
+    });
+  }
+
+  function handleOpenThinkingPanel(recordId) {
+    openInspector(recordId);
+  }
+
+  return (
+    <section
+      className={`agent-chat-main ${isDragOver ? "drag-over" : ""}`}
+      onDragOver={(event) => {
+        event.preventDefault();
+        setIsDragOver(true);
+      }}
+      onDragLeave={(event) => {
+        const relatedTarget = event.relatedTarget;
+        if (!(relatedTarget instanceof Node) || !event.currentTarget.contains(relatedTarget)) {
           setIsDragOver(false);
-          addFiles(event.dataTransfer?.files);
-        }}
-      >
-        <div className="agent-chat-main-head">
-          <div>
-            <h4>{activeSummary?.title || "Chat"}</h4>
-            <p className="placeholder-text">{activeSummary?.id || "Select or create a session"}</p>
-          </div>
-          <div className="agent-chat-actions">
-            {activeSummary?.parentSessionId ? (
-              <button type="button" onClick={() => openSession(activeSummary.parentSessionId)} disabled={isSending}>
-                Back To Parent
-              </button>
+        }
+      }}
+      onDrop={(event) => {
+        event.preventDefault();
+        setIsDragOver(false);
+        addFiles(event.dataTransfer?.files);
+      }}
+    >
+      <div className="agent-chat-main-head">
+        <div className="agent-chat-session-controls">
+          <select
+            className="agent-chat-session-select"
+            value={activeSessionId || ""}
+            onChange={(event) => openSession(event.target.value)}
+            disabled={isLoadingSessions || isSending || sessions.length === 0}
+          >
+            {sessions.length === 0 ? (
+              <option value="">{isLoadingSessions ? "Loading sessions..." : "No sessions"}</option>
             ) : null}
-            <button
-              type="button"
-              className="danger"
-              onClick={handleDeleteActiveSession}
-              disabled={!activeSessionId || isSending}
-            >
-              Delete
-            </button>
-          </div>
+            {sessions.map((session) => (
+              <option key={session.id} value={session.id}>
+                {session.title}
+              </option>
+            ))}
+          </select>
+          <button type="button" className="agent-chat-icon-button" onClick={() => createSession()} disabled={isSending} title="New session">
+            <span className="material-symbols-rounded" aria-hidden="true">
+              add
+            </span>
+          </button>
+        </div>
+        <div className="agent-chat-actions">
+          <button
+            type="button"
+            className="agent-chat-icon-button"
+            onClick={() => openInspector()}
+            disabled={!hasInspectorRecords}
+            title="Thinking"
+          >
+            <span className="material-symbols-rounded" aria-hidden="true">
+              more_horiz
+            </span>
+          </button>
+          <button
+            type="button"
+            className="agent-chat-icon-button danger"
+            onClick={handleDeleteActiveSession}
+            disabled={!activeSessionId || isSending}
+            title="Delete session"
+          >
+            <span className="material-symbols-rounded" aria-hidden="true">
+              delete
+            </span>
+          </button>
+        </div>
+      </div>
+
+      <div className={`agent-chat-workspace ${isInspectorOpen ? "inspector-open" : ""}`}>
+        <div className="agent-chat-thread">
+          <AgentChatEvents
+            isLoadingSession={isLoadingSession}
+            isSending={isSending}
+            chatMessages={chatMessages}
+            latestRunStatus={latestRunStatus}
+            onOpenThinkingPanel={handleOpenThinkingPanel}
+          />
+
+          <AgentChatComposer
+            inputText={inputText}
+            onInputTextChange={setInputText}
+            isSending={isSending}
+            onSend={handleSend}
+            onStop={handleStop}
+            pendingFiles={pendingFiles}
+            onRemovePendingFile={removePendingFile}
+            onAddFiles={addFiles}
+            fileInputRef={fileInputRef}
+          />
+
+          <p className="agent-chat-status-line placeholder-text">{statusText}</p>
         </div>
 
-        <AgentChatEvents
-          isLoadingSession={isLoadingSession}
-          isSending={isSending}
-          chatMessages={chatMessages}
-          latestRunStatus={latestRunStatus}
-        />
+        {isInspectorOpen ? (
+          <button
+            type="button"
+            className="agent-chat-inspector-overlay"
+            onClick={() => setIsInspectorOpen(false)}
+            aria-label="Close process panel"
+          />
+        ) : null}
 
-        <AgentChatComposer
-          inputText={inputText}
-          onInputTextChange={setInputText}
-          isSending={isSending}
-          onSend={handleSend}
-          onStop={handleStop}
-          pendingFiles={pendingFiles}
-          onRemovePendingFile={removePendingFile}
-          onAddFiles={addFiles}
-          fileInputRef={fileInputRef}
+        <AgentChatInspector
+          isOpen={isInspectorOpen}
+          records={inspectorRecords}
+          selectedRecordId={selectedInspectorRecordId}
+          onSelectRecord={setSelectedInspectorRecordId}
+          onClose={() => setIsInspectorOpen(false)}
+          onOpenSession={openSession}
         />
-
-        <p className="agent-chat-status-line placeholder-text">{statusText}</p>
       </div>
     </section>
   );

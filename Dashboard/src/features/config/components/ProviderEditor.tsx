@@ -1,6 +1,19 @@
 import React from "react";
 import { createPortal } from "react-dom";
 
+function providerIcon(providerId) {
+  if (providerId === "openai-api") {
+    return "auto_awesome";
+  }
+  if (providerId === "openai-oauth") {
+    return "key";
+  }
+  if (providerId === "ollama") {
+    return "deployed_code";
+  }
+  return "hub";
+}
+
 export function ProviderEditor({
   providerCatalog,
   draftConfig,
@@ -33,9 +46,14 @@ export function ProviderEditor({
 
   return (
     <div className="providers-shell">
-      <section className="entry-editor-card">
-        <h3>Providers</h3>
-        <p className="placeholder-text">Choose a provider to configure API key and model in a modal dialog.</p>
+      <section className="entry-editor-card providers-intro-card">
+        <h3>LLM Providers</h3>
+        <p className="placeholder-text">
+          Configure credentials and endpoints for providers. At least one provider is required for agents.
+        </p>
+        <div className="providers-note">
+          When you add a provider, choose a model and run a completion test before saving.
+        </div>
         {customModelsCount > 0 ? (
           <p className="placeholder-text">
             Config has {customModelsCount} custom model entries. They are preserved and available in raw mode.
@@ -43,7 +61,7 @@ export function ProviderEditor({
         ) : null}
       </section>
 
-      <section className="providers-grid">
+      <section className="providers-list">
         {providerCatalog.map((provider) => {
           const providerEntry = getProviderEntry(draftConfig.models, provider.id)?.entry;
           const entryModel = String(providerEntry?.model || provider.defaultEntry.model || "").trim();
@@ -54,24 +72,29 @@ export function ProviderEditor({
             !Boolean(String(providerEntry?.apiKey || "").trim()) &&
             Boolean(entryModel && entryURL);
           const configured = configuredViaEnvironment || providerIsConfigured(provider, providerEntry);
-          const actionText = configured ? "Configure" : provider.requiresApiKey ? "Add Key" : "Setup";
+          const actionText = configured ? "Manage" : provider.requiresApiKey ? "Add key" : "Setup";
           const configuredBadgeText = configuredViaEnvironment ? "env" : configured ? "configured" : "not set";
 
           return (
             <button
               key={provider.id}
               type="button"
-              className={`provider-card ${configured ? "configured" : ""}`}
+              className={`provider-card provider-list-item ${configured ? "configured" : ""}`}
               onClick={() => onOpenProviderModal(provider.id)}
             >
-              <div className="provider-card-head">
-                <h4>{provider.title}</h4>
-                <span className={`provider-state ${configured ? "on" : "off"}`}>{configuredBadgeText}</span>
-              </div>
-              <p>{provider.description}</p>
-              <span className="provider-model-line">
-                Model: {providerEntry?.model || provider.modelHint}
+              <span className="provider-list-icon material-symbols-rounded" aria-hidden="true">
+                {providerIcon(provider.id)}
               </span>
+              <div className="provider-list-main">
+                <div className="provider-card-head">
+                  <h4>{provider.title}</h4>
+                  <span className={`provider-state ${configured ? "on" : "off"}`}>{configuredBadgeText}</span>
+                </div>
+                <p>{provider.description}</p>
+                <span className="provider-model-line">
+                  Default model: {providerEntry?.model || provider.modelHint}
+                </span>
+              </div>
               <span className="provider-card-action">{actionText}</span>
             </button>
           );

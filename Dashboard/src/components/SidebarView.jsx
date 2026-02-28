@@ -1,17 +1,38 @@
 import React from "react";
 
-export function SidebarView({ items, activeItemId, isCompact, onToggleCompact, onSelect }) {
+export function SidebarView({
+  items,
+  activeItemId,
+  isCompact,
+  onToggleCompact,
+  onSelect,
+  isMobileOpen = false,
+  onRequestClose = () => {}
+}) {
   return (
-    <aside className={`sidebar ${isCompact ? "compact" : "full"}`}>
+    <aside className={`sidebar ${isCompact ? "compact" : "full"} ${isMobileOpen ? "mobile-open" : ""}`}>
       <div className="sidebar-head">
-        {!isCompact && <strong className="sidebar-brand">SlopOverlord</strong>}
-        <button
-          className="sidebar-toggle"
-          type="button"
-          onClick={onToggleCompact}
-          aria-label={isCompact ? "Expand sidebar" : "Collapse sidebar"}
-        >
-          {isCompact ? ">>" : "<<"}
+        {isCompact ? (
+          <button className="sidebar-logo-launch" type="button" onClick={onToggleCompact} aria-label="Expand menu">
+            <img src="/so_logo.svg" alt="" className="sidebar-logo" aria-hidden="true" />
+          </button>
+        ) : (
+          <>
+            <div className="sidebar-brand-wrap">
+              <img src="/so_logo.svg" alt="" className="sidebar-logo" aria-hidden="true" />
+              <strong className="sidebar-brand">SlopOverlord</strong>
+            </div>
+            <button className="sidebar-toggle" type="button" onClick={onToggleCompact} aria-label="Collapse menu">
+              <span className="material-symbols-rounded" aria-hidden="true">
+                chevron_left
+              </span>
+            </button>
+          </>
+        )}
+        <button className="sidebar-mobile-close" type="button" onClick={onRequestClose} aria-label="Close menu">
+          <span className="material-symbols-rounded" aria-hidden="true">
+            close
+          </span>
         </button>
       </div>
 
@@ -21,7 +42,10 @@ export function SidebarView({ items, activeItemId, isCompact, onToggleCompact, o
             key={item.id}
             type="button"
             className={`sidebar-item ${activeItemId === item.id ? "active" : ""}`}
-            onClick={() => onSelect(item.id)}
+            onClick={() => {
+              onSelect(item.id);
+              onRequestClose();
+            }}
             title={item.label.title}
           >
             <span className="sidebar-icon">{item.label.icon}</span>

@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { createDependencies } from "./app/di/createDependencies";
 import { DEFAULT_AGENT_TAB } from "./app/routing/dashboardRouteAdapter";
 import { useDashboardRoute } from "./app/routing/useDashboardRoute";
@@ -24,9 +24,36 @@ export function App() {
   const runtime = useRuntimeOverview(dependencies.coreApi);
   const { route, setSection, setConfigSection, setAgentRoute } = useDashboardRoute();
   const [sidebarCompact, setSidebarCompact] = useState(false);
+  const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
+
+  useEffect(() => {
+    document.body.classList.toggle("mobile-menu-open", mobileSidebarOpen);
+    return () => {
+      document.body.classList.remove("mobile-menu-open");
+    };
+  }, [mobileSidebarOpen]);
+
+  useEffect(() => {
+    const mediaQuery = window.matchMedia("(min-width: 1001px)");
+    function handleChange(event: MediaQueryListEvent | MediaQueryList) {
+      if (event.matches) {
+        setMobileSidebarOpen(false);
+      }
+    }
+    handleChange(mediaQuery);
+
+    if (typeof mediaQuery.addEventListener === "function") {
+      mediaQuery.addEventListener("change", handleChange);
+      return () => mediaQuery.removeEventListener("change", handleChange);
+    }
+
+    mediaQuery.addListener(handleChange);
+    return () => mediaQuery.removeListener(handleChange);
+  }, []);
 
   function onSelectSidebar(nextSection: string) {
     setSection(nextSection);
+    setMobileSidebarOpen(false);
   }
 
   function onAgentRouteChange(agentId: string | null, agentTab: string | null = DEFAULT_AGENT_TAB) {
@@ -107,12 +134,43 @@ export function App() {
         isCompact={sidebarCompact}
         onToggleCompact={() => setSidebarCompact((value) => !value)}
         onSelect={onSelectSidebar}
+        isMobileOpen={mobileSidebarOpen}
+        onRequestClose={() => setMobileSidebarOpen(false)}
+      />
+      <button
+        type="button"
+        className={`sidebar-mobile-overlay ${mobileSidebarOpen ? "open" : ""}`}
+        onClick={() => setMobileSidebarOpen(false)}
+        aria-label="Close menu"
       />
 
       <div className={`page ${activeItem.id === "config" ? "page-config" : ""}`}>
         <header className="hero">
-          <h1>SlopOverlord Dashboard</h1>
-          <p>Section: {activeItem.label.title}</p>
+          <div className="hero-mobile-row">
+            <button
+              type="button"
+              className="mobile-sidebar-toggle"
+              onClick={() =>
+                setMobileSidebarOpen((value) => {
+                  const next = !value;
+                  if (next) {
+                    setSidebarCompact(false);
+                  }
+                  return next;
+                })
+              }
+              aria-label={mobileSidebarOpen ? "Close menu" : "Open menu"}
+              aria-expanded={mobileSidebarOpen}
+            >
+              <span className="material-symbols-rounded" aria-hidden="true">
+                menu
+              </span>
+            </button>
+            <div>
+              <h1>SlopOverlord Dashboard</h1>
+              <p>Section: {activeItem.label.title}</p>
+            </div>
+          </div>
         </header>
         {activeItem.content}
       </div>
