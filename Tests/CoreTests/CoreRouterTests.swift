@@ -109,6 +109,27 @@ func getConfigEndpoint() async throws {
 }
 
 @Test
+func serviceSupportsInMemoryPersistenceBuilder() async throws {
+    let sqlitePath = FileManager.default.temporaryDirectory
+        .appendingPathComponent("core-inmemory-\(UUID().uuidString).sqlite")
+        .path
+
+    var config = CoreConfig.default
+    config.sqlitePath = sqlitePath
+
+    let service = CoreService(
+        config: config,
+        persistenceBuilder: InMemoryCorePersistenceBuilder()
+    )
+    let router = CoreRouter(service: service)
+
+    let body = try JSONEncoder().encode(ChannelMessageRequest(userId: "u1", content: "respond please"))
+    let response = await router.handle(method: "POST", path: "/v1/channels/general/messages", body: body)
+    #expect(response.status == 200)
+    #expect(!FileManager.default.fileExists(atPath: sqlitePath))
+}
+
+@Test
 func putConfigEndpoint() async throws {
     let tempPath = FileManager.default.temporaryDirectory
         .appendingPathComponent("slopoverlord-config-\(UUID().uuidString).json")

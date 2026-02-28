@@ -60,6 +60,7 @@ struct CoreMain: AsyncParsableCommand {
 
         let resolvedConfigPath = explicitConfigPath ??
             workspaceRoot.appendingPathComponent(CoreConfig.defaultConfigFileName).path
+        try ensureConfigFileExists(path: resolvedConfigPath, config: config, logger: logger)
         let service = CoreService(config: config, configPath: resolvedConfigPath)
         let router = CoreRouter(service: service)
         let server = CoreHTTPServer(
@@ -134,6 +135,23 @@ private func normalizedConfigPath(_ raw: String?) -> String? {
         return nil
     }
     return trimmed
+}
+
+private func ensureConfigFileExists(path: String, config: CoreConfig, logger: Logger) throws {
+    let fileManager = FileManager.default
+    let configURL = URL(fileURLWithPath: path)
+    if fileManager.fileExists(atPath: configURL.path) {
+        return
+    }
+
+    let parentDirectory = configURL.deletingLastPathComponent()
+    try fileManager.createDirectory(at: parentDirectory, withIntermediateDirectories: true)
+
+    let encoder = JSONEncoder()
+    encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+    let payload = try encoder.encode(config) + Data("\n".utf8)
+    try payload.write(to: configURL, options: .atomic)
+    logger.info("Config initialized at \(configURL.path)")
 }
 
 private func prepareWorkspace(config: inout CoreConfig, logger: Logger) throws -> URL {

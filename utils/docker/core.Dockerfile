@@ -42,12 +42,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libgcc-s1 \
     libstdc++6 \
     && rm -rf /var/lib/apt/lists/*
-WORKDIR /usr/lib/slopoverlord
-RUN mkdir -p /etc/slopoverlord /var/lib/slopoverlord
+WORKDIR /root
+RUN mkdir -p /root/workspace /etc/slopoverlord /var/lib/slopoverlord
 COPY --from=builder /usr/lib/swift /usr/lib/swift
 COPY --from=builder /artifacts/slopoverlord-core /usr/bin/slopoverlord-core
 COPY --from=builder /artifacts/SlopOverlord_Core.resources /usr/lib/slopoverlord/SlopOverlord_Core.resources
 COPY --from=builder /artifacts/SlopOverlord_Core.bundle /usr/lib/slopoverlord/SlopOverlord_Core.bundle
-COPY slopoverlord.config.json /etc/slopoverlord/slopoverlord.config.json
 EXPOSE 25101
-CMD ["/usr/bin/slopoverlord-core", "--config-path", "/etc/slopoverlord/slopoverlord.config.json"]
+CMD ["/usr/bin/slopoverlord-core"]
