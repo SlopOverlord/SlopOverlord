@@ -81,7 +81,7 @@ public actor CoreService {
     public enum SystemLogsError: Error {
         case storageFailure
     }
-    
+
     public enum ActorBoardError: Error {
         case invalidPayload
         case actorNotFound
@@ -89,6 +89,15 @@ public actor CoreService {
         case teamNotFound
         case protectedActor
         case storageFailure
+    }
+
+    public enum ProjectError: Error {
+        case invalidProjectID
+        case invalidChannelID
+        case invalidTaskID
+        case invalidPayload
+        case notFound
+        case conflict
     }
 
     private let runtime: RuntimeSystem
@@ -229,6 +238,215 @@ public actor CoreService {
     /// Exposes worker snapshots for observability endpoints.
     public func workerSnapshots() async -> [WorkerSnapshot] {
         await runtime.workerSnapshots()
+    }
+
+    /// Lists dashboard projects with channels and task board data.
+    public func listProjects() async -> [ProjectRecord] {
+        await store.listProjects()
+    }
+
+    /// Returns one dashboard project by identifier.
+    public func getProject(id: String) async throws -> ProjectRecord {
+        guard let normalizedID = normalizedProjectID(id) else {
+            throw ProjectError.invalidProjectID
+        }
+        guard let project = await store.project(id: normalizedID) else {
+            throw ProjectError.notFound
+        }
+        return project
+    }
+
+    /// Creates a new dashboard project.
+    public func createProject(_ request: ProjectCreateRequest) async throws -> ProjectRecord {
+        let now = Date()
+        let normalizedName = try normalizeProjectName(request.name)
+        let normalizedDescription = normalizeProjectDescription(request.description)
+        let channels = try normalizeInitialProjectChannels(request.channels, fallbackName: normalizedName)
+        let project = ProjectRecord(
+            id: UUID().uuidString,
+            name: normalizedName,
+            description: normalizedDescription,
+            channels: channels,
+            tasks: [],
+            createdAt: now,
+            updatedAt: now
+        )
+        await store.saveProject(project)
+        return project
+    }
+
+    /// Updates dashboard project metadata.
+    public func updateProject(projectID: String, request: ProjectUpdateRequest) async throws -> ProjectRecord {
+        guard let normalizedID = normalizedProjectID(projectID) else {
+            throw ProjectError.invalidProjectID
+        }
+        guard var project = await store.project(id: normalizedID) else {
+            throw ProjectError.notFound
+        }
+
+        if let nextName = request.name {
+            project.name = try normalizeProjectName(nextName)
+        }
+        if let nextDescription = request.description {
+            project.description = normalizeProjectDescription(nextDescription)
+        }
+
+        project.updatedAt = Date()
+        await store.saveProject(project)
+        return project
+    }
+
+    /// Deletes one dashboard project and nested board entities.
+    public func deleteProject(projectID: String) async throws {
+        guard let normalizedID = normalizedProjectID(projectID) else {
+            throw ProjectError.invalidProjectID
+        }
+        guard await store.project(id: normalizedID) != nil else {
+            throw ProjectError.notFound
+        }
+        await store.deleteProject(id: normalizedID)
+    }
+
+    /// Adds a channel to a dashboard project.
+    public func createProjectChannel(
+        projectID: String,
+        request: ProjectChannelCreateRequest
+    ) async throws -> ProjectRecord {
+        guard let normalizedID = normalizedProjectID(projectID) else {
+            throw ProjectError.invalidProjectID
+        }
+        guard var project = await store.project(id: normalizedID) else {
+            throw ProjectError.notFound
+        }
+
+        let title = normalizeChannelTitle(request.title)
+        let channelID = try normalizedChannelID(request.channelId)
+        if project.channels.contains(where: { $0.channelId == channelID }) {
+            throw ProjectError.conflict
+        }
+
+        project.channels.append(
+            ProjectChannel(
+                id: UUID().uuidString,
+                title: title,
+                channelId: channelID,
+                createdAt: Date()
+            )
+        )
+        project.updatedAt = Date()
+        await store.saveProject(project)
+        return project
+    }
+
+    /// Removes a channel from a dashboard project.
+    public func deleteProjectChannel(projectID: String, channelID: String) async throws -> ProjectRecord {
+        guard let normalizedID = normalizedProjectID(projectID) else {
+            throw ProjectError.invalidProjectID
+        }
+        guard let normalizedChannel = normalizedEntityID(channelID) else {
+            throw ProjectError.invalidChannelID
+        }
+        guard var project = await store.project(id: normalizedID) else {
+            throw ProjectError.notFound
+        }
+
+        guard project.channels.contains(where: { $0.id == normalizedChannel }) else {
+            throw ProjectError.notFound
+        }
+        if project.channels.count <= 1 {
+            throw ProjectError.invalidPayload
+        }
+
+        project.channels.removeAll(where: { $0.id == normalizedChannel })
+        project.updatedAt = Date()
+        await store.saveProject(project)
+        return project
+    }
+
+    /// Creates a new task inside project board.
+    public func createProjectTask(projectID: String, request: ProjectTaskCreateRequest) async throws -> ProjectRecord {
+        guard let normalizedID = normalizedProjectID(projectID) else {
+            throw ProjectError.invalidProjectID
+        }
+        guard var project = await store.project(id: normalizedID) else {
+            throw ProjectError.notFound
+        }
+
+        let now = Date()
+        project.tasks.append(
+            ProjectTask(
+                id: UUID().uuidString,
+                title: try normalizeTaskTitle(request.title),
+                description: normalizeTaskDescription(request.description),
+                priority: try normalizeTaskPriority(request.priority),
+                status: try normalizeTaskStatus(request.status),
+                createdAt: now,
+                updatedAt: now
+            )
+        )
+        project.updatedAt = now
+        await store.saveProject(project)
+        return project
+    }
+
+    /// Updates one task inside project board.
+    public func updateProjectTask(
+        projectID: String,
+        taskID: String,
+        request: ProjectTaskUpdateRequest
+    ) async throws -> ProjectRecord {
+        guard let normalizedProject = normalizedProjectID(projectID) else {
+            throw ProjectError.invalidProjectID
+        }
+        guard let normalizedTask = normalizedEntityID(taskID) else {
+            throw ProjectError.invalidTaskID
+        }
+        guard var project = await store.project(id: normalizedProject) else {
+            throw ProjectError.notFound
+        }
+        guard let taskIndex = project.tasks.firstIndex(where: { $0.id == normalizedTask }) else {
+            throw ProjectError.notFound
+        }
+
+        var task = project.tasks[taskIndex]
+        if let title = request.title {
+            task.title = try normalizeTaskTitle(title)
+        }
+        if let description = request.description {
+            task.description = normalizeTaskDescription(description)
+        }
+        if let priority = request.priority {
+            task.priority = try normalizeTaskPriority(priority)
+        }
+        if let status = request.status {
+            task.status = try normalizeTaskStatus(status)
+        }
+        task.updatedAt = Date()
+        project.tasks[taskIndex] = task
+        project.updatedAt = Date()
+        await store.saveProject(project)
+        return project
+    }
+
+    /// Removes one task from project board.
+    public func deleteProjectTask(projectID: String, taskID: String) async throws -> ProjectRecord {
+        guard let normalizedProject = normalizedProjectID(projectID) else {
+            throw ProjectError.invalidProjectID
+        }
+        guard let normalizedTask = normalizedEntityID(taskID) else {
+            throw ProjectError.invalidTaskID
+        }
+        guard var project = await store.project(id: normalizedProject) else {
+            throw ProjectError.notFound
+        }
+        guard project.tasks.contains(where: { $0.id == normalizedTask }) else {
+            throw ProjectError.notFound
+        }
+
+        project.tasks.removeAll(where: { $0.id == normalizedTask })
+        project.updatedAt = Date()
+        await store.saveProject(project)
+        return project
     }
 
     /// Returns currently active runtime config snapshot.
@@ -1005,6 +1223,127 @@ public actor CoreService {
         let defaultModel = modelProvider?.models.first ?? resolvedModels.first
         await runtime.updateModelProvider(modelProvider: modelProvider, defaultModel: defaultModel)
         return currentConfig
+    }
+
+    private func normalizeProjectName(_ raw: String) throws -> String {
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, trimmed.count <= 160 else {
+            throw ProjectError.invalidPayload
+        }
+        return trimmed
+    }
+
+    private func normalizeProjectDescription(_ raw: String?) -> String {
+        let value = (raw ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        return String(value.prefix(2_000))
+    }
+
+    private func normalizeInitialProjectChannels(
+        _ channels: [ProjectChannelCreateRequest],
+        fallbackName: String
+    ) throws -> [ProjectChannel] {
+        if channels.isEmpty {
+            let slug = slugify(fallbackName)
+            return [
+                ProjectChannel(
+                    id: UUID().uuidString,
+                    title: "Main channel",
+                    channelId: slug.isEmpty ? "project-main" : "\(slug)-main",
+                    createdAt: Date()
+                )
+            ]
+        }
+
+        var normalized: [ProjectChannel] = []
+        var uniqueChannelIDs: Set<String> = []
+        for channel in channels {
+            let title = normalizeChannelTitle(channel.title)
+            let channelID = try normalizedChannelID(channel.channelId)
+            guard uniqueChannelIDs.insert(channelID).inserted else {
+                throw ProjectError.conflict
+            }
+            normalized.append(
+                ProjectChannel(
+                    id: UUID().uuidString,
+                    title: title,
+                    channelId: channelID,
+                    createdAt: Date()
+                )
+            )
+        }
+        return normalized
+    }
+
+    private func normalizeTaskTitle(_ raw: String) throws -> String {
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            throw ProjectError.invalidPayload
+        }
+        return String(trimmed.prefix(240))
+    }
+
+    private func normalizeTaskDescription(_ raw: String?) -> String {
+        let value = (raw ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        return String(value.prefix(8_000))
+    }
+
+    private func normalizeTaskPriority(_ raw: String) throws -> String {
+        let value = raw.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        let allowed = Set(["low", "medium", "high"])
+        guard allowed.contains(value) else {
+            throw ProjectError.invalidPayload
+        }
+        return value
+    }
+
+    private func normalizeTaskStatus(_ raw: String) throws -> String {
+        let value = raw.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        let allowed = Set(["backlog", "ready", "in_progress", "done"])
+        guard allowed.contains(value) else {
+            throw ProjectError.invalidPayload
+        }
+        return value
+    }
+
+    private func normalizeChannelTitle(_ raw: String) -> String {
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            return "Channel"
+        }
+        return String(trimmed.prefix(160))
+    }
+
+    private func normalizedProjectID(_ raw: String) -> String? {
+        normalizedEntityID(raw)
+    }
+
+    private func normalizedEntityID(_ raw: String) -> String? {
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            return nil
+        }
+
+        let allowed = CharacterSet(charactersIn: "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_.")
+        guard trimmed.rangeOfCharacter(from: allowed.inverted) == nil, trimmed.count <= 180 else {
+            return nil
+        }
+
+        return trimmed
+    }
+
+    private func normalizedChannelID(_ raw: String) throws -> String {
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        let allowed = CharacterSet(charactersIn: "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_.:/")
+        guard !trimmed.isEmpty, trimmed.count <= 200, trimmed.rangeOfCharacter(from: allowed.inverted) == nil else {
+            throw ProjectError.invalidChannelID
+        }
+        return trimmed
+    }
+
+    private func slugify(_ raw: String) -> String {
+        let lower = raw.lowercased()
+        let separated = lower.replacingOccurrences(of: "[^a-z0-9]+", with: "-", options: .regularExpression)
+        return separated.trimmingCharacters(in: CharacterSet(charactersIn: "-"))
     }
 
     private func availableAgentModels() -> [ProviderModelOption] {

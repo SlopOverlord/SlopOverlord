@@ -18,6 +18,7 @@ public actor SQLiteStore: PersistenceStore {
     private var fallbackEvents: [EventEnvelope] = []
     private var fallbackBulletins: [MemoryBulletin] = []
     private var fallbackArtifacts: [String: String] = [:]
+    private var fallbackProjects: [String: ProjectRecord] = [:]
 
     /// Creates a persistence store and applies schema when SQLite is available.
     public init(path: String, schemaSQL: String) {
@@ -286,7 +287,338 @@ public actor SQLiteStore: PersistenceStore {
 #endif
     }
 
+    public func listProjects() async -> [ProjectRecord] {
 #if canImport(SQLite3)
+        guard let db else {
+            return fallbackProjects.values.sorted { $0.createdAt < $1.createdAt }
+        }
+
+        let sql =
+            """
+            SELECT id, name, description, created_at, updated_at
+            FROM dashboard_projects
+            ORDER BY created_at ASC;
+            """
+
+        var statement: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK else {
+            return fallbackProjects.values.sorted { $0.createdAt < $1.createdAt }
+        }
+        defer { sqlite3_finalize(statement) }
+
+        var result: [ProjectRecord] = []
+        while sqlite3_step(statement) == SQLITE_ROW {
+            guard
+                let idPtr = sqlite3_column_text(statement, 0),
+                let namePtr = sqlite3_column_text(statement, 1),
+                let descriptionPtr = sqlite3_column_text(statement, 2),
+                let createdAtPtr = sqlite3_column_text(statement, 3),
+                let updatedAtPtr = sqlite3_column_text(statement, 4)
+            else {
+                continue
+            }
+
+            let id = String(cString: idPtr)
+            let name = String(cString: namePtr)
+            let description = String(cString: descriptionPtr)
+            let createdAt = isoFormatter.date(from: String(cString: createdAtPtr)) ?? Date()
+            let updatedAt = isoFormatter.date(from: String(cString: updatedAtPtr)) ?? createdAt
+            let channels = loadProjectChannels(db: db, projectID: id)
+            let tasks = loadProjectTasks(db: db, projectID: id)
+            result.append(
+                ProjectRecord(
+                    id: id,
+                    name: name,
+                    description: description,
+                    channels: channels,
+                    tasks: tasks,
+                    createdAt: createdAt,
+                    updatedAt: updatedAt
+                )
+            )
+        }
+
+        if result.isEmpty {
+            return fallbackProjects.values.sorted { $0.createdAt < $1.createdAt }
+        }
+        return result
+#else
+        return fallbackProjects.values.sorted { $0.createdAt < $1.createdAt }
+#endif
+    }
+
+    public func project(id: String) async -> ProjectRecord? {
+#if canImport(SQLite3)
+        if let db {
+            let sql =
+                """
+                SELECT id, name, description, created_at, updated_at
+                FROM dashboard_projects
+                WHERE id = ?
+                LIMIT 1;
+                """
+
+            var statement: OpaquePointer?
+            guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK else {
+                return fallbackProjects[id]
+            }
+            defer { sqlite3_finalize(statement) }
+
+            bindText(id, at: 1, statement: statement)
+            if sqlite3_step(statement) == SQLITE_ROW,
+               let idPtr = sqlite3_column_text(statement, 0),
+               let namePtr = sqlite3_column_text(statement, 1),
+               let descriptionPtr = sqlite3_column_text(statement, 2),
+               let createdAtPtr = sqlite3_column_text(statement, 3),
+               let updatedAtPtr = sqlite3_column_text(statement, 4) {
+                let projectID = String(cString: idPtr)
+                let createdAt = isoFormatter.date(from: String(cString: createdAtPtr)) ?? Date()
+                let updatedAt = isoFormatter.date(from: String(cString: updatedAtPtr)) ?? createdAt
+                return ProjectRecord(
+                    id: projectID,
+                    name: String(cString: namePtr),
+                    description: String(cString: descriptionPtr),
+                    channels: loadProjectChannels(db: db, projectID: projectID),
+                    tasks: loadProjectTasks(db: db, projectID: projectID),
+                    createdAt: createdAt,
+                    updatedAt: updatedAt
+                )
+            }
+        }
+#endif
+        return fallbackProjects[id]
+    }
+
+    public func saveProject(_ project: ProjectRecord) async {
+        fallbackProjects[project.id] = project
+#if canImport(SQLite3)
+        guard let db else {
+            return
+        }
+
+        let projectSQL =
+            """
+            INSERT OR REPLACE INTO dashboard_projects(
+                id,
+                name,
+                description,
+                created_at,
+                updated_at
+            ) VALUES(?, ?, ?, ?, ?);
+            """
+
+        var projectStatement: OpaquePointer?
+        guard sqlite3_prepare_v2(db, projectSQL, -1, &projectStatement, nil) == SQLITE_OK else {
+            return
+        }
+        defer { sqlite3_finalize(projectStatement) }
+
+        bindText(project.id, at: 1, statement: projectStatement)
+        bindText(project.name, at: 2, statement: projectStatement)
+        bindText(project.description, at: 3, statement: projectStatement)
+        bindText(isoFormatter.string(from: project.createdAt), at: 4, statement: projectStatement)
+        bindText(isoFormatter.string(from: project.updatedAt), at: 5, statement: projectStatement)
+        guard sqlite3_step(projectStatement) == SQLITE_DONE else {
+            return
+        }
+
+        removeProjectChildren(db: db, projectID: project.id)
+
+        let channelSQL =
+            """
+            INSERT INTO dashboard_project_channels(
+                id,
+                project_id,
+                title,
+                channel_id,
+                created_at
+            ) VALUES(?, ?, ?, ?, ?);
+            """
+
+        for channel in project.channels {
+            var channelStatement: OpaquePointer?
+            guard sqlite3_prepare_v2(db, channelSQL, -1, &channelStatement, nil) == SQLITE_OK else {
+                continue
+            }
+            defer { sqlite3_finalize(channelStatement) }
+            bindText(channel.id, at: 1, statement: channelStatement)
+            bindText(project.id, at: 2, statement: channelStatement)
+            bindText(channel.title, at: 3, statement: channelStatement)
+            bindText(channel.channelId, at: 4, statement: channelStatement)
+            bindText(isoFormatter.string(from: channel.createdAt), at: 5, statement: channelStatement)
+            _ = sqlite3_step(channelStatement)
+        }
+
+        let taskSQL =
+            """
+            INSERT INTO dashboard_project_tasks(
+                id,
+                project_id,
+                title,
+                description,
+                priority,
+                status,
+                created_at,
+                updated_at
+            ) VALUES(?, ?, ?, ?, ?, ?, ?, ?);
+            """
+
+        for task in project.tasks {
+            var taskStatement: OpaquePointer?
+            guard sqlite3_prepare_v2(db, taskSQL, -1, &taskStatement, nil) == SQLITE_OK else {
+                continue
+            }
+            defer { sqlite3_finalize(taskStatement) }
+            bindText(task.id, at: 1, statement: taskStatement)
+            bindText(project.id, at: 2, statement: taskStatement)
+            bindText(task.title, at: 3, statement: taskStatement)
+            bindText(task.description, at: 4, statement: taskStatement)
+            bindText(task.priority, at: 5, statement: taskStatement)
+            bindText(task.status, at: 6, statement: taskStatement)
+            bindText(isoFormatter.string(from: task.createdAt), at: 7, statement: taskStatement)
+            bindText(isoFormatter.string(from: task.updatedAt), at: 8, statement: taskStatement)
+            _ = sqlite3_step(taskStatement)
+        }
+#endif
+    }
+
+    public func deleteProject(id: String) async {
+        fallbackProjects[id] = nil
+#if canImport(SQLite3)
+        guard let db else {
+            return
+        }
+
+        removeProjectChildren(db: db, projectID: id)
+
+        let sql =
+            """
+            DELETE FROM dashboard_projects
+            WHERE id = ?;
+            """
+        var statement: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK else {
+            return
+        }
+        defer { sqlite3_finalize(statement) }
+        bindText(id, at: 1, statement: statement)
+        _ = sqlite3_step(statement)
+#endif
+    }
+
+#if canImport(SQLite3)
+    private func removeProjectChildren(db: OpaquePointer, projectID: String) {
+        let deleteChannelsSQL =
+            """
+            DELETE FROM dashboard_project_channels
+            WHERE project_id = ?;
+            """
+        var channelsStatement: OpaquePointer?
+        if sqlite3_prepare_v2(db, deleteChannelsSQL, -1, &channelsStatement, nil) == SQLITE_OK {
+            defer { sqlite3_finalize(channelsStatement) }
+            bindText(projectID, at: 1, statement: channelsStatement)
+            _ = sqlite3_step(channelsStatement)
+        }
+
+        let deleteTasksSQL =
+            """
+            DELETE FROM dashboard_project_tasks
+            WHERE project_id = ?;
+            """
+        var tasksStatement: OpaquePointer?
+        if sqlite3_prepare_v2(db, deleteTasksSQL, -1, &tasksStatement, nil) == SQLITE_OK {
+            defer { sqlite3_finalize(tasksStatement) }
+            bindText(projectID, at: 1, statement: tasksStatement)
+            _ = sqlite3_step(tasksStatement)
+        }
+    }
+
+    private func loadProjectChannels(db: OpaquePointer, projectID: String) -> [ProjectChannel] {
+        let sql =
+            """
+            SELECT id, title, channel_id, created_at
+            FROM dashboard_project_channels
+            WHERE project_id = ?
+            ORDER BY created_at ASC;
+            """
+
+        var statement: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK else {
+            return []
+        }
+        defer { sqlite3_finalize(statement) }
+        bindText(projectID, at: 1, statement: statement)
+
+        var result: [ProjectChannel] = []
+        while sqlite3_step(statement) == SQLITE_ROW {
+            guard
+                let idPtr = sqlite3_column_text(statement, 0),
+                let titlePtr = sqlite3_column_text(statement, 1),
+                let channelIDPtr = sqlite3_column_text(statement, 2),
+                let createdAtPtr = sqlite3_column_text(statement, 3)
+            else {
+                continue
+            }
+            result.append(
+                ProjectChannel(
+                    id: String(cString: idPtr),
+                    title: String(cString: titlePtr),
+                    channelId: String(cString: channelIDPtr),
+                    createdAt: isoFormatter.date(from: String(cString: createdAtPtr)) ?? Date()
+                )
+            )
+        }
+
+        return result
+    }
+
+    private func loadProjectTasks(db: OpaquePointer, projectID: String) -> [ProjectTask] {
+        let sql =
+            """
+            SELECT id, title, description, priority, status, created_at, updated_at
+            FROM dashboard_project_tasks
+            WHERE project_id = ?
+            ORDER BY created_at ASC;
+            """
+
+        var statement: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK else {
+            return []
+        }
+        defer { sqlite3_finalize(statement) }
+        bindText(projectID, at: 1, statement: statement)
+
+        var result: [ProjectTask] = []
+        while sqlite3_step(statement) == SQLITE_ROW {
+            guard
+                let idPtr = sqlite3_column_text(statement, 0),
+                let titlePtr = sqlite3_column_text(statement, 1),
+                let descriptionPtr = sqlite3_column_text(statement, 2),
+                let priorityPtr = sqlite3_column_text(statement, 3),
+                let statusPtr = sqlite3_column_text(statement, 4),
+                let createdAtPtr = sqlite3_column_text(statement, 5),
+                let updatedAtPtr = sqlite3_column_text(statement, 6)
+            else {
+                continue
+            }
+            let createdAt = isoFormatter.date(from: String(cString: createdAtPtr)) ?? Date()
+            let updatedAt = isoFormatter.date(from: String(cString: updatedAtPtr)) ?? createdAt
+            result.append(
+                ProjectTask(
+                    id: String(cString: idPtr),
+                    title: String(cString: titlePtr),
+                    description: String(cString: descriptionPtr),
+                    priority: String(cString: priorityPtr),
+                    status: String(cString: statusPtr),
+                    createdAt: createdAt,
+                    updatedAt: updatedAt
+                )
+            )
+        }
+
+        return result
+    }
+
     private func bindText(_ value: String, at index: Int32, statement: OpaquePointer?) {
         sqlite3_bind_text(statement, index, (value as NSString).utf8String, -1, sqliteTransient)
     }
