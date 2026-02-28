@@ -746,3 +746,168 @@ public struct OpenAIProviderStatusResponse: Codable, Sendable {
         self.hasAnyKey = hasAnyKey
     }
 }
+
+public enum ActorKind: String, Codable, Sendable {
+    case agent
+    case human
+    case action
+}
+
+public enum ActorLinkDirection: String, Codable, Sendable {
+    case oneWay = "one_way"
+    case twoWay = "two_way"
+}
+
+public enum ActorCommunicationType: String, Codable, Sendable {
+    case chat
+    case task
+    case event
+}
+
+public enum ActorSocketPosition: String, Codable, Sendable {
+    case top
+    case right
+    case bottom
+    case left
+}
+
+public struct ActorNode: Codable, Sendable, Equatable {
+    public var id: String
+    public var displayName: String
+    public var kind: ActorKind
+    public var linkedAgentId: String?
+    public var channelId: String?
+    public var role: String?
+    public var positionX: Double
+    public var positionY: Double
+    public var createdAt: Date
+
+    public init(
+        id: String,
+        displayName: String,
+        kind: ActorKind,
+        linkedAgentId: String? = nil,
+        channelId: String? = nil,
+        role: String? = nil,
+        positionX: Double = 0,
+        positionY: Double = 0,
+        createdAt: Date = Date()
+    ) {
+        self.id = id
+        self.displayName = displayName
+        self.kind = kind
+        self.linkedAgentId = linkedAgentId
+        self.channelId = channelId
+        self.role = role
+        self.positionX = positionX
+        self.positionY = positionY
+        self.createdAt = createdAt
+    }
+}
+
+public struct ActorLink: Codable, Sendable, Equatable {
+    public var id: String
+    public var sourceActorId: String
+    public var targetActorId: String
+    public var direction: ActorLinkDirection
+    public var communicationType: ActorCommunicationType
+    public var sourceSocket: ActorSocketPosition?
+    public var targetSocket: ActorSocketPosition?
+    public var createdAt: Date
+
+    public init(
+        id: String,
+        sourceActorId: String,
+        targetActorId: String,
+        direction: ActorLinkDirection,
+        communicationType: ActorCommunicationType,
+        sourceSocket: ActorSocketPosition? = nil,
+        targetSocket: ActorSocketPosition? = nil,
+        createdAt: Date = Date()
+    ) {
+        self.id = id
+        self.sourceActorId = sourceActorId
+        self.targetActorId = targetActorId
+        self.direction = direction
+        self.communicationType = communicationType
+        self.sourceSocket = sourceSocket
+        self.targetSocket = targetSocket
+        self.createdAt = createdAt
+    }
+}
+
+public struct ActorTeam: Codable, Sendable, Equatable {
+    public var id: String
+    public var name: String
+    public var memberActorIds: [String]
+    public var createdAt: Date
+
+    public init(
+        id: String,
+        name: String,
+        memberActorIds: [String],
+        createdAt: Date = Date()
+    ) {
+        self.id = id
+        self.name = name
+        self.memberActorIds = memberActorIds
+        self.createdAt = createdAt
+    }
+}
+
+public struct ActorBoardSnapshot: Codable, Sendable, Equatable {
+    public var nodes: [ActorNode]
+    public var links: [ActorLink]
+    public var teams: [ActorTeam]
+    public var updatedAt: Date
+
+    public init(
+        nodes: [ActorNode],
+        links: [ActorLink],
+        teams: [ActorTeam],
+        updatedAt: Date = Date()
+    ) {
+        self.nodes = nodes
+        self.links = links
+        self.teams = teams
+        self.updatedAt = updatedAt
+    }
+}
+
+public struct ActorBoardUpdateRequest: Codable, Sendable {
+    public var nodes: [ActorNode]
+    public var links: [ActorLink]
+    public var teams: [ActorTeam]
+
+    public init(nodes: [ActorNode], links: [ActorLink], teams: [ActorTeam]) {
+        self.nodes = nodes
+        self.links = links
+        self.teams = teams
+    }
+}
+
+public struct ActorRouteRequest: Codable, Sendable {
+    public var fromActorId: String
+    public var communicationType: ActorCommunicationType?
+
+    public init(fromActorId: String, communicationType: ActorCommunicationType? = nil) {
+        self.fromActorId = fromActorId
+        self.communicationType = communicationType
+    }
+}
+
+public struct ActorRouteResponse: Codable, Sendable, Equatable {
+    public var fromActorId: String
+    public var recipientActorIds: [String]
+    public var resolvedAt: Date
+
+    public init(
+        fromActorId: String,
+        recipientActorIds: [String],
+        resolvedAt: Date = Date()
+    ) {
+        self.fromActorId = fromActorId
+        self.recipientActorIds = recipientActorIds
+        self.resolvedAt = resolvedAt
+    }
+}

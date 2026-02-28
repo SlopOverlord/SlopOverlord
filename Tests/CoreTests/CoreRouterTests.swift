@@ -693,6 +693,318 @@ func createAgentDuplicateIDReturnsConflict() async throws {
 }
 
 @Test
+func actorBoardEndpointsSyncSystemActorsAndPersistLayout() async throws {
+    let workspaceName = "workspace-actors-\(UUID().uuidString)"
+    let sqlitePath = FileManager.default.temporaryDirectory
+        .appendingPathComponent("core-actors-\(UUID().uuidString).sqlite")
+        .path
+
+    var config = CoreConfig.default
+    config.workspace = .init(name: workspaceName, basePath: FileManager.default.temporaryDirectory.path)
+    config.sqlitePath = sqlitePath
+
+    let service = CoreService(config: config)
+    let router = CoreRouter(service: service)
+
+    let createAgentBody = try JSONEncoder().encode(
+        AgentCreateRequest(
+            id: "agent-ops",
+            displayName: "Ops Agent",
+            role: "Handles operational work"
+        )
+    )
+    let createAgentResponse = await router.handle(method: "POST", path: "/v1/agents", body: createAgentBody)
+    #expect(createAgentResponse.status == 201)
+
+    let decoder = JSONDecoder()
+    decoder.dateDecodingStrategy = .iso8601
+
+    let firstBoardResponse = await router.handle(method: "GET", path: "/v1/actors/board", body: nil)
+    #expect(firstBoardResponse.status == 200)
+    let firstBoard = try decoder.decode(ActorBoardSnapshot.self, from: firstBoardResponse.body)
+    #expect(firstBoard.nodes.contains(where: { $0.id == "human:admin" && $0.kind == .human }))
+    #expect(firstBoard.nodes.contains(where: { $0.id == "agent:agent-ops" && $0.linkedAgentId == "agent-ops" }))
+
+    var updatedNodes = firstBoard.nodes
+    if let adminIndex = updatedNodes.firstIndex(where: { $0.id == "human:admin" }) {
+        updatedNodes[adminIndex].positionX = 512
+        updatedNodes[adminIndex].positionY = 420
+    }
+    updatedNodes.append(
+        ActorNode(
+            id: "action:notify",
+            displayName: "Notify",
+            kind: .action,
+            channelId: "channel:notify",
+            role: "Dispatches notifications",
+            positionX: 760,
+            positionY: 420
+        )
+    )
+
+    let updateRequest = ActorBoardUpdateRequest(
+        nodes: updatedNodes,
+        links: [
+            ActorLink(
+                id: "link-admin-notify",
+                sourceActorId: "human:admin",
+                targetActorId: "action:notify",
+                direction: .oneWay,
+                communicationType: .chat
+            )
+        ],
+        teams: [
+            ActorTeam(
+                id: "team:core",
+                name: "Core Team",
+                memberActorIds: ["human:admin", "action:notify"]
+            )
+        ]
+    )
+    let encoder = JSONEncoder()
+    encoder.dateEncodingStrategy = .iso8601
+    let updateBody = try encoder.encode(updateRequest)
+    let updateResponse = await router.handle(method: "PUT", path: "/v1/actors/board", body: updateBody)
+    #expect(updateResponse.status == 200)
+
+    let updatedBoard = try decoder.decode(ActorBoardSnapshot.self, from: updateResponse.body)
+    #expect(updatedBoard.nodes.contains(where: { $0.id == "action:notify" }))
+    #expect(updatedBoard.links.contains(where: { $0.id == "link-admin-notify" }))
+    #expect(updatedBoard.teams.contains(where: { $0.id == "team:core" }))
+
+    let persistedResponse = await router.handle(method: "GET", path: "/v1/actors/board", body: nil)
+    #expect(persistedResponse.status == 200)
+    let persistedBoard = try decoder.decode(ActorBoardSnapshot.self, from: persistedResponse.body)
+    let persistedAdmin = persistedBoard.nodes.first(where: { $0.id == "human:admin" })
+    #expect(persistedAdmin?.positionX == 512)
+    #expect(persistedAdmin?.positionY == 420)
+}
+
+@Test
+func actorRouteEndpointResolvesRecipientsFromLinks() async throws {
+    let workspaceName = "workspace-actor-route-\(UUID().uuidString)"
+    let sqlitePath = FileManager.default.temporaryDirectory
+        .appendingPathComponent("core-actor-route-\(UUID().uuidString).sqlite")
+        .path
+
+    var config = CoreConfig.default
+    config.workspace = .init(name: workspaceName, basePath: FileManager.default.temporaryDirectory.path)
+    config.sqlitePath = sqlitePath
+
+    let service = CoreService(config: config)
+    let router = CoreRouter(service: service)
+
+    let createAgentBody = try JSONEncoder().encode(
+        AgentCreateRequest(
+            id: "agent-analyst",
+            displayName: "Analyst Agent",
+            role: "Analyzes incoming events"
+        )
+    )
+    let createAgentResponse = await router.handle(method: "POST", path: "/v1/agents", body: createAgentBody)
+    #expect(createAgentResponse.status == 201)
+
+    let boardResponse = await router.handle(method: "GET", path: "/v1/actors/board", body: nil)
+    #expect(boardResponse.status == 200)
+
+    let decoder = JSONDecoder()
+    decoder.dateDecodingStrategy = .iso8601
+    let board = try decoder.decode(ActorBoardSnapshot.self, from: boardResponse.body)
+
+    var nodes = board.nodes
+    nodes.append(
+        ActorNode(
+            id: "action:triage",
+            displayName: "Triage",
+            kind: .action,
+            channelId: "channel:triage",
+            role: "Routes and enriches events",
+            positionX: 700,
+            positionY: 260
+        )
+    )
+
+    let updateRequest = ActorBoardUpdateRequest(
+        nodes: nodes,
+        links: [
+            ActorLink(
+                id: "link-admin-triage",
+                sourceActorId: "human:admin",
+                targetActorId: "action:triage",
+                direction: .oneWay,
+                communicationType: .chat
+            ),
+            ActorLink(
+                id: "link-triage-agent",
+                sourceActorId: "action:triage",
+                targetActorId: "agent:agent-analyst",
+                direction: .twoWay,
+                communicationType: .event
+            )
+        ],
+        teams: []
+    )
+    let encoder = JSONEncoder()
+    encoder.dateEncodingStrategy = .iso8601
+    let updateBody = try encoder.encode(updateRequest)
+    let updateResponse = await router.handle(method: "PUT", path: "/v1/actors/board", body: updateBody)
+    #expect(updateResponse.status == 200)
+
+    let adminRouteBody = try JSONEncoder().encode(
+        ActorRouteRequest(fromActorId: "human:admin", communicationType: .chat)
+    )
+    let adminRouteResponse = await router.handle(method: "POST", path: "/v1/actors/route", body: adminRouteBody)
+    #expect(adminRouteResponse.status == 200)
+    let adminRoute = try decoder.decode(ActorRouteResponse.self, from: adminRouteResponse.body)
+    #expect(adminRoute.recipientActorIds == ["action:triage"])
+
+    let actionRouteBody = try JSONEncoder().encode(
+        ActorRouteRequest(fromActorId: "action:triage", communicationType: .event)
+    )
+    let actionRouteResponse = await router.handle(method: "POST", path: "/v1/actors/route", body: actionRouteBody)
+    #expect(actionRouteResponse.status == 200)
+    let actionRoute = try decoder.decode(ActorRouteResponse.self, from: actionRouteResponse.body)
+    #expect(actionRoute.recipientActorIds == ["agent:agent-analyst"])
+
+    let missingRouteBody = try JSONEncoder().encode(
+        ActorRouteRequest(fromActorId: "missing:actor", communicationType: .chat)
+    )
+    let missingRouteResponse = await router.handle(method: "POST", path: "/v1/actors/route", body: missingRouteBody)
+    #expect(missingRouteResponse.status == 404)
+}
+
+@Test
+func actorCRUDEndpointsManageNodesLinksAndTeams() async throws {
+    let workspaceName = "workspace-actor-crud-\(UUID().uuidString)"
+    let sqlitePath = FileManager.default.temporaryDirectory
+        .appendingPathComponent("core-actor-crud-\(UUID().uuidString).sqlite")
+        .path
+
+    var config = CoreConfig.default
+    config.workspace = .init(name: workspaceName, basePath: FileManager.default.temporaryDirectory.path)
+    config.sqlitePath = sqlitePath
+
+    let service = CoreService(config: config)
+    let router = CoreRouter(service: service)
+
+    let createAgentBody = try JSONEncoder().encode(
+        AgentCreateRequest(
+            id: "agent-crud",
+            displayName: "CRUD Agent",
+            role: "Actor CRUD coverage"
+        )
+    )
+    let createAgentResponse = await router.handle(method: "POST", path: "/v1/agents", body: createAgentBody)
+    #expect(createAgentResponse.status == 201)
+
+    let encoder = JSONEncoder()
+    encoder.dateEncodingStrategy = .iso8601
+    let decoder = JSONDecoder()
+    decoder.dateDecodingStrategy = .iso8601
+
+    let createNodeBody = try encoder.encode(
+        ActorNode(
+            id: "action:qa",
+            displayName: "QA Action",
+            kind: .action,
+            channelId: "channel:qa",
+            role: "Checks artifacts",
+            positionX: 420,
+            positionY: 280
+        )
+    )
+    let createNodeResponse = await router.handle(method: "POST", path: "/v1/actors/nodes", body: createNodeBody)
+    #expect(createNodeResponse.status == 201)
+    var board = try decoder.decode(ActorBoardSnapshot.self, from: createNodeResponse.body)
+    #expect(board.nodes.contains(where: { $0.id == "action:qa" }))
+
+    let updateNodeBody = try encoder.encode(
+        ActorNode(
+            id: "action:qa",
+            displayName: "QA Action Updated",
+            kind: .action,
+            channelId: "channel:qa-v2",
+            role: "Updated role",
+            positionX: 500,
+            positionY: 340
+        )
+    )
+    let updateNodeResponse = await router.handle(method: "PUT", path: "/v1/actors/nodes/action:qa", body: updateNodeBody)
+    #expect(updateNodeResponse.status == 200)
+    board = try decoder.decode(ActorBoardSnapshot.self, from: updateNodeResponse.body)
+    #expect(board.nodes.contains(where: { $0.id == "action:qa" && $0.displayName == "QA Action Updated" }))
+
+    let createLinkBody = try encoder.encode(
+        ActorLink(
+            id: "link-admin-qa",
+            sourceActorId: "human:admin",
+            targetActorId: "action:qa",
+            direction: .oneWay,
+            communicationType: .chat
+        )
+    )
+    let createLinkResponse = await router.handle(method: "POST", path: "/v1/actors/links", body: createLinkBody)
+    #expect(createLinkResponse.status == 201)
+    board = try decoder.decode(ActorBoardSnapshot.self, from: createLinkResponse.body)
+    #expect(board.links.contains(where: { $0.id == "link-admin-qa" }))
+
+    let updateLinkBody = try encoder.encode(
+        ActorLink(
+            id: "link-admin-qa",
+            sourceActorId: "human:admin",
+            targetActorId: "action:qa",
+            direction: .twoWay,
+            communicationType: .event
+        )
+    )
+    let updateLinkResponse = await router.handle(method: "PUT", path: "/v1/actors/links/link-admin-qa", body: updateLinkBody)
+    #expect(updateLinkResponse.status == 200)
+    board = try decoder.decode(ActorBoardSnapshot.self, from: updateLinkResponse.body)
+    let updatedLink = board.links.first(where: { $0.id == "link-admin-qa" })
+    #expect(updatedLink?.direction == .twoWay)
+    #expect(updatedLink?.communicationType == .event)
+
+    let createTeamBody = try encoder.encode(
+        ActorTeam(
+            id: "team:ops",
+            name: "Ops Team",
+            memberActorIds: ["human:admin", "action:qa"]
+        )
+    )
+    let createTeamResponse = await router.handle(method: "POST", path: "/v1/actors/teams", body: createTeamBody)
+    #expect(createTeamResponse.status == 201)
+    board = try decoder.decode(ActorBoardSnapshot.self, from: createTeamResponse.body)
+    #expect(board.teams.contains(where: { $0.id == "team:ops" }))
+
+    let updateTeamBody = try encoder.encode(
+        ActorTeam(
+            id: "team:ops",
+            name: "Ops Team Updated",
+            memberActorIds: ["action:qa"]
+        )
+    )
+    let updateTeamResponse = await router.handle(method: "PUT", path: "/v1/actors/teams/team:ops", body: updateTeamBody)
+    #expect(updateTeamResponse.status == 200)
+    board = try decoder.decode(ActorBoardSnapshot.self, from: updateTeamResponse.body)
+    #expect(board.teams.contains(where: { $0.id == "team:ops" && $0.name == "Ops Team Updated" }))
+
+    let deleteLinkResponse = await router.handle(method: "DELETE", path: "/v1/actors/links/link-admin-qa", body: nil)
+    #expect(deleteLinkResponse.status == 200)
+    board = try decoder.decode(ActorBoardSnapshot.self, from: deleteLinkResponse.body)
+    #expect(!board.links.contains(where: { $0.id == "link-admin-qa" }))
+
+    let deleteTeamResponse = await router.handle(method: "DELETE", path: "/v1/actors/teams/team:ops", body: nil)
+    #expect(deleteTeamResponse.status == 200)
+    board = try decoder.decode(ActorBoardSnapshot.self, from: deleteTeamResponse.body)
+    #expect(!board.teams.contains(where: { $0.id == "team:ops" }))
+
+    let deleteNodeResponse = await router.handle(method: "DELETE", path: "/v1/actors/nodes/action:qa", body: nil)
+    #expect(deleteNodeResponse.status == 200)
+    board = try decoder.decode(ActorBoardSnapshot.self, from: deleteNodeResponse.body)
+    #expect(!board.nodes.contains(where: { $0.id == "action:qa" }))
+}
+
+@Test
 func agentSessionLifecycleEndpoints() async throws {
     let workspaceName = "workspace-sessions-\(UUID().uuidString)"
     let sqlitePath = FileManager.default.temporaryDirectory

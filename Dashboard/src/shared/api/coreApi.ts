@@ -26,6 +26,18 @@ export interface CoreApi {
   fetchAgents: () => Promise<AnyRecord[] | null>;
   fetchAgent: (agentId: string) => Promise<AnyRecord | null>;
   createAgent: (payload: AnyRecord) => Promise<AnyRecord | null>;
+  fetchActorsBoard: () => Promise<AnyRecord | null>;
+  updateActorsBoard: (payload: AnyRecord) => Promise<AnyRecord | null>;
+  resolveActorRoute: (payload: AnyRecord) => Promise<AnyRecord | null>;
+  createActorNode: (payload: AnyRecord) => Promise<AnyRecord | null>;
+  updateActorNode: (actorId: string, payload: AnyRecord) => Promise<AnyRecord | null>;
+  deleteActorNode: (actorId: string) => Promise<AnyRecord | null>;
+  createActorLink: (payload: AnyRecord) => Promise<AnyRecord | null>;
+  updateActorLink: (linkId: string, payload: AnyRecord) => Promise<AnyRecord | null>;
+  deleteActorLink: (linkId: string) => Promise<AnyRecord | null>;
+  createActorTeam: (payload: AnyRecord) => Promise<AnyRecord | null>;
+  updateActorTeam: (teamId: string, payload: AnyRecord) => Promise<AnyRecord | null>;
+  deleteActorTeam: (teamId: string) => Promise<AnyRecord | null>;
   fetchAgentSessions: (agentId: string) => Promise<AnyRecord[] | null>;
   createAgentSession: (agentId: string, payload?: AnyRecord) => Promise<AnyRecord | null>;
   fetchAgentSession: (agentId: string, sessionId: string) => Promise<AnyRecord | null>;
@@ -190,6 +202,145 @@ export function createCoreApi(): CoreApi {
         path: "/v1/agents",
         method: "POST",
         body: payload
+      });
+      if (!response.ok) {
+        return null;
+      }
+      return response.data;
+    },
+
+    fetchActorsBoard: async () => {
+      const response = await requestJson<AnyRecord>({
+        path: "/v1/actors/board"
+      });
+      if (!response.ok) {
+        return null;
+      }
+      return response.data;
+    },
+
+    updateActorsBoard: async (payload) => {
+      const response = await requestJson<AnyRecord, AnyRecord>({
+        path: "/v1/actors/board",
+        method: "PUT",
+        body: payload
+      });
+      if (!response.ok) {
+        return null;
+      }
+      return response.data;
+    },
+
+    resolveActorRoute: async (payload) => {
+      const response = await requestJson<AnyRecord, AnyRecord>({
+        path: "/v1/actors/route",
+        method: "POST",
+        body: payload
+      });
+      if (!response.ok) {
+        return null;
+      }
+      return response.data;
+    },
+
+    createActorNode: async (payload) => {
+      const response = await requestJson<AnyRecord, AnyRecord>({
+        path: "/v1/actors/nodes",
+        method: "POST",
+        body: payload
+      });
+      if (!response.ok) {
+        return null;
+      }
+      return response.data;
+    },
+
+    updateActorNode: async (actorId, payload) => {
+      const response = await requestJson<AnyRecord, AnyRecord>({
+        path: `/v1/actors/nodes/${encodeURIComponent(actorId)}`,
+        method: "PUT",
+        body: payload
+      });
+      if (!response.ok) {
+        return null;
+      }
+      return response.data;
+    },
+
+    deleteActorNode: async (actorId) => {
+      const response = await requestJson<AnyRecord>({
+        path: `/v1/actors/nodes/${encodeURIComponent(actorId)}`,
+        method: "DELETE"
+      });
+      if (!response.ok) {
+        return null;
+      }
+      return response.data;
+    },
+
+    createActorLink: async (payload) => {
+      const response = await requestJson<AnyRecord, AnyRecord>({
+        path: "/v1/actors/links",
+        method: "POST",
+        body: payload
+      });
+      if (!response.ok) {
+        return null;
+      }
+      return response.data;
+    },
+
+    updateActorLink: async (linkId, payload) => {
+      const response = await requestJson<AnyRecord, AnyRecord>({
+        path: `/v1/actors/links/${encodeURIComponent(linkId)}`,
+        method: "PUT",
+        body: payload
+      });
+      if (!response.ok) {
+        return null;
+      }
+      return response.data;
+    },
+
+    deleteActorLink: async (linkId) => {
+      const response = await requestJson<AnyRecord>({
+        path: `/v1/actors/links/${encodeURIComponent(linkId)}`,
+        method: "DELETE"
+      });
+      if (!response.ok) {
+        return null;
+      }
+      return response.data;
+    },
+
+    createActorTeam: async (payload) => {
+      const response = await requestJson<AnyRecord, AnyRecord>({
+        path: "/v1/actors/teams",
+        method: "POST",
+        body: payload
+      });
+      if (!response.ok) {
+        return null;
+      }
+      return response.data;
+    },
+
+    updateActorTeam: async (teamId, payload) => {
+      const response = await requestJson<AnyRecord, AnyRecord>({
+        path: `/v1/actors/teams/${encodeURIComponent(teamId)}`,
+        method: "PUT",
+        body: payload
+      });
+      if (!response.ok) {
+        return null;
+      }
+      return response.data;
+    },
+
+    deleteActorTeam: async (teamId) => {
+      const response = await requestJson<AnyRecord>({
+        path: `/v1/actors/teams/${encodeURIComponent(teamId)}`,
+        method: "DELETE"
       });
       if (!response.ok) {
         return null;

@@ -127,6 +127,14 @@ private enum ErrorCode {
     static let toolForbidden = "tool_forbidden"
     static let toolInvokeFailed = "tool_invoke_failed"
     static let systemLogsReadFailed = "system_logs_read_failed"
+    static let invalidActorPayload = "invalid_actor_payload"
+    static let actorNotFound = "actor_not_found"
+    static let linkNotFound = "link_not_found"
+    static let teamNotFound = "team_not_found"
+    static let actorProtected = "actor_protected"
+    static let actorBoardReadFailed = "actor_board_read_failed"
+    static let actorBoardWriteFailed = "actor_board_write_failed"
+    static let actorRouteFailed = "actor_route_failed"
 }
 
 private struct AcceptResponse: Encodable {
@@ -323,6 +331,17 @@ public actor CoreRouter {
             }
         }
 
+        add(.get, "/v1/actors/board") { _ in
+            do {
+                let board = try await service.getActorBoard()
+                return Self.encodable(status: HTTPStatus.ok, payload: board)
+            } catch let error as CoreService.ActorBoardError {
+                return Self.actorBoardErrorResponse(error, fallback: ErrorCode.actorBoardReadFailed)
+            } catch {
+                return Self.json(status: HTTPStatus.internalServerError, payload: ["error": ErrorCode.actorBoardReadFailed])
+            }
+        }
+
         add(.get, "/v1/agents/:agentId") { request in
             let agentId = request.pathParam("agentId") ?? ""
             do {
@@ -463,6 +482,77 @@ public actor CoreRouter {
             }
         }
 
+        add(.put, "/v1/actors/board") { request in
+            guard let body = request.body,
+                  let payload = Self.decode(body, as: ActorBoardUpdateRequest.self)
+            else {
+                return Self.json(status: HTTPStatus.badRequest, payload: ["error": ErrorCode.invalidActorPayload])
+            }
+
+            do {
+                let board = try await service.updateActorBoard(request: payload)
+                return Self.encodable(status: HTTPStatus.ok, payload: board)
+            } catch let error as CoreService.ActorBoardError {
+                return Self.actorBoardErrorResponse(error, fallback: ErrorCode.actorBoardWriteFailed)
+            } catch {
+                return Self.json(status: HTTPStatus.internalServerError, payload: ["error": ErrorCode.actorBoardWriteFailed])
+            }
+        }
+
+        add(.put, "/v1/actors/nodes/:actorId") { request in
+            let actorId = request.pathParam("actorId") ?? ""
+            guard let body = request.body,
+                  let payload = Self.decode(body, as: ActorNode.self)
+            else {
+                return Self.json(status: HTTPStatus.badRequest, payload: ["error": ErrorCode.invalidActorPayload])
+            }
+
+            do {
+                let board = try await service.updateActorNode(actorID: actorId, node: payload)
+                return Self.encodable(status: HTTPStatus.ok, payload: board)
+            } catch let error as CoreService.ActorBoardError {
+                return Self.actorBoardErrorResponse(error, fallback: ErrorCode.actorBoardWriteFailed)
+            } catch {
+                return Self.json(status: HTTPStatus.internalServerError, payload: ["error": ErrorCode.actorBoardWriteFailed])
+            }
+        }
+
+        add(.put, "/v1/actors/links/:linkId") { request in
+            let linkId = request.pathParam("linkId") ?? ""
+            guard let body = request.body,
+                  let payload = Self.decode(body, as: ActorLink.self)
+            else {
+                return Self.json(status: HTTPStatus.badRequest, payload: ["error": ErrorCode.invalidActorPayload])
+            }
+
+            do {
+                let board = try await service.updateActorLink(linkID: linkId, link: payload)
+                return Self.encodable(status: HTTPStatus.ok, payload: board)
+            } catch let error as CoreService.ActorBoardError {
+                return Self.actorBoardErrorResponse(error, fallback: ErrorCode.actorBoardWriteFailed)
+            } catch {
+                return Self.json(status: HTTPStatus.internalServerError, payload: ["error": ErrorCode.actorBoardWriteFailed])
+            }
+        }
+
+        add(.put, "/v1/actors/teams/:teamId") { request in
+            let teamId = request.pathParam("teamId") ?? ""
+            guard let body = request.body,
+                  let payload = Self.decode(body, as: ActorTeam.self)
+            else {
+                return Self.json(status: HTTPStatus.badRequest, payload: ["error": ErrorCode.invalidActorPayload])
+            }
+
+            do {
+                let board = try await service.updateActorTeam(teamID: teamId, team: payload)
+                return Self.encodable(status: HTTPStatus.ok, payload: board)
+            } catch let error as CoreService.ActorBoardError {
+                return Self.actorBoardErrorResponse(error, fallback: ErrorCode.actorBoardWriteFailed)
+            } catch {
+                return Self.json(status: HTTPStatus.internalServerError, payload: ["error": ErrorCode.actorBoardWriteFailed])
+            }
+        }
+
         add(.post, "/v1/providers/openai/models") { request in
             guard let body = request.body,
                   let payload = Self.decode(body, as: OpenAIProviderModelsRequest.self)
@@ -492,6 +582,57 @@ public actor CoreRouter {
                 return Self.json(status: HTTPStatus.conflict, payload: ["error": ErrorCode.agentAlreadyExists])
             } catch {
                 return Self.json(status: HTTPStatus.internalServerError, payload: ["error": ErrorCode.agentCreateFailed])
+            }
+        }
+
+        add(.post, "/v1/actors/nodes") { request in
+            guard let body = request.body,
+                  let payload = Self.decode(body, as: ActorNode.self)
+            else {
+                return Self.json(status: HTTPStatus.badRequest, payload: ["error": ErrorCode.invalidActorPayload])
+            }
+
+            do {
+                let board = try await service.createActorNode(node: payload)
+                return Self.encodable(status: HTTPStatus.created, payload: board)
+            } catch let error as CoreService.ActorBoardError {
+                return Self.actorBoardErrorResponse(error, fallback: ErrorCode.actorBoardWriteFailed)
+            } catch {
+                return Self.json(status: HTTPStatus.internalServerError, payload: ["error": ErrorCode.actorBoardWriteFailed])
+            }
+        }
+
+        add(.post, "/v1/actors/links") { request in
+            guard let body = request.body,
+                  let payload = Self.decode(body, as: ActorLink.self)
+            else {
+                return Self.json(status: HTTPStatus.badRequest, payload: ["error": ErrorCode.invalidActorPayload])
+            }
+
+            do {
+                let board = try await service.createActorLink(link: payload)
+                return Self.encodable(status: HTTPStatus.created, payload: board)
+            } catch let error as CoreService.ActorBoardError {
+                return Self.actorBoardErrorResponse(error, fallback: ErrorCode.actorBoardWriteFailed)
+            } catch {
+                return Self.json(status: HTTPStatus.internalServerError, payload: ["error": ErrorCode.actorBoardWriteFailed])
+            }
+        }
+
+        add(.post, "/v1/actors/teams") { request in
+            guard let body = request.body,
+                  let payload = Self.decode(body, as: ActorTeam.self)
+            else {
+                return Self.json(status: HTTPStatus.badRequest, payload: ["error": ErrorCode.invalidActorPayload])
+            }
+
+            do {
+                let board = try await service.createActorTeam(team: payload)
+                return Self.encodable(status: HTTPStatus.created, payload: board)
+            } catch let error as CoreService.ActorBoardError {
+                return Self.actorBoardErrorResponse(error, fallback: ErrorCode.actorBoardWriteFailed)
+            } catch {
+                return Self.json(status: HTTPStatus.internalServerError, payload: ["error": ErrorCode.actorBoardWriteFailed])
             }
         }
 
@@ -595,6 +736,23 @@ public actor CoreRouter {
             return Self.encodable(status: HTTPStatus.ok, payload: decision)
         }
 
+        add(.post, "/v1/actors/route") { request in
+            guard let body = request.body,
+                  let payload = Self.decode(body, as: ActorRouteRequest.self)
+            else {
+                return Self.json(status: HTTPStatus.badRequest, payload: ["error": ErrorCode.invalidActorPayload])
+            }
+
+            do {
+                let response = try await service.resolveActorRoute(request: payload)
+                return Self.encodable(status: HTTPStatus.ok, payload: response)
+            } catch let error as CoreService.ActorBoardError {
+                return Self.actorBoardErrorResponse(error, fallback: ErrorCode.actorRouteFailed)
+            } catch {
+                return Self.json(status: HTTPStatus.internalServerError, payload: ["error": ErrorCode.actorRouteFailed])
+            }
+        }
+
         add(.post, "/v1/channels/:channelId/route/:workerId") { request in
             let channelId = request.pathParam("channelId") ?? ""
             let workerId = request.pathParam("workerId") ?? ""
@@ -637,6 +795,45 @@ public actor CoreRouter {
                 return Self.agentSessionErrorResponse(error, fallback: ErrorCode.sessionDeleteFailed)
             } catch {
                 return Self.json(status: HTTPStatus.internalServerError, payload: ["error": ErrorCode.sessionDeleteFailed])
+            }
+        }
+
+        add(.delete, "/v1/actors/nodes/:actorId") { request in
+            let actorId = request.pathParam("actorId") ?? ""
+
+            do {
+                let board = try await service.deleteActorNode(actorID: actorId)
+                return Self.encodable(status: HTTPStatus.ok, payload: board)
+            } catch let error as CoreService.ActorBoardError {
+                return Self.actorBoardErrorResponse(error, fallback: ErrorCode.actorBoardWriteFailed)
+            } catch {
+                return Self.json(status: HTTPStatus.internalServerError, payload: ["error": ErrorCode.actorBoardWriteFailed])
+            }
+        }
+
+        add(.delete, "/v1/actors/links/:linkId") { request in
+            let linkId = request.pathParam("linkId") ?? ""
+
+            do {
+                let board = try await service.deleteActorLink(linkID: linkId)
+                return Self.encodable(status: HTTPStatus.ok, payload: board)
+            } catch let error as CoreService.ActorBoardError {
+                return Self.actorBoardErrorResponse(error, fallback: ErrorCode.actorBoardWriteFailed)
+            } catch {
+                return Self.json(status: HTTPStatus.internalServerError, payload: ["error": ErrorCode.actorBoardWriteFailed])
+            }
+        }
+
+        add(.delete, "/v1/actors/teams/:teamId") { request in
+            let teamId = request.pathParam("teamId") ?? ""
+
+            do {
+                let board = try await service.deleteActorTeam(teamID: teamId)
+                return Self.encodable(status: HTTPStatus.ok, payload: board)
+            } catch let error as CoreService.ActorBoardError {
+                return Self.actorBoardErrorResponse(error, fallback: ErrorCode.actorBoardWriteFailed)
+            } catch {
+                return Self.json(status: HTTPStatus.internalServerError, payload: ["error": ErrorCode.actorBoardWriteFailed])
             }
         }
 
@@ -709,6 +906,23 @@ public actor CoreRouter {
 
     private static func systemLogsErrorResponse(_ error: CoreService.SystemLogsError, fallback: String) -> CoreRouterResponse {
         switch error {
+        case .storageFailure:
+            return json(status: HTTPStatus.internalServerError, payload: ["error": fallback])
+        }
+    }
+    
+    private static func actorBoardErrorResponse(_ error: CoreService.ActorBoardError, fallback: String) -> CoreRouterResponse {
+        switch error {
+        case .invalidPayload:
+            return json(status: HTTPStatus.badRequest, payload: ["error": ErrorCode.invalidActorPayload])
+        case .actorNotFound:
+            return json(status: HTTPStatus.notFound, payload: ["error": ErrorCode.actorNotFound])
+        case .linkNotFound:
+            return json(status: HTTPStatus.notFound, payload: ["error": ErrorCode.linkNotFound])
+        case .teamNotFound:
+            return json(status: HTTPStatus.notFound, payload: ["error": ErrorCode.teamNotFound])
+        case .protectedActor:
+            return json(status: HTTPStatus.conflict, payload: ["error": ErrorCode.actorProtected])
         case .storageFailure:
             return json(status: HTTPStatus.internalServerError, payload: ["error": fallback])
         }

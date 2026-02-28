@@ -5,6 +5,7 @@ import { useDashboardRoute } from "./app/routing/useDashboardRoute";
 import { SidebarView } from "./components/SidebarView";
 import { useRuntimeOverview } from "./features/runtime-overview/model/useRuntimeOverview";
 import { AgentsView } from "./views/AgentsView";
+import { ActorsView } from "./views/ActorsView";
 import { ConfigView } from "./views/ConfigView";
 import { PlaceholderView } from "./views/PlaceholderView";
 import { ProjectsView } from "./views/ProjectsView";
@@ -97,6 +98,11 @@ export function App() {
       id: "overview",
       label: { icon: "OV", title: "Overview" },
       content: runtimeContent
+    },
+    {
+      id: "actors",
+      label: { icon: "AT", title: "Actors" },
+      content: <ActorsView />
     },
     {
       id: "agents",

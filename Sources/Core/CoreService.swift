@@ -81,12 +81,22 @@ public actor CoreService {
     public enum SystemLogsError: Error {
         case storageFailure
     }
+    
+    public enum ActorBoardError: Error {
+        case invalidPayload
+        case actorNotFound
+        case linkNotFound
+        case teamNotFound
+        case protectedActor
+        case storageFailure
+    }
 
     private let runtime: RuntimeSystem
     private let store: any PersistenceStore
     private let openAIProviderCatalog: OpenAIProviderCatalogService
     private let agentCatalogStore: AgentCatalogFileStore
     private let sessionStore: AgentSessionFileStore
+    private let actorBoardStore: ActorBoardFileStore
     private let sessionOrchestrator: AgentSessionOrchestrator
     private let toolsAuthorization: ToolAuthorizationService
     private let toolExecution: ToolExecutionService
@@ -112,11 +122,14 @@ public actor CoreService {
         self.store = persistenceBuilder.makeStore(config: config)
         self.openAIProviderCatalog = OpenAIProviderCatalogService()
         self.configPath = configPath
-        self.workspaceRootURL = config.resolvedWorkspaceRootURL(currentDirectory: FileManager.default.currentDirectoryPath)
-        self.agentsRootURL = workspaceRootURL.appendingPathComponent("agents", isDirectory: true)
+        self.workspaceRootURL = config
+            .resolvedWorkspaceRootURL(currentDirectory: FileManager.default.currentDirectoryPath)
+        self.agentsRootURL = self.workspaceRootURL
+            .appendingPathComponent("agents", isDirectory: true)
         self.agentCatalogStore = AgentCatalogFileStore(agentsRootURL: self.agentsRootURL)
         self.sessionStore = AgentSessionFileStore(agentsRootURL: self.agentsRootURL)
         self.systemLogStore = SystemLogFileStore(workspaceRootURL: self.workspaceRootURL)
+        self.actorBoardStore = ActorBoardFileStore(workspaceRootURL: self.workspaceRootURL)
         let orchestratorCatalogStore = AgentCatalogFileStore(agentsRootURL: self.agentsRootURL)
         let orchestratorSessionStore = AgentSessionFileStore(agentsRootURL: self.agentsRootURL)
         self.sessionOrchestrator = AgentSessionOrchestrator(
@@ -303,6 +316,268 @@ public actor CoreService {
         } catch {
             throw mapAgentToolsError(error)
         }
+    }
+
+    /// Returns actor graph snapshot used by visual canvas board.
+    public func getActorBoard() throws -> ActorBoardSnapshot {
+        do {
+            let agents = try listAgents()
+            return try actorBoardStore.loadBoard(agents: agents)
+        } catch {
+            throw mapActorBoardError(error)
+        }
+    }
+
+    /// Stores visual actor graph updates and re-synchronizes system actors.
+    public func updateActorBoard(request: ActorBoardUpdateRequest) throws -> ActorBoardSnapshot {
+        do {
+            let agents = try listAgents()
+            return try actorBoardStore.saveBoard(request, agents: agents)
+        } catch {
+            throw mapActorBoardError(error)
+        }
+    }
+
+    /// Resolves which actors can receive data from the sender according to graph links.
+    public func resolveActorRoute(request: ActorRouteRequest) throws -> ActorRouteResponse {
+        do {
+            let agents = try listAgents()
+            return try actorBoardStore.resolveRoute(request, agents: agents)
+        } catch {
+            throw mapActorBoardError(error)
+        }
+    }
+
+    /// Creates one actor node in board.
+    public func createActorNode(node: ActorNode) throws -> ActorBoardSnapshot {
+        guard let nodeID = normalizedActorEntityID(node.id) else {
+            throw ActorBoardError.invalidPayload
+        }
+
+        let agents = try listAgents()
+        let currentBoard = try actorBoardStore.loadBoard(agents: agents)
+        guard !currentBoard.nodes.contains(where: { $0.id == nodeID }) else {
+            throw ActorBoardError.invalidPayload
+        }
+
+        var nextNode = node
+        nextNode.id = nodeID
+        nextNode.createdAt = Date()
+
+        return try updateActorBoardSnapshot(
+            nodes: currentBoard.nodes + [nextNode],
+            links: currentBoard.links,
+            teams: currentBoard.teams,
+            agents: agents
+        )
+    }
+
+    /// Updates one actor node in board.
+    public func updateActorNode(actorID: String, node: ActorNode) throws -> ActorBoardSnapshot {
+        guard let normalizedID = normalizedActorEntityID(actorID) else {
+            throw ActorBoardError.invalidPayload
+        }
+
+        let agents = try listAgents()
+        let currentBoard = try actorBoardStore.loadBoard(agents: agents)
+        guard let existingNodeIndex = currentBoard.nodes.firstIndex(where: { $0.id == normalizedID }) else {
+            throw ActorBoardError.actorNotFound
+        }
+
+        let existingNode = currentBoard.nodes[existingNodeIndex]
+        let nextNode: ActorNode
+        if isProtectedSystemActorID(normalizedID) {
+            var protectedNode = existingNode
+            protectedNode.positionX = node.positionX
+            protectedNode.positionY = node.positionY
+            nextNode = protectedNode
+        } else {
+            var editableNode = node
+            editableNode.id = normalizedID
+            editableNode.createdAt = existingNode.createdAt
+            nextNode = editableNode
+        }
+
+        var nodes = currentBoard.nodes
+        nodes[existingNodeIndex] = nextNode
+        return try updateActorBoardSnapshot(
+            nodes: nodes,
+            links: currentBoard.links,
+            teams: currentBoard.teams,
+            agents: agents
+        )
+    }
+
+    /// Deletes one actor node in board with related links and team memberships.
+    public func deleteActorNode(actorID: String) throws -> ActorBoardSnapshot {
+        guard let normalizedID = normalizedActorEntityID(actorID) else {
+            throw ActorBoardError.invalidPayload
+        }
+
+        if isProtectedSystemActorID(normalizedID) {
+            throw ActorBoardError.protectedActor
+        }
+
+        let agents = try listAgents()
+        let currentBoard = try actorBoardStore.loadBoard(agents: agents)
+        guard currentBoard.nodes.contains(where: { $0.id == normalizedID }) else {
+            throw ActorBoardError.actorNotFound
+        }
+
+        let nodes = currentBoard.nodes.filter { $0.id != normalizedID }
+        let links = currentBoard.links.filter {
+            $0.sourceActorId != normalizedID && $0.targetActorId != normalizedID
+        }
+        let teams = currentBoard.teams.map { team in
+            ActorTeam(
+                id: team.id,
+                name: team.name,
+                memberActorIds: team.memberActorIds.filter { $0 != normalizedID },
+                createdAt: team.createdAt
+            )
+        }
+
+        return try updateActorBoardSnapshot(nodes: nodes, links: links, teams: teams, agents: agents)
+    }
+
+    /// Creates one link between actors.
+    public func createActorLink(link: ActorLink) throws -> ActorBoardSnapshot {
+        guard let linkID = normalizedActorEntityID(link.id) else {
+            throw ActorBoardError.invalidPayload
+        }
+
+        let agents = try listAgents()
+        let currentBoard = try actorBoardStore.loadBoard(agents: agents)
+        guard !currentBoard.links.contains(where: { $0.id == linkID }) else {
+            throw ActorBoardError.invalidPayload
+        }
+
+        var nextLink = link
+        nextLink.id = linkID
+        nextLink.createdAt = Date()
+
+        return try updateActorBoardSnapshot(
+            nodes: currentBoard.nodes,
+            links: currentBoard.links + [nextLink],
+            teams: currentBoard.teams,
+            agents: agents
+        )
+    }
+
+    /// Updates one actor link.
+    public func updateActorLink(linkID: String, link: ActorLink) throws -> ActorBoardSnapshot {
+        guard let normalizedID = normalizedActorEntityID(linkID) else {
+            throw ActorBoardError.invalidPayload
+        }
+
+        let agents = try listAgents()
+        let currentBoard = try actorBoardStore.loadBoard(agents: agents)
+        guard let existingLinkIndex = currentBoard.links.firstIndex(where: { $0.id == normalizedID }) else {
+            throw ActorBoardError.linkNotFound
+        }
+
+        var nextLink = link
+        nextLink.id = normalizedID
+        nextLink.createdAt = currentBoard.links[existingLinkIndex].createdAt
+
+        var links = currentBoard.links
+        links[existingLinkIndex] = nextLink
+        return try updateActorBoardSnapshot(
+            nodes: currentBoard.nodes,
+            links: links,
+            teams: currentBoard.teams,
+            agents: agents
+        )
+    }
+
+    /// Deletes one actor link.
+    public func deleteActorLink(linkID: String) throws -> ActorBoardSnapshot {
+        guard let normalizedID = normalizedActorEntityID(linkID) else {
+            throw ActorBoardError.invalidPayload
+        }
+
+        let agents = try listAgents()
+        let currentBoard = try actorBoardStore.loadBoard(agents: agents)
+        guard currentBoard.links.contains(where: { $0.id == normalizedID }) else {
+            throw ActorBoardError.linkNotFound
+        }
+
+        return try updateActorBoardSnapshot(
+            nodes: currentBoard.nodes,
+            links: currentBoard.links.filter { $0.id != normalizedID },
+            teams: currentBoard.teams,
+            agents: agents
+        )
+    }
+
+    /// Creates one team.
+    public func createActorTeam(team: ActorTeam) throws -> ActorBoardSnapshot {
+        guard let teamID = normalizedActorEntityID(team.id) else {
+            throw ActorBoardError.invalidPayload
+        }
+
+        let agents = try listAgents()
+        let currentBoard = try actorBoardStore.loadBoard(agents: agents)
+        guard !currentBoard.teams.contains(where: { $0.id == teamID }) else {
+            throw ActorBoardError.invalidPayload
+        }
+
+        var nextTeam = team
+        nextTeam.id = teamID
+        nextTeam.createdAt = Date()
+
+        return try updateActorBoardSnapshot(
+            nodes: currentBoard.nodes,
+            links: currentBoard.links,
+            teams: currentBoard.teams + [nextTeam],
+            agents: agents
+        )
+    }
+
+    /// Updates one team.
+    public func updateActorTeam(teamID: String, team: ActorTeam) throws -> ActorBoardSnapshot {
+        guard let normalizedID = normalizedActorEntityID(teamID) else {
+            throw ActorBoardError.invalidPayload
+        }
+
+        let agents = try listAgents()
+        let currentBoard = try actorBoardStore.loadBoard(agents: agents)
+        guard let existingTeamIndex = currentBoard.teams.firstIndex(where: { $0.id == normalizedID }) else {
+            throw ActorBoardError.teamNotFound
+        }
+
+        var nextTeam = team
+        nextTeam.id = normalizedID
+        nextTeam.createdAt = currentBoard.teams[existingTeamIndex].createdAt
+
+        var teams = currentBoard.teams
+        teams[existingTeamIndex] = nextTeam
+        return try updateActorBoardSnapshot(
+            nodes: currentBoard.nodes,
+            links: currentBoard.links,
+            teams: teams,
+            agents: agents
+        )
+    }
+
+    /// Deletes one team.
+    public func deleteActorTeam(teamID: String) throws -> ActorBoardSnapshot {
+        guard let normalizedID = normalizedActorEntityID(teamID) else {
+            throw ActorBoardError.invalidPayload
+        }
+
+        let agents = try listAgents()
+        let currentBoard = try actorBoardStore.loadBoard(agents: agents)
+        guard currentBoard.teams.contains(where: { $0.id == normalizedID }) else {
+            throw ActorBoardError.teamNotFound
+        }
+
+        return try updateActorBoardSnapshot(
+            nodes: currentBoard.nodes,
+            links: currentBoard.links,
+            teams: currentBoard.teams.filter { $0.id != normalizedID },
+            agents: agents
+        )
     }
 
     /// Lists agent chat sessions backed by JSONL files.
@@ -714,10 +989,13 @@ public actor CoreService {
         try payload.write(to: url, options: .atomic)
 
         currentConfig = config
-        workspaceRootURL = config.resolvedWorkspaceRootURL(currentDirectory: FileManager.default.currentDirectoryPath)
-        agentsRootURL = workspaceRootURL.appendingPathComponent("agents", isDirectory: true)
+        workspaceRootURL = config
+            .resolvedWorkspaceRootURL(currentDirectory: FileManager.default.currentDirectoryPath)
+        agentsRootURL = workspaceRootURL
+            .appendingPathComponent("agents", isDirectory: true)
         agentCatalogStore.updateAgentsRootURL(agentsRootURL)
         sessionStore.updateAgentsRootURL(agentsRootURL)
+        actorBoardStore.updateWorkspaceRootURL(workspaceRootURL)
         await sessionOrchestrator.updateAgentsRootURL(agentsRootURL)
         await toolsAuthorization.updateAgentsRootURL(agentsRootURL)
         toolExecution.updateWorkspaceRootURL(workspaceRootURL)
@@ -803,6 +1081,63 @@ public actor CoreService {
         case .storageFailure:
             return .storageFailure
         }
+    }
+
+    private func mapActorBoardError(_ error: Error) -> ActorBoardError {
+        if let actorBoardError = error as? ActorBoardError {
+            return actorBoardError
+        }
+
+        guard let storeError = error as? ActorBoardFileStore.StoreError else {
+            return .storageFailure
+        }
+
+        switch storeError {
+        case .invalidPayload:
+            return .invalidPayload
+        case .actorNotFound:
+            return .actorNotFound
+        case .storageFailure:
+            return .storageFailure
+        }
+    }
+
+    private func updateActorBoardSnapshot(
+        nodes: [ActorNode],
+        links: [ActorLink],
+        teams: [ActorTeam],
+        agents: [AgentSummary]
+    ) throws -> ActorBoardSnapshot {
+        do {
+            return try actorBoardStore.saveBoard(
+                ActorBoardUpdateRequest(nodes: nodes, links: links, teams: teams),
+                agents: agents
+            )
+        } catch {
+            throw mapActorBoardError(error)
+        }
+    }
+
+    private func isProtectedSystemActorID(_ id: String) -> Bool {
+        id == "human:admin" || id.hasPrefix("agent:")
+    }
+
+    private func normalizedActorEntityID(_ raw: String) -> String? {
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            return nil
+        }
+
+        let allowed = CharacterSet(charactersIn: "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_.:/")
+        if trimmed.rangeOfCharacter(from: allowed.inverted) != nil {
+            return nil
+        }
+
+        guard trimmed.count <= 180 else {
+            return nil
+        }
+
+        return trimmed
     }
 
     private func normalizedAgentID(_ raw: String) -> String? {

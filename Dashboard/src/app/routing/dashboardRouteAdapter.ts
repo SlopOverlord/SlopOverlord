@@ -3,6 +3,7 @@ export const TOP_LEVEL_SECTIONS = [
   "projects",
   "sessions",
   "overview",
+  "actors",
   "agents",
   "usafe",
   "nodes",
