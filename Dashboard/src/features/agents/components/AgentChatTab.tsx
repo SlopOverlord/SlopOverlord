@@ -5,7 +5,8 @@ import {
   fetchAgentSession,
   fetchAgentSessions,
   postAgentSessionControl,
-  postAgentSessionMessage
+  postAgentSessionMessage,
+  subscribeAgentSessionStream
 } from "../../../api";
 
 const INLINE_ATTACHMENT_MAX_BYTES = 2 * 1024 * 1024;
@@ -429,11 +430,14 @@ export function AgentChatTab({ agentId }) {
   const [selectedInspectorRecordId, setSelectedInspectorRecordId] = useState(null);
   const fileInputRef = useRef(null);
   const composeInputRef = useRef(null);
-  const runStateRef = useRef({ watcherId: 0, sessionId: null, abortController: null });
+  const runStateRef = useRef({ sessionId: null, abortController: null });
+  const streamCleanupRef = useRef(() => {});
 
   useEffect(() => {
     document.body.classList.add("agent-chat-no-page-scroll");
     return () => {
+      streamCleanupRef.current?.();
+      streamCleanupRef.current = () => {};
       document.body.classList.remove("agent-chat-no-page-scroll");
     };
   }, []);
@@ -453,7 +457,8 @@ export function AgentChatTab({ agentId }) {
       setIsInspectorOpen(false);
       setSelectedInspectorRecordId(null);
       setIsSending(false);
-      runStateRef.current.watcherId += 1;
+      streamCleanupRef.current?.();
+      streamCleanupRef.current = () => {};
       runStateRef.current.abortController?.abort();
       runStateRef.current.sessionId = null;
       runStateRef.current.abortController = null;
@@ -492,7 +497,8 @@ export function AgentChatTab({ agentId }) {
 
     return () => {
       isCancelled = true;
-      runStateRef.current.watcherId += 1;
+      streamCleanupRef.current?.();
+      streamCleanupRef.current = () => {};
       runStateRef.current.abortController?.abort();
       runStateRef.current.sessionId = null;
       runStateRef.current.abortController = null;
@@ -562,43 +568,112 @@ export function AgentChatTab({ agentId }) {
       .find((eventItem) => eventItem.type === "run_status" && eventItem.runStatus)?.runStatus;
   }
 
-  function latestRespondingTextFromEvents(events) {
-    const responding = [...events].reverse().find(
-      (eventItem) =>
-        eventItem.type === "run_status" &&
-        eventItem.runStatus?.stage === "responding" &&
-        eventItem.runStatus?.expandedText
-    )?.runStatus;
-    return String(responding?.expandedText || "");
+  function mergeSessionSummary(summary) {
+    if (!summary?.id) {
+      return;
+    }
+    setSessions((previous) =>
+      sortSessionsByUpdate([summary, ...previous.filter((sessionItem) => sessionItem.id !== summary.id)])
+    );
   }
 
-  async function watchSessionWhileRunning(sessionId, watcherId) {
-    while (runStateRef.current.watcherId === watcherId) {
-      const detail = await fetchAgentSession(agentId, sessionId);
-      if (runStateRef.current.watcherId !== watcherId) {
-        return;
+  function applyStreamEvent(summary, streamEvent) {
+    if (!streamEvent?.id || !streamEvent?.sessionId) {
+      return;
+    }
+
+    setActiveSession((previous) => {
+      if (!previous?.summary?.id || previous.summary.id !== streamEvent.sessionId) {
+        return previous;
       }
 
-      if (detail && Array.isArray(detail.events)) {
-        const events = detail.events;
-        const latestStatus = latestRunStatusFromEvents(events);
-        const respondingText = latestRespondingTextFromEvents(events);
-        if (respondingText) {
-          setOptimisticAssistantText(respondingText);
+      const existingEvents = Array.isArray(previous.events) ? previous.events : [];
+      const alreadyExists = existingEvents.some((item) => item?.id === streamEvent.id);
+      if (alreadyExists) {
+        if (summary?.id === previous.summary.id) {
+          return { ...previous, summary };
         }
+        return previous;
+      }
 
-        if (latestStatus) {
-          setStatusText(
-            `Status: ${latestStatus.label}${latestStatus.details ? ` - ${latestStatus.details}` : ""}`
-          );
+      return {
+        ...previous,
+        summary: summary?.id === previous.summary.id ? summary : previous.summary,
+        events: [...existingEvents, streamEvent]
+      };
+    });
+  }
+
+  function handleSessionStreamUpdate(update) {
+    if (!update || typeof update !== "object") {
+      return;
+    }
+
+    const kind = String(update.kind || "");
+    const summary = update.summary && typeof update.summary === "object" ? update.summary : null;
+    const streamEvent = update.event && typeof update.event === "object" ? update.event : null;
+
+    if (summary?.id) {
+      mergeSessionSummary(summary);
+    }
+
+    if (streamEvent) {
+      applyStreamEvent(summary, streamEvent);
+
+      if (streamEvent.type === "run_status" && streamEvent.runStatus) {
+        const detailsText = streamEvent.runStatus.details ? ` - ${streamEvent.runStatus.details}` : "";
+        setStatusText(`Status: ${streamEvent.runStatus.label || streamEvent.runStatus.stage}${detailsText}`);
+
+        if (streamEvent.runStatus.stage === "responding" && streamEvent.runStatus.expandedText) {
+          setOptimisticAssistantText(String(streamEvent.runStatus.expandedText));
+        }
+        if (streamEvent.runStatus.stage === "done" || streamEvent.runStatus.stage === "interrupted") {
+          setOptimisticAssistantText("");
         }
       }
 
-      await new Promise((resolve) => {
-        setTimeout(resolve, 280);
-      });
+      if (streamEvent.type === "message" && streamEvent.message?.role === "assistant") {
+        setOptimisticAssistantText("");
+      }
+    }
+
+    if (kind === "session_closed") {
+      setStatusText(String(update.message || "Session stream closed."));
+    } else if (kind === "session_error") {
+      setStatusText(String(update.message || "Session stream error."));
     }
   }
+
+  useEffect(() => {
+    streamCleanupRef.current?.();
+    streamCleanupRef.current = () => {};
+
+    if (!activeSessionId) {
+      return;
+    }
+
+    const disconnect = subscribeAgentSessionStream(agentId, activeSessionId, {
+      onUpdate: handleSessionStreamUpdate,
+      onError: () => {
+        if (activeSessionId) {
+          setStatusText((previous) => {
+            if (String(previous || "").toLowerCase().includes("status:")) {
+              return previous;
+            }
+            return "Realtime stream reconnecting...";
+          });
+        }
+      }
+    });
+    streamCleanupRef.current = disconnect;
+
+    return () => {
+      disconnect();
+      if (streamCleanupRef.current === disconnect) {
+        streamCleanupRef.current = () => {};
+      }
+    };
+  }, [agentId, activeSessionId]);
 
   function addFiles(fileList) {
     const next = Array.from(fileList || []);
@@ -698,11 +773,8 @@ export function AgentChatTab({ agentId }) {
       })
     );
 
-    const watcherId = runStateRef.current.watcherId + 1;
-    runStateRef.current.watcherId = watcherId;
     runStateRef.current.sessionId = sessionId;
     runStateRef.current.abortController = new AbortController();
-    watchSessionWhileRunning(sessionId, watcherId);
 
     try {
       const response = await postAgentSessionMessage(
@@ -737,9 +809,6 @@ export function AgentChatTab({ agentId }) {
         setStatusText("Failed to send message.");
       }
     } finally {
-      if (runStateRef.current.watcherId === watcherId) {
-        runStateRef.current.watcherId += 1;
-      }
       runStateRef.current.abortController = null;
       runStateRef.current.sessionId = null;
       setOptimisticUserEvent(null);
@@ -754,7 +823,6 @@ export function AgentChatTab({ agentId }) {
     }
 
     const sessionId = runStateRef.current.sessionId || activeSessionId;
-    runStateRef.current.watcherId += 1;
     runStateRef.current.abortController?.abort();
     runStateRef.current.abortController = null;
     runStateRef.current.sessionId = null;

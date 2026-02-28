@@ -7,11 +7,30 @@ public struct CoreRouterResponse: Sendable {
     public var status: Int
     public var body: Data
     public var contentType: String
+    public var sseStream: AsyncStream<CoreRouterServerSentEvent>?
 
-    public init(status: Int, body: Data, contentType: String = "application/json") {
+    public init(
+        status: Int,
+        body: Data,
+        contentType: String = "application/json",
+        sseStream: AsyncStream<CoreRouterServerSentEvent>? = nil
+    ) {
         self.status = status
         self.body = body
         self.contentType = contentType
+        self.sseStream = sseStream
+    }
+}
+
+public struct CoreRouterServerSentEvent: Sendable {
+    public var event: String
+    public var data: Data
+    public var id: String?
+
+    public init(event: String, data: Data, id: String? = nil) {
+        self.event = event
+        self.data = data
+        self.id = id
     }
 }
 
@@ -95,6 +114,7 @@ private enum ErrorCode {
     static let sessionListFailed = "session_list_failed"
     static let sessionDeleteFailed = "session_delete_failed"
     static let sessionWriteFailed = "session_write_failed"
+    static let sessionStreamFailed = "session_stream_failed"
     static let invalidAgentConfigPayload = "invalid_agent_config_payload"
     static let invalidAgentModel = "invalid_agent_model"
     static let agentConfigReadFailed = "agent_config_read_failed"
@@ -332,6 +352,19 @@ public actor CoreRouter {
                 return Self.agentSessionErrorResponse(error, fallback: ErrorCode.sessionNotFound)
             } catch {
                 return Self.json(status: HTTPStatus.internalServerError, payload: ["error": ErrorCode.sessionNotFound])
+            }
+        }
+
+        add(.get, "/v1/agents/:agentId/sessions/:sessionId/stream") { request in
+            let agentId = request.pathParam("agentId") ?? ""
+            let sessionId = request.pathParam("sessionId") ?? ""
+            do {
+                let stream = try await service.streamAgentSessionEvents(agentID: agentId, sessionID: sessionId)
+                return Self.sse(status: HTTPStatus.ok, updates: stream)
+            } catch let error as CoreService.AgentSessionError {
+                return Self.agentSessionErrorResponse(error, fallback: ErrorCode.sessionStreamFailed)
+            } catch {
+                return Self.json(status: HTTPStatus.internalServerError, payload: ["error": ErrorCode.sessionStreamFailed])
             }
         }
 
@@ -579,6 +612,39 @@ public actor CoreRouter {
         encoder.dateEncodingStrategy = .iso8601
         let data = (try? encoder.encode(payload)) ?? CoreRouterConstants.emptyJSONData
         return CoreRouterResponse(status: status, body: data)
+    }
+
+    private static func sse(status: Int, updates: AsyncStream<AgentSessionStreamUpdate>) -> CoreRouterResponse {
+        let stream = AsyncStream<CoreRouterServerSentEvent>(bufferingPolicy: .bufferingNewest(128)) { continuation in
+            let task = Task {
+                let encoder = JSONEncoder()
+                encoder.dateEncodingStrategy = .iso8601
+
+                for await update in updates {
+                    let payload = (try? encoder.encode(update)) ?? CoreRouterConstants.emptyJSONData
+                    continuation.yield(
+                        CoreRouterServerSentEvent(
+                            event: update.kind.rawValue,
+                            data: payload,
+                            id: String(update.cursor)
+                        )
+                    )
+                }
+
+                continuation.finish()
+            }
+
+            continuation.onTermination = { _ in
+                task.cancel()
+            }
+        }
+
+        return CoreRouterResponse(
+            status: status,
+            body: Data(),
+            contentType: "text/event-stream",
+            sseStream: stream
+        )
     }
 
     private static func decode<T: Decodable>(_ data: Data, as type: T.Type) -> T? {

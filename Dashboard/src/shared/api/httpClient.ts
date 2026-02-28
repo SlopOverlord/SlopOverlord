@@ -16,7 +16,7 @@ export interface JsonResponse<TData> {
 
 const DEFAULT_API_BASE = "http://localhost:25101";
 
-function resolveApiBase() {
+export function resolveApiBase() {
   const configured = window.__SLOPOVERLORD_CONFIG__?.apiBase;
   if (typeof configured !== "string" || configured.trim().length === 0) {
     return DEFAULT_API_BASE;
@@ -24,7 +24,7 @@ function resolveApiBase() {
   return configured.trim().replace(/\/+$/, "");
 }
 
-function joinURL(path: string) {
+export function buildApiURL(path: string) {
   const base = resolveApiBase();
   const normalizedPath = path.startsWith("/") ? path : `/${path}`;
   return `${base}${normalizedPath}`;
@@ -61,7 +61,7 @@ export async function requestJson<TResponse, TBody = unknown>(
   }
 
   try {
-    const response = await fetch(joinURL(options.path), requestInit);
+    const response = await fetch(buildApiURL(options.path), requestInit);
     const data = await parseJSONSafely<TResponse>(response);
     return { ok: response.ok, status: response.status, data };
   } catch {

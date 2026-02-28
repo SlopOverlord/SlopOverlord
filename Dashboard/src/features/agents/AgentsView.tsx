@@ -423,10 +423,6 @@ export function AgentsView({ routeAgentId = null, routeTab = "overview", onRoute
       </section>
 
       <section className="agent-content-shell">
-        <div className="agent-content-header">
-          <h3>{tabTitle(activeTab)}</h3>
-          <span className="placeholder-text">/agents/{activeAgent.id}{activeTab === "overview" ? "" : `/${activeTab}`}</span>
-        </div>
         {renderAgentTabContent(activeAgent, activeTab)}
       </section>
     </main>

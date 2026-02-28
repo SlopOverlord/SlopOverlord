@@ -421,6 +421,24 @@ func agentSessionLifecycleEndpoints() async throws {
     let sessions = try decoder.decode([AgentSessionSummary].self, from: listResponse.body)
     #expect(sessions.contains(where: { $0.id == sessionSummary.id }))
 
+    let streamResponse = await router.handle(
+        method: "GET",
+        path: "/v1/agents/agent-chat/sessions/\(sessionSummary.id)/stream",
+        body: nil
+    )
+    #expect(streamResponse.status == 200)
+    #expect(streamResponse.contentType == "text/event-stream")
+    #expect(streamResponse.sseStream != nil)
+    var streamIterator = streamResponse.sseStream?.makeAsyncIterator()
+    let readyChunk = await streamIterator?.next()
+    #expect(readyChunk != nil)
+    if let readyChunk {
+        #expect(readyChunk.event == AgentSessionStreamUpdateKind.sessionReady.rawValue)
+        let streamUpdate = try decoder.decode(AgentSessionStreamUpdate.self, from: readyChunk.data)
+        #expect(streamUpdate.kind == .sessionReady)
+        #expect(streamUpdate.summary?.id == sessionSummary.id)
+    }
+
     let attachmentPayload = AgentAttachmentUpload(
         name: "note.txt",
         mimeType: "text/plain",

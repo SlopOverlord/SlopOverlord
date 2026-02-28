@@ -3,6 +3,11 @@ import Configuration
 import Foundation
 import Logging
 import Protocols
+#if os(Linux)
+import Glibc
+#else
+import Darwin
+#endif
 
 @main
 struct CoreMain: AsyncParsableCommand {
@@ -14,7 +19,7 @@ struct CoreMain: AsyncParsableCommand {
     @Option(name: [.short, .long], help: "Path to JSON config file")
     var configPath: String?
 
-    @Option(name: .long, help: "Generates an immediate visor bulletin after boot")
+    @Flag(name: .long, inversion: .prefixedNo, help: "Generates an immediate visor bulletin after boot")
     var bootstrapBulletin: Bool = true
 
     @Flag(name: .long, help: "Runs demo request on startup")
@@ -26,84 +31,90 @@ struct CoreMain: AsyncParsableCommand {
     mutating func run() async throws {
         await LoggingBootstrapper.shared.bootstrapIfNeeded()
         let logger = Logger(label: "slopoverlord.core.main")
+        await FatalSignalLogger.shared.installIfNeeded()
 
-        var explicitConfigPath = normalizedConfigPath(configPath)
-        var config = CoreConfig.load(from: explicitConfigPath)
+        do {
+            var explicitConfigPath = normalizedConfigPath(configPath)
+            var config = CoreConfig.load(from: explicitConfigPath)
 
-        if #available(macOS 15.0, *) {
-            let envConfig = ConfigReader(providers: [EnvironmentVariablesProvider()])
-            if let envConfigPath = normalizedConfigPath(
-                envConfig.string(forKey: "core.config.path", default: "")
-            ) {
-                explicitConfigPath = envConfigPath
-                config = CoreConfig.load(from: explicitConfigPath)
-            }
+            if #available(macOS 15.0, *) {
+                let envConfig = ConfigReader(providers: [EnvironmentVariablesProvider()])
+                if let envConfigPath = normalizedConfigPath(
+                    envConfig.string(forKey: "core.config.path", default: "")
+                ) {
+                    explicitConfigPath = envConfigPath
+                    config = CoreConfig.load(from: explicitConfigPath)
+                }
 
-            applyEnvironmentOverrides(config: &config, envConfig: envConfig)
+                applyEnvironmentOverrides(config: &config, envConfig: envConfig)
 
-            if explicitConfigPath == nil {
+                if explicitConfigPath == nil {
+                    let workspaceConfigPath = CoreConfig.defaultConfigPath(for: config.workspace)
+                    if FileManager.default.fileExists(atPath: workspaceConfigPath) {
+                        config = CoreConfig.load(from: workspaceConfigPath)
+                        applyEnvironmentOverrides(config: &config, envConfig: envConfig)
+                    }
+                }
+            } else if explicitConfigPath == nil {
                 let workspaceConfigPath = CoreConfig.defaultConfigPath(for: config.workspace)
                 if FileManager.default.fileExists(atPath: workspaceConfigPath) {
                     config = CoreConfig.load(from: workspaceConfigPath)
-                    applyEnvironmentOverrides(config: &config, envConfig: envConfig)
                 }
             }
-        } else if explicitConfigPath == nil {
-            let workspaceConfigPath = CoreConfig.defaultConfigPath(for: config.workspace)
-            if FileManager.default.fileExists(atPath: workspaceConfigPath) {
-                config = CoreConfig.load(from: workspaceConfigPath)
-            }
-        }
 
-        let workspaceRoot = try prepareWorkspace(config: &config, logger: logger)
-        logger.info("Workspace prepared at \(workspaceRoot.path)")
+            let workspaceRoot = try prepareWorkspace(config: &config, logger: logger)
+            logger.info("Workspace prepared at \(workspaceRoot.path)")
 
-        let resolvedConfigPath = explicitConfigPath ??
-            workspaceRoot.appendingPathComponent(CoreConfig.defaultConfigFileName).path
-        try ensureConfigFileExists(path: resolvedConfigPath, config: config, logger: logger)
-        let service = CoreService(config: config, configPath: resolvedConfigPath)
-        let router = CoreRouter(service: service)
-        let server = CoreHTTPServer(
-            host: config.listen.host,
-            port: config.listen.port,
-            router: router,
-            logger: logger
-        )
-
-        logger.info("SlopOverlord Core initialized")
-
-        if !oneshot {
-            try server.start()
-            logger.info("Core HTTP server listening on \(config.listen.host):\(config.listen.port)")
-        }
-
-        if runDemoRequest {
-            let sampleRequest = ChannelMessageRequest(
-                userId: "demo-user",
-                content: "Implement a feature and run tests"
-            )
-            let requestBody = try? JSONEncoder().encode(sampleRequest)
-            let response = await router.handle(
-                method: "POST",
-                path: "/v1/channels/general/messages",
-                body: requestBody
+            let resolvedConfigPath = explicitConfigPath ??
+                workspaceRoot.appendingPathComponent(CoreConfig.defaultConfigFileName).path
+            try ensureConfigFileExists(path: resolvedConfigPath, config: config, logger: logger)
+            let service = CoreService(config: config, configPath: resolvedConfigPath)
+            let router = CoreRouter(service: service)
+            let server = CoreHTTPServer(
+                host: config.listen.host,
+                port: config.listen.port,
+                router: router,
+                logger: logger
             )
 
-            if let body = String(data: response.body, encoding: .utf8) {
-                logger.info("POST /v1/channels/general/messages -> \(response.status) \(body)")
+            logger.info("SlopOverlord Core initialized")
+
+            if !oneshot {
+                try server.start()
+                logger.info("Core HTTP server listening on \(config.listen.host):\(config.listen.port)")
             }
-        }
 
-        if bootstrapBulletin {
-            let bulletin = await service.triggerVisorBulletin()
-            logger.info("Visor bulletin generated: \(bulletin.headline)")
-        }
+            if runDemoRequest {
+                let sampleRequest = ChannelMessageRequest(
+                    userId: "demo-user",
+                    content: "Implement a feature and run tests"
+                )
+                let requestBody = try? JSONEncoder().encode(sampleRequest)
+                let response = await router.handle(
+                    method: "POST",
+                    path: "/v1/channels/general/messages",
+                    body: requestBody
+                )
 
-        // Daemon mode by default: keep process alive for container/service runtime.
-        if !oneshot {
-            logger.info("SlopOverlord Core daemon mode is active")
-            defer { try? server.shutdown() }
-            try server.waitUntilClosed()
+                if let body = String(data: response.body, encoding: .utf8) {
+                    logger.info("POST /v1/channels/general/messages -> \(response.status) \(body)")
+                }
+            }
+
+            if bootstrapBulletin {
+                let bulletin = await service.triggerVisorBulletin()
+                logger.info("Visor bulletin generated: \(bulletin.headline)")
+            }
+
+            // Foreground server mode by default: keep process alive for container/service runtime.
+            if !oneshot {
+                logger.info("SlopOverlord Core foreground server mode is active")
+                defer { try? server.shutdown() }
+                try server.waitUntilClosed()
+            }
+        } catch {
+            logger.critical("Core is exiting because of an unrecoverable error: \(String(describing: error))")
+            throw error
         }
     }
 }
@@ -213,5 +224,46 @@ private actor LoggingBootstrapper {
 
         LoggingSystem.bootstrap(StreamLogHandler.standardError)
         isBootstrapped = true
+    }
+}
+
+private actor FatalSignalLogger {
+    static let shared = FatalSignalLogger()
+
+    private var isInstalled = false
+    private let trackedSignals: [Int32] = [SIGABRT, SIGILL, SIGTRAP, SIGSEGV, SIGBUS, SIGFPE]
+
+    func installIfNeeded() {
+        guard !isInstalled else {
+            return
+        }
+        isInstalled = true
+
+        for code in trackedSignals {
+            _ = signal(code, coreFatalSignalHandler)
+        }
+    }
+}
+
+private func coreFatalSignalHandler(_ signalCode: Int32) {
+    let signalName = signalNameForCode(signalCode)
+    let text = "slopoverlord-core fatal signal \(signalCode) (\(signalName)). Process will exit.\n"
+    text.withCString { pointer in
+        _ = write(STDERR_FILENO, pointer, strlen(pointer))
+    }
+
+    _ = signal(signalCode, SIG_DFL)
+    _ = raise(signalCode)
+}
+
+private func signalNameForCode(_ code: Int32) -> String {
+    switch code {
+    case SIGABRT: return "SIGABRT"
+    case SIGILL: return "SIGILL"
+    case SIGTRAP: return "SIGTRAP"
+    case SIGSEGV: return "SIGSEGV"
+    case SIGBUS: return "SIGBUS"
+    case SIGFPE: return "SIGFPE"
+    default: return "UNKNOWN"
     }
 }

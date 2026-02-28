@@ -19,6 +19,7 @@ export const createAgentSession = coreApi.createAgentSession;
 export const fetchAgentSession = coreApi.fetchAgentSession;
 export const postAgentSessionMessage = coreApi.postAgentSessionMessage;
 export const postAgentSessionControl = coreApi.postAgentSessionControl;
+export const subscribeAgentSessionStream = coreApi.subscribeAgentSessionStream;
 export const deleteAgentSession = coreApi.deleteAgentSession;
 export const fetchAgentConfig = coreApi.fetchAgentConfig;
 export const updateAgentConfig = coreApi.updateAgentConfig;

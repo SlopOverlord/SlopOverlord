@@ -2,6 +2,39 @@ import Foundation
 import AgentRuntime
 import Protocols
 
+public enum AgentSessionStreamUpdateKind: String, Codable, Sendable {
+    case sessionReady = "session_ready"
+    case sessionEvent = "session_event"
+    case heartbeat
+    case sessionClosed = "session_closed"
+    case sessionError = "session_error"
+}
+
+public struct AgentSessionStreamUpdate: Codable, Sendable {
+    public var kind: AgentSessionStreamUpdateKind
+    public var cursor: Int
+    public var summary: AgentSessionSummary?
+    public var event: AgentSessionEvent?
+    public var message: String?
+    public var createdAt: Date
+
+    public init(
+        kind: AgentSessionStreamUpdateKind,
+        cursor: Int,
+        summary: AgentSessionSummary? = nil,
+        event: AgentSessionEvent? = nil,
+        message: String? = nil,
+        createdAt: Date = Date()
+    ) {
+        self.kind = kind
+        self.cursor = cursor
+        self.summary = summary
+        self.event = event
+        self.message = message
+        self.createdAt = createdAt
+    }
+}
+
 public actor CoreService {
 
     public enum AgentStorageError: Error {
@@ -233,6 +266,115 @@ public actor CoreService {
             return try sessionStore.loadSession(agentID: normalizedAgentID, sessionID: normalizedSessionID)
         } catch {
             throw mapSessionStoreError(error)
+        }
+    }
+
+    /// Streams incremental session updates over a long-lived connection.
+    public func streamAgentSessionEvents(agentID: String, sessionID: String) throws -> AsyncStream<AgentSessionStreamUpdate> {
+        guard let normalizedAgentID = normalizedAgentID(agentID) else {
+            throw AgentSessionError.invalidAgentID
+        }
+
+        guard let normalizedSessionID = normalizedSessionID(sessionID) else {
+            throw AgentSessionError.invalidSessionID
+        }
+
+        _ = try getAgent(id: normalizedAgentID)
+        _ = try getAgentSession(agentID: normalizedAgentID, sessionID: normalizedSessionID)
+
+        return AsyncStream(bufferingPolicy: .bufferingNewest(128)) { continuation in
+            let task = Task { [normalizedAgentID, normalizedSessionID] in
+                var deliveredCount = 0
+                var lastHeartbeatAt = Date.distantPast
+
+                while !Task.isCancelled {
+                    do {
+                        let detail = try self.getAgentSession(
+                            agentID: normalizedAgentID,
+                            sessionID: normalizedSessionID
+                        )
+
+                        if deliveredCount == 0 {
+                            deliveredCount = detail.events.count
+                            continuation.yield(
+                                AgentSessionStreamUpdate(
+                                    kind: .sessionReady,
+                                    cursor: deliveredCount,
+                                    summary: detail.summary
+                                )
+                            )
+                            lastHeartbeatAt = Date()
+                        }
+
+                        if detail.events.count > deliveredCount {
+                            for index in deliveredCount..<detail.events.count {
+                                continuation.yield(
+                                    AgentSessionStreamUpdate(
+                                        kind: .sessionEvent,
+                                        cursor: index + 1,
+                                        summary: detail.summary,
+                                        event: detail.events[index]
+                                    )
+                                )
+                            }
+                            deliveredCount = detail.events.count
+                            lastHeartbeatAt = Date()
+                        } else {
+                            let now = Date()
+                            if now.timeIntervalSince(lastHeartbeatAt) >= 12 {
+                                continuation.yield(
+                                    AgentSessionStreamUpdate(
+                                        kind: .heartbeat,
+                                        cursor: deliveredCount,
+                                        summary: detail.summary,
+                                        createdAt: now
+                                    )
+                                )
+                                lastHeartbeatAt = now
+                            }
+                        }
+                    } catch let error as AgentSessionError {
+                        switch error {
+                        case .sessionNotFound:
+                            continuation.yield(
+                                AgentSessionStreamUpdate(
+                                    kind: .sessionClosed,
+                                    cursor: deliveredCount,
+                                    message: "Session was deleted."
+                                )
+                            )
+                        default:
+                            continuation.yield(
+                                AgentSessionStreamUpdate(
+                                    kind: .sessionError,
+                                    cursor: deliveredCount,
+                                    message: "Failed to stream session updates."
+                                )
+                            )
+                        }
+                        continuation.finish()
+                        return
+                    } catch {
+                        continuation.yield(
+                            AgentSessionStreamUpdate(
+                                kind: .sessionError,
+                                cursor: deliveredCount,
+                                message: "Failed to stream session updates."
+                            )
+                        )
+                        continuation.finish()
+                        return
+                    }
+
+                    try? await Task.sleep(nanoseconds: 250_000_000)
+                }
+
+                continuation.finish()
+            }
+
+            continuation.onTermination = { _ in
+                task.cancel()
+            }
         }
     }
 

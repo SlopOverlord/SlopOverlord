@@ -1,9 +1,15 @@
-import { requestJson } from "./httpClient";
+import { buildApiURL, requestJson } from "./httpClient";
 
 type AnyRecord = Record<string, unknown>;
 
 interface RequestOptions {
   signal?: AbortSignal;
+}
+
+interface AgentSessionStreamHandlers {
+  onUpdate?: (update: AnyRecord) => void;
+  onOpen?: () => void;
+  onError?: () => void;
 }
 
 export interface CoreApi {
@@ -34,6 +40,11 @@ export interface CoreApi {
     payload: AnyRecord,
     options?: RequestOptions
   ) => Promise<AnyRecord | null>;
+  subscribeAgentSessionStream: (
+    agentId: string,
+    sessionId: string,
+    handlers?: AgentSessionStreamHandlers
+  ) => () => void;
   deleteAgentSession: (agentId: string, sessionId: string) => Promise<boolean>;
   fetchAgentConfig: (agentId: string) => Promise<AnyRecord | null>;
   updateAgentConfig: (agentId: string, payload: AnyRecord) => Promise<AnyRecord | null>;
@@ -222,6 +233,47 @@ export function createCoreApi(): CoreApi {
         return null;
       }
       return response.data;
+    },
+
+    subscribeAgentSessionStream: (agentId, sessionId, handlers = {}) => {
+      const source = new EventSource(
+        buildApiURL(`/v1/agents/${encodeURIComponent(agentId)}/sessions/${encodeURIComponent(sessionId)}/stream`)
+      );
+
+      const eventNames = ["session_ready", "session_event", "heartbeat", "session_closed", "session_error"];
+      const onMessage = (event: MessageEvent) => {
+        if (!event?.data || typeof handlers.onUpdate !== "function") {
+          return;
+        }
+
+        try {
+          const payload = JSON.parse(event.data);
+          if (payload && typeof payload === "object") {
+            handlers.onUpdate(payload as AnyRecord);
+          }
+        } catch {
+          // Ignore malformed stream chunks and keep connection alive.
+        }
+      };
+
+      for (const eventName of eventNames) {
+        source.addEventListener(eventName, onMessage as EventListener);
+      }
+
+      source.onopen = () => {
+        handlers.onOpen?.();
+      };
+
+      source.onerror = () => {
+        handlers.onError?.();
+      };
+
+      return () => {
+        for (const eventName of eventNames) {
+          source.removeEventListener(eventName, onMessage as EventListener);
+        }
+        source.close();
+      };
     },
 
     deleteAgentSession: async (agentId, sessionId) => {
