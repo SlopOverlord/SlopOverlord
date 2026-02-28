@@ -1,7 +1,7 @@
 import Foundation
-import Foundation
 import Testing
 @testable import AgentRuntime
+@testable import PluginSDK
 @testable import Protocols
 
 @Test
@@ -80,4 +80,65 @@ func visorCreatesBulletin() async {
 
     let entries = await memory.entries()
     #expect(entries.count == 1)
+}
+
+private actor ToolInvocationCounter {
+    private var count = 0
+
+    func increment() {
+        count += 1
+    }
+
+    func value() -> Int {
+        count
+    }
+}
+
+private actor SequencedModelProvider: ModelProviderPlugin {
+    let id: String = "sequenced"
+    let models: [String] = ["mock-model"]
+    private var queue: [String]
+
+    init(outputs: [String]) {
+        self.queue = outputs
+    }
+
+    func complete(model: String, prompt: String, maxTokens: Int) async throws -> String {
+        if queue.isEmpty {
+            return "No output."
+        }
+        return queue.removeFirst()
+    }
+}
+
+@Test
+func respondInlineAutoToolCallingLoop() async {
+    let provider = SequencedModelProvider(
+        outputs: [
+            "{\"tool\":\"agents.list\",\"arguments\":{},\"reason\":\"need agents\"}",
+            "Final answer after tool execution."
+        ]
+    )
+    let invocationCounter = ToolInvocationCounter()
+    let system = RuntimeSystem(modelProvider: provider, defaultModel: "mock-model")
+
+    let decision = await system.postMessage(
+        channelId: "tool-loop",
+        request: ChannelMessageRequest(userId: "u1", content: "hello"),
+        toolInvoker: { request in
+            await invocationCounter.increment()
+            #expect(request.tool == "agents.list")
+            return ToolInvocationResult(
+                tool: request.tool,
+                ok: true,
+                data: .array([])
+            )
+        }
+    )
+
+    #expect(decision.action == .respond)
+    let snapshot = await system.channelState(channelId: "tool-loop")
+    let finalMessage = snapshot?.messages.last(where: { $0.userId == "system" })?.content ?? ""
+    #expect(finalMessage == "Final answer after tool execution.")
+    #expect(await invocationCounter.value() == 1)
 }

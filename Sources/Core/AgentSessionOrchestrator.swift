@@ -4,6 +4,7 @@ import Protocols
 
 actor AgentSessionOrchestrator {
     private static let sessionContextBootstrapMarker = "[agent_session_context_bootstrap_v1]"
+    typealias ToolInvoker = @Sendable (String, String, ToolInvocationRequest) async -> ToolInvocationResult
 
     enum OrchestratorError: Error {
         case invalidAgentID
@@ -17,6 +18,7 @@ actor AgentSessionOrchestrator {
     private let runtime: RuntimeSystem
     private let sessionStore: AgentSessionFileStore
     private let agentCatalogStore: AgentCatalogFileStore
+    private var toolInvoker: ToolInvoker?
 
     private var activeSessionRunChannels: Set<String> = []
     private var interruptedSessionRunChannels: Set<String> = []
@@ -24,15 +26,25 @@ actor AgentSessionOrchestrator {
     private var streamedAssistantLastPersistedByChannel: [String: String] = [:]
     private var streamedAssistantLastPersistedAtByChannel: [String: Date] = [:]
 
-    init(runtime: RuntimeSystem, sessionStore: AgentSessionFileStore, agentCatalogStore: AgentCatalogFileStore) {
+    init(
+        runtime: RuntimeSystem,
+        sessionStore: AgentSessionFileStore,
+        agentCatalogStore: AgentCatalogFileStore,
+        toolInvoker: ToolInvoker? = nil
+    ) {
         self.runtime = runtime
         self.sessionStore = sessionStore
         self.agentCatalogStore = agentCatalogStore
+        self.toolInvoker = toolInvoker
     }
 
     func updateAgentsRootURL(_ url: URL) {
         sessionStore.updateAgentsRootURL(url)
         agentCatalogStore.updateAgentsRootURL(url)
+    }
+
+    func updateToolInvoker(_ toolInvoker: ToolInvoker?) {
+        self.toolInvoker = toolInvoker
     }
 
     func createSession(agentID: String, request: AgentSessionCreateRequest) async throws -> AgentSessionSummary {
@@ -185,6 +197,20 @@ actor AgentSessionOrchestrator {
                     channelID: channelID,
                     partialText: partialText
                 )
+            },
+            toolInvoker: { [weak self] toolRequest in
+                guard let self else {
+                    return ToolInvocationResult(
+                        tool: toolRequest.tool,
+                        ok: false,
+                        error: ToolErrorPayload(
+                            code: "tool_invoker_unavailable",
+                            message: "Tool invoker is unavailable.",
+                            retryable: true
+                        )
+                    )
+                }
+                return await self.invokeTool(agentID: agentID, sessionID: sessionID, request: toolRequest)
             }
         )
 
@@ -451,6 +477,25 @@ actor AgentSessionOrchestrator {
 
     private func sessionChannelID(agentID: String, sessionID: String) -> String {
         "agent:\(agentID):session:\(sessionID)"
+    }
+
+    private func invokeTool(
+        agentID: String,
+        sessionID: String,
+        request: ToolInvocationRequest
+    ) async -> ToolInvocationResult {
+        guard let toolInvoker else {
+            return ToolInvocationResult(
+                tool: request.tool,
+                ok: false,
+                error: ToolErrorPayload(
+                    code: "tool_invoker_unavailable",
+                    message: "Tool invoker is unavailable.",
+                    retryable: true
+                )
+            )
+        }
+        return await toolInvoker(agentID, sessionID, request)
     }
 
     private func ensureSessionContextLoaded(agentID: String, sessionID: String) async throws {

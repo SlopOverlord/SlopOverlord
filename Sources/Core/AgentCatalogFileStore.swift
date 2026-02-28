@@ -313,6 +313,20 @@ final class AgentCatalogFileStore {
             at: agentDirectory.appendingPathComponent("sessions", isDirectory: true),
             withIntermediateDirectories: true
         )
+
+        let toolsDirectory = agentDirectory.appendingPathComponent("tools", isDirectory: true)
+        try fileManager.createDirectory(at: toolsDirectory, withIntermediateDirectories: true)
+
+        let toolsPolicy = AgentToolsPolicy(
+            version: 1,
+            defaultPolicy: .allow,
+            tools: [:],
+            guardrails: .init()
+        )
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        let payload = try encoder.encode(toolsPolicy) + Data("\n".utf8)
+        try payload.write(to: toolsDirectory.appendingPathComponent("tools.json"), options: .atomic)
     }
 
     private func agentConfigURL(for id: String) -> URL {

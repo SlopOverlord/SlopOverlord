@@ -61,13 +61,33 @@ public actor CoreService {
         case storageFailure
     }
 
+    public enum AgentToolsError: Error {
+        case invalidAgentID
+        case invalidPayload
+        case agentNotFound
+        case storageFailure
+    }
+
+    public enum ToolInvocationError: Error {
+        case invalidAgentID
+        case invalidSessionID
+        case invalidPayload
+        case agentNotFound
+        case sessionNotFound
+        case forbidden(ToolErrorPayload)
+        case storageFailure
+    }
+
     private let runtime: RuntimeSystem
     private let store: any PersistenceStore
     private let openAIProviderCatalog: OpenAIProviderCatalogService
     private let agentCatalogStore: AgentCatalogFileStore
     private let sessionStore: AgentSessionFileStore
     private let sessionOrchestrator: AgentSessionOrchestrator
+    private let toolsAuthorization: ToolAuthorizationService
+    private let toolExecution: ToolExecutionService
     private let configPath: String
+    private var workspaceRootURL: URL
     private var agentsRootURL: URL
     private var currentConfig: CoreConfig
     private var eventTask: Task<Void, Never>?
@@ -87,9 +107,8 @@ public actor CoreService {
         self.store = persistenceBuilder.makeStore(config: config)
         self.openAIProviderCatalog = OpenAIProviderCatalogService()
         self.configPath = configPath
-        self.agentsRootURL = config
-            .resolvedWorkspaceRootURL(currentDirectory: FileManager.default.currentDirectoryPath)
-            .appendingPathComponent("agents", isDirectory: true)
+        self.workspaceRootURL = config.resolvedWorkspaceRootURL(currentDirectory: FileManager.default.currentDirectoryPath)
+        self.agentsRootURL = workspaceRootURL.appendingPathComponent("agents", isDirectory: true)
         self.agentCatalogStore = AgentCatalogFileStore(agentsRootURL: self.agentsRootURL)
         self.sessionStore = AgentSessionFileStore(agentsRootURL: self.agentsRootURL)
         let orchestratorCatalogStore = AgentCatalogFileStore(agentsRootURL: self.agentsRootURL)
@@ -99,7 +118,36 @@ public actor CoreService {
             sessionStore: orchestratorSessionStore,
             agentCatalogStore: orchestratorCatalogStore
         )
+        let toolsStore = AgentToolsFileStore(agentsRootURL: self.agentsRootURL)
+        self.toolsAuthorization = ToolAuthorizationService(store: toolsStore)
+        let processRegistry = SessionProcessRegistry()
+        self.toolExecution = ToolExecutionService(
+            workspaceRootURL: self.workspaceRootURL,
+            runtime: self.runtime,
+            sessionStore: self.sessionStore,
+            agentCatalogStore: self.agentCatalogStore,
+            processRegistry: processRegistry
+        )
         self.currentConfig = config
+        Task { [weak self] in
+            guard let self else {
+                return
+            }
+            await self.sessionOrchestrator.updateToolInvoker { [weak self] agentID, sessionID, request in
+                guard let self else {
+                    return ToolInvocationResult(
+                        tool: request.tool,
+                        ok: false,
+                        error: ToolErrorPayload(
+                            code: "tool_invoker_unavailable",
+                            message: "Tool invoker is unavailable.",
+                            retryable: true
+                        )
+                    )
+                }
+                return await self.invokeToolFromRuntime(agentID: agentID, sessionID: sessionID, request: request)
+            }
+        }
         Task {
             await self.startEventPersistence()
         }
@@ -217,6 +265,37 @@ public actor CoreService {
             )
         } catch {
             throw mapAgentConfigError(error)
+        }
+    }
+
+    /// Returns available tool catalog entries.
+    public func toolCatalog() -> [AgentToolCatalogEntry] {
+        ToolCatalog.entries
+    }
+
+    /// Returns agent tools policy from `/agents/<agentID>/tools/tools.json`.
+    public func getAgentToolsPolicy(agentID: String) async throws -> AgentToolsPolicy {
+        guard let normalizedAgentID = normalizedAgentID(agentID) else {
+            throw AgentToolsError.invalidAgentID
+        }
+        _ = try getAgent(id: normalizedAgentID)
+        do {
+            return try await toolsAuthorization.policy(agentID: normalizedAgentID)
+        } catch {
+            throw mapAgentToolsError(error)
+        }
+    }
+
+    /// Updates agent tools policy.
+    public func updateAgentToolsPolicy(agentID: String, request: AgentToolsUpdateRequest) async throws -> AgentToolsPolicy {
+        guard let normalizedAgentID = normalizedAgentID(agentID) else {
+            throw AgentToolsError.invalidAgentID
+        }
+        _ = try getAgent(id: normalizedAgentID)
+        do {
+            return try await toolsAuthorization.updatePolicy(agentID: normalizedAgentID, request: request)
+        } catch {
+            throw mapAgentToolsError(error)
         }
     }
 
@@ -379,7 +458,7 @@ public actor CoreService {
     }
 
     /// Deletes one session and its attachment directory.
-    public func deleteAgentSession(agentID: String, sessionID: String) throws {
+    public func deleteAgentSession(agentID: String, sessionID: String) async throws {
         guard let normalizedAgentID = normalizedAgentID(agentID) else {
             throw AgentSessionError.invalidAgentID
         }
@@ -392,6 +471,7 @@ public actor CoreService {
 
         do {
             try sessionStore.deleteSession(agentID: normalizedAgentID, sessionID: normalizedSessionID)
+            await toolExecution.cleanupSessionProcesses(normalizedSessionID)
         } catch {
             throw mapSessionStoreError(error)
         }
@@ -461,6 +541,153 @@ public actor CoreService {
         openAIProviderCatalog.status(config: currentConfig)
     }
 
+    /// Executes one tool call in session context and persists tool_call/tool_result events.
+    public func invokeTool(
+        agentID: String,
+        sessionID: String,
+        request: ToolInvocationRequest
+    ) async throws -> ToolInvocationResult {
+        let result = await invokeToolFromRuntime(agentID: agentID, sessionID: sessionID, request: request)
+        if result.ok || result.error?.code != "tool_forbidden" {
+            return result
+        }
+        throw ToolInvocationError.forbidden(result.error ?? .init(code: "tool_forbidden", message: "Forbidden", retryable: false))
+    }
+
+    /// Internal runtime path used by auto tool-calling loop.
+    public func invokeToolFromRuntime(
+        agentID: String,
+        sessionID: String,
+        request: ToolInvocationRequest
+    ) async -> ToolInvocationResult {
+        guard let normalizedAgentID = normalizedAgentID(agentID) else {
+            return .init(
+                tool: request.tool,
+                ok: false,
+                error: .init(code: "invalid_agent_id", message: "Invalid agent id.", retryable: false)
+            )
+        }
+        guard let normalizedSessionID = normalizedSessionID(sessionID) else {
+            return .init(
+                tool: request.tool,
+                ok: false,
+                error: .init(code: "invalid_session_id", message: "Invalid session id.", retryable: false)
+            )
+        }
+        guard !request.tool.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            return .init(
+                tool: request.tool,
+                ok: false,
+                error: .init(code: "invalid_tool", message: "Tool id is required.", retryable: false)
+            )
+        }
+
+        do {
+            _ = try getAgent(id: normalizedAgentID)
+            _ = try sessionStore.loadSession(agentID: normalizedAgentID, sessionID: normalizedSessionID)
+        } catch let error as AgentStorageError {
+            if case .notFound = error {
+                return .init(
+                    tool: request.tool,
+                    ok: false,
+                    error: .init(code: "agent_not_found", message: "Agent not found.", retryable: false)
+                )
+            }
+            return .init(
+                tool: request.tool,
+                ok: false,
+                error: .init(code: "invalid_agent_id", message: "Invalid agent id.", retryable: false)
+            )
+        } catch {
+            return .init(
+                tool: request.tool,
+                ok: false,
+                error: .init(code: "session_not_found", message: "Session not found.", retryable: false)
+            )
+        }
+
+        let authorization: ToolAuthorizationDecision
+        do {
+            authorization = try await toolsAuthorization.authorize(agentID: normalizedAgentID, toolID: request.tool)
+        } catch {
+            return .init(
+                tool: request.tool,
+                ok: false,
+                error: .init(code: "authorization_failed", message: "Failed to authorize tool call.", retryable: true)
+            )
+        }
+
+        do {
+            _ = try sessionStore.appendEvents(
+                agentID: normalizedAgentID,
+                sessionID: normalizedSessionID,
+                events: [
+                    AgentSessionEvent(
+                        agentId: normalizedAgentID,
+                        sessionId: normalizedSessionID,
+                        type: .toolCall,
+                        toolCall: AgentToolCallEvent(
+                            tool: request.tool,
+                            arguments: request.arguments,
+                            reason: request.reason
+                        )
+                    )
+                ]
+            )
+        } catch {
+            return .init(
+                tool: request.tool,
+                ok: false,
+                error: .init(code: "session_write_failed", message: "Failed to persist tool call event.", retryable: true)
+            )
+        }
+
+        let result: ToolInvocationResult
+        if authorization.allowed {
+            result = await toolExecution.invoke(
+                agentID: normalizedAgentID,
+                sessionID: normalizedSessionID,
+                request: request,
+                policy: authorization.policy
+            )
+        } else {
+            result = .init(
+                tool: request.tool,
+                ok: false,
+                error: authorization.error ?? .init(code: "tool_forbidden", message: "Tool is forbidden.", retryable: false)
+            )
+        }
+
+        do {
+            _ = try sessionStore.appendEvents(
+                agentID: normalizedAgentID,
+                sessionID: normalizedSessionID,
+                events: [
+                    AgentSessionEvent(
+                        agentId: normalizedAgentID,
+                        sessionId: normalizedSessionID,
+                        type: .toolResult,
+                        toolResult: AgentToolResultEvent(
+                            tool: request.tool,
+                            ok: result.ok,
+                            data: result.data,
+                            error: result.error,
+                            durationMs: result.durationMs
+                        )
+                    )
+                ]
+            )
+        } catch {
+            return .init(
+                tool: request.tool,
+                ok: false,
+                error: .init(code: "session_write_failed", message: "Failed to persist tool result event.", retryable: true)
+            )
+        }
+
+        return result
+    }
+
     /// Persists config to file and updates in-memory snapshot.
     public func updateConfig(_ config: CoreConfig) async throws -> CoreConfig {
         let encoder = JSONEncoder()
@@ -472,12 +699,13 @@ public actor CoreService {
         try payload.write(to: url, options: .atomic)
 
         currentConfig = config
-        agentsRootURL = config
-            .resolvedWorkspaceRootURL(currentDirectory: FileManager.default.currentDirectoryPath)
-            .appendingPathComponent("agents", isDirectory: true)
+        workspaceRootURL = config.resolvedWorkspaceRootURL(currentDirectory: FileManager.default.currentDirectoryPath)
+        agentsRootURL = workspaceRootURL.appendingPathComponent("agents", isDirectory: true)
         agentCatalogStore.updateAgentsRootURL(agentsRootURL)
         sessionStore.updateAgentsRootURL(agentsRootURL)
         await sessionOrchestrator.updateAgentsRootURL(agentsRootURL)
+        await toolsAuthorization.updateAgentsRootURL(agentsRootURL)
+        toolExecution.updateWorkspaceRootURL(workspaceRootURL)
         let resolvedModels = CoreModelProviderFactory.resolveModelIdentifiers(config: config)
         let modelProvider = CoreModelProviderFactory.buildModelProvider(config: config, resolvedModels: resolvedModels)
         let defaultModel = modelProvider?.models.first ?? resolvedModels.first
@@ -540,6 +768,23 @@ public actor CoreService {
         case .notFound:
             return .agentNotFound
         case .alreadyExists, .storageFailure:
+            return .storageFailure
+        }
+    }
+
+    private func mapAgentToolsError(_ error: Error) -> AgentToolsError {
+        guard let storeError = error as? AgentToolsFileStore.StoreError else {
+            return .storageFailure
+        }
+
+        switch storeError {
+        case .invalidAgentID:
+            return .invalidAgentID
+        case .invalidPayload:
+            return .invalidPayload
+        case .agentNotFound:
+            return .agentNotFound
+        case .storageFailure:
             return .storageFailure
         }
     }

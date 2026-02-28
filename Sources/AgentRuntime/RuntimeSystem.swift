@@ -50,13 +50,19 @@ public actor RuntimeSystem {
     public func postMessage(
         channelId: String,
         request: ChannelMessageRequest,
-        onResponseChunk: (@Sendable (String) async -> Bool)? = nil
+        onResponseChunk: (@Sendable (String) async -> Bool)? = nil,
+        toolInvoker: (@Sendable (ToolInvocationRequest) async -> ToolInvocationResult)? = nil
     ) async -> ChannelRouteDecision {
         let ingest = await channels.ingest(channelId: channelId, request: request)
 
         switch ingest.decision.action {
         case .respond:
-            await respondInline(channelId: channelId, userMessage: request.content, onResponseChunk: onResponseChunk)
+            await respondInline(
+                channelId: channelId,
+                userMessage: request.content,
+                onResponseChunk: onResponseChunk,
+                toolInvoker: toolInvoker
+            )
 
         case .spawnBranch:
             let branchId = await branches.spawn(channelId: channelId, prompt: request.content)
@@ -110,7 +116,8 @@ public actor RuntimeSystem {
     private func respondInline(
         channelId: String,
         userMessage: String,
-        onResponseChunk: (@Sendable (String) async -> Bool)?
+        onResponseChunk: (@Sendable (String) async -> Bool)?,
+        toolInvoker: (@Sendable (ToolInvocationRequest) async -> ToolInvocationResult)?
     ) async {
         guard let modelProvider, let defaultModel else {
             let fallback = "Responded inline"
@@ -122,6 +129,54 @@ public actor RuntimeSystem {
         }
 
         do {
+            if let toolInvoker {
+                var currentPrompt = userMessage
+                let maxToolSteps = 8
+
+                for _ in 0..<maxToolSteps {
+                    let latest = try await modelProvider.complete(
+                        model: defaultModel,
+                        prompt: currentPrompt,
+                        maxTokens: 1024
+                    )
+                    let trimmed = latest.trimmingCharacters(in: .whitespacesAndNewlines)
+
+                    if let call = parseToolCall(from: trimmed) {
+                        let result = await toolInvoker(call)
+                        let resultJSON = encodedToolResult(result)
+                        currentPrompt =
+                            """
+                            User request:
+                            \(userMessage)
+
+                            Previous tool call:
+                            \(trimmed)
+
+                            Tool result:
+                            \(resultJSON)
+
+                            If you need another tool call, return strict JSON object:
+                            {"tool":"<tool-id>","arguments":{},"reason":"<short reason>"}
+                            Otherwise return final answer in plain text.
+                            """
+                        continue
+                    }
+
+                    if let onResponseChunk {
+                        _ = await onResponseChunk(latest)
+                    }
+                    await channels.appendSystemMessage(channelId: channelId, content: latest)
+                    return
+                }
+
+                let limitMessage = "Tool call limit reached. Provide final answer without new tool calls."
+                if let onResponseChunk {
+                    _ = await onResponseChunk(limitMessage)
+                }
+                await channels.appendSystemMessage(channelId: channelId, content: limitMessage)
+                return
+            }
+
             var latest = ""
             let stream = modelProvider.stream(model: defaultModel, prompt: userMessage, maxTokens: 1024)
             for try await partial in stream {
@@ -159,6 +214,56 @@ public actor RuntimeSystem {
                 content: text
             )
         }
+    }
+
+    private func parseToolCall(from raw: String) -> ToolInvocationRequest? {
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            return nil
+        }
+
+        if let fenced = extractJSONFence(from: trimmed) {
+            return decodeToolCall(fenced)
+        }
+        return decodeToolCall(trimmed)
+    }
+
+    private func decodeToolCall(_ raw: String) -> ToolInvocationRequest? {
+        guard let data = raw.data(using: .utf8) else {
+            return nil
+        }
+        return try? JSONDecoder().decode(ToolInvocationRequest.self, from: data)
+    }
+
+    private func extractJSONFence(from text: String) -> String? {
+        guard text.hasPrefix("```") else {
+            return nil
+        }
+        let normalized = text.replacingOccurrences(of: "\r\n", with: "\n")
+        let prefix = "```json\n"
+        let content: String
+        if normalized.hasPrefix(prefix) {
+            content = String(normalized.dropFirst(prefix.count))
+        } else if normalized.hasPrefix("```\n") {
+            content = String(normalized.dropFirst("```\n".count))
+        } else {
+            return nil
+        }
+
+        guard let fenceRange = content.range(of: "\n```") else {
+            return nil
+        }
+        return String(content[..<fenceRange.lowerBound]).trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private func encodedToolResult(_ result: ToolInvocationResult) -> String {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys]
+        if let data = try? encoder.encode(result),
+           let text = String(data: data, encoding: .utf8) {
+            return text
+        }
+        return "{\"tool\":\"\(result.tool)\",\"ok\":\(result.ok ? "true" : "false")}"
     }
 
     /// Routes interactive payload to worker bound to the channel.

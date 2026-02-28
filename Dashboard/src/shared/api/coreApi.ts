@@ -48,6 +48,15 @@ export interface CoreApi {
   deleteAgentSession: (agentId: string, sessionId: string) => Promise<boolean>;
   fetchAgentConfig: (agentId: string) => Promise<AnyRecord | null>;
   updateAgentConfig: (agentId: string, payload: AnyRecord) => Promise<AnyRecord | null>;
+  fetchAgentToolsCatalog: (agentId: string) => Promise<AnyRecord[] | null>;
+  fetchAgentToolsPolicy: (agentId: string) => Promise<AnyRecord | null>;
+  updateAgentToolsPolicy: (agentId: string, payload: AnyRecord) => Promise<AnyRecord | null>;
+  invokeAgentTool: (
+    agentId: string,
+    sessionId: string,
+    payload: AnyRecord,
+    options?: RequestOptions
+  ) => Promise<AnyRecord | null>;
 }
 
 export function createCoreApi(): CoreApi {
@@ -299,6 +308,51 @@ export function createCoreApi(): CoreApi {
         path: `/v1/agents/${encodeURIComponent(agentId)}/config`,
         method: "PUT",
         body: payload
+      });
+      if (!response.ok) {
+        return null;
+      }
+      return response.data;
+    },
+
+    fetchAgentToolsCatalog: async (agentId) => {
+      const response = await requestJson<AnyRecord[]>({
+        path: `/v1/agents/${encodeURIComponent(agentId)}/tools/catalog`
+      });
+      if (!response.ok || !Array.isArray(response.data)) {
+        return null;
+      }
+      return response.data;
+    },
+
+    fetchAgentToolsPolicy: async (agentId) => {
+      const response = await requestJson<AnyRecord>({
+        path: `/v1/agents/${encodeURIComponent(agentId)}/tools`
+      });
+      if (!response.ok) {
+        return null;
+      }
+      return response.data;
+    },
+
+    updateAgentToolsPolicy: async (agentId, payload) => {
+      const response = await requestJson<AnyRecord, AnyRecord>({
+        path: `/v1/agents/${encodeURIComponent(agentId)}/tools`,
+        method: "PUT",
+        body: payload
+      });
+      if (!response.ok) {
+        return null;
+      }
+      return response.data;
+    },
+
+    invokeAgentTool: async (agentId, sessionId, payload, options = {}) => {
+      const response = await requestJson<AnyRecord, AnyRecord>({
+        path: `/v1/agents/${encodeURIComponent(agentId)}/sessions/${encodeURIComponent(sessionId)}/tools/invoke`,
+        method: "POST",
+        body: payload,
+        signal: options.signal
       });
       if (!response.ok) {
         return null;

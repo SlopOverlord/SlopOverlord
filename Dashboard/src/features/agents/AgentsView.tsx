@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import { createAgent as createAgentRequest, fetchAgent, fetchAgents } from "../../api";
 import { AgentChatTab } from "./components/AgentChatTab";
 import { AgentConfigTab } from "./components/AgentConfigTab";
+import { AgentToolsTab } from "./components/AgentToolsTab";
 
 const AGENT_TABS = [
   { id: "overview", title: "Overview" },
@@ -9,6 +10,7 @@ const AGENT_TABS = [
   { id: "memories", title: "Memories" },
   { id: "tasks", title: "Tasks" },
   { id: "skills", title: "Skills" },
+  { id: "tools", title: "Tools" },
   { id: "cron", title: "Cron" },
   { id: "config", title: "Config" }
 ];
@@ -338,6 +340,14 @@ export function AgentsView({ routeAgentId = null, routeTab = "overview", onRoute
           title="Cron"
           description="Scheduled jobs for this agent will be managed here."
         />
+      );
+    }
+
+    if (tab === "tools") {
+      return (
+        <section className="entry-editor-card agent-content-card">
+          <AgentToolsTab agentId={agent.id} />
+        </section>
       );
     }
 

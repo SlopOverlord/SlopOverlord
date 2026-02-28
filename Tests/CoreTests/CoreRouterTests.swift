@@ -332,6 +332,302 @@ func agentConfigEndpointsReadAndUpdate() async throws {
 }
 
 @Test
+func agentToolsEndpointsReadAndUpdate() async throws {
+    let workspaceName = "workspace-agent-tools-\(UUID().uuidString)"
+    let sqlitePath = FileManager.default.temporaryDirectory
+        .appendingPathComponent("core-agent-tools-\(UUID().uuidString).sqlite")
+        .path
+
+    var config = CoreConfig.default
+    config.workspace = .init(name: workspaceName, basePath: FileManager.default.temporaryDirectory.path)
+    config.sqlitePath = sqlitePath
+
+    let service = CoreService(config: config)
+    let router = CoreRouter(service: service)
+
+    let createBody = try JSONEncoder().encode(
+        AgentCreateRequest(
+            id: "agent-tools",
+            displayName: "Agent Tools",
+            role: "Tests tools policy endpoints"
+        )
+    )
+    let createResponse = await router.handle(method: "POST", path: "/v1/agents", body: createBody)
+    #expect(createResponse.status == 201)
+
+    let decoder = JSONDecoder()
+    decoder.dateDecodingStrategy = .iso8601
+
+    let getResponse = await router.handle(method: "GET", path: "/v1/agents/agent-tools/tools", body: nil)
+    #expect(getResponse.status == 200)
+    let fetched = try decoder.decode(AgentToolsPolicy.self, from: getResponse.body)
+    #expect(fetched.version == 1)
+    #expect(fetched.defaultPolicy == .allow)
+
+    let updateRequest = AgentToolsUpdateRequest(
+        version: 1,
+        defaultPolicy: .deny,
+        tools: [
+            "agents.list": true,
+            "sessions.list": true
+        ],
+        guardrails: AgentToolsGuardrails()
+    )
+    let updateBody = try JSONEncoder().encode(updateRequest)
+    let updateResponse = await router.handle(method: "PUT", path: "/v1/agents/agent-tools/tools", body: updateBody)
+    #expect(updateResponse.status == 200)
+
+    let updated = try decoder.decode(AgentToolsPolicy.self, from: updateResponse.body)
+    #expect(updated.defaultPolicy == .deny)
+    #expect(updated.tools["agents.list"] == true)
+    #expect(updated.tools["sessions.list"] == true)
+
+    let toolsFileURL = config
+        .resolvedWorkspaceRootURL()
+        .appendingPathComponent("agents", isDirectory: true)
+        .appendingPathComponent("agent-tools", isDirectory: true)
+        .appendingPathComponent("tools", isDirectory: true)
+        .appendingPathComponent("tools.json")
+    #expect(FileManager.default.fileExists(atPath: toolsFileURL.path))
+}
+
+@Test
+func agentToolsUpdateRejectsInvalidSchemaVersion() async throws {
+    let workspaceName = "workspace-agent-tools-invalid-\(UUID().uuidString)"
+    let sqlitePath = FileManager.default.temporaryDirectory
+        .appendingPathComponent("core-agent-tools-invalid-\(UUID().uuidString).sqlite")
+        .path
+
+    var config = CoreConfig.default
+    config.workspace = .init(name: workspaceName, basePath: FileManager.default.temporaryDirectory.path)
+    config.sqlitePath = sqlitePath
+
+    let service = CoreService(config: config)
+    let router = CoreRouter(service: service)
+
+    let createBody = try JSONEncoder().encode(
+        AgentCreateRequest(
+            id: "agent-tools-invalid",
+            displayName: "Agent Tools Invalid",
+            role: "Tests tools payload validation"
+        )
+    )
+    let createResponse = await router.handle(method: "POST", path: "/v1/agents", body: createBody)
+    #expect(createResponse.status == 201)
+
+    let invalidRequest = AgentToolsUpdateRequest(
+        version: 2,
+        defaultPolicy: .allow,
+        tools: [:],
+        guardrails: AgentToolsGuardrails()
+    )
+    let body = try JSONEncoder().encode(invalidRequest)
+    let response = await router.handle(method: "PUT", path: "/v1/agents/agent-tools-invalid/tools", body: body)
+    #expect(response.status == 400)
+}
+
+@Test
+func invokeToolEndpointRespectsPolicy() async throws {
+    let workspaceName = "workspace-agent-tool-invoke-\(UUID().uuidString)"
+    let sqlitePath = FileManager.default.temporaryDirectory
+        .appendingPathComponent("core-agent-tool-invoke-\(UUID().uuidString).sqlite")
+        .path
+
+    var config = CoreConfig.default
+    config.workspace = .init(name: workspaceName, basePath: FileManager.default.temporaryDirectory.path)
+    config.sqlitePath = sqlitePath
+
+    let service = CoreService(config: config)
+    let router = CoreRouter(service: service)
+
+    let createAgentBody = try JSONEncoder().encode(
+        AgentCreateRequest(
+            id: "agent-tools-invoke",
+            displayName: "Agent Tools Invoke",
+            role: "Runs tool invocation endpoint tests"
+        )
+    )
+    let createAgentResponse = await router.handle(method: "POST", path: "/v1/agents", body: createAgentBody)
+    #expect(createAgentResponse.status == 201)
+
+    let createSessionResponse = await router.handle(
+        method: "POST",
+        path: "/v1/agents/agent-tools-invoke/sessions",
+        body: try JSONEncoder().encode(AgentSessionCreateRequest(title: "Tool Session"))
+    )
+    #expect(createSessionResponse.status == 201)
+
+    let decoder = JSONDecoder()
+    decoder.dateDecodingStrategy = .iso8601
+    let summary = try decoder.decode(AgentSessionSummary.self, from: createSessionResponse.body)
+
+    let invokeBody = try JSONEncoder().encode(
+        ToolInvocationRequest(tool: "agents.list")
+    )
+    let invokeResponse = await router.handle(
+        method: "POST",
+        path: "/v1/agents/agent-tools-invoke/sessions/\(summary.id)/tools/invoke",
+        body: invokeBody
+    )
+    #expect(invokeResponse.status == 200)
+    let invokeResult = try decoder.decode(ToolInvocationResult.self, from: invokeResponse.body)
+    #expect(invokeResult.ok == true)
+
+    let denyBody = try JSONEncoder().encode(
+        AgentToolsUpdateRequest(
+            version: 1,
+            defaultPolicy: .deny,
+            tools: [:],
+            guardrails: AgentToolsGuardrails()
+        )
+    )
+    let denyResponse = await router.handle(
+        method: "PUT",
+        path: "/v1/agents/agent-tools-invoke/tools",
+        body: denyBody
+    )
+    #expect(denyResponse.status == 200)
+
+    let invokeForbiddenResponse = await router.handle(
+        method: "POST",
+        path: "/v1/agents/agent-tools-invoke/sessions/\(summary.id)/tools/invoke",
+        body: invokeBody
+    )
+    #expect(invokeForbiddenResponse.status == 403)
+}
+
+@Test
+func invokeRuntimeExecBlocksDeniedCommandPrefix() async throws {
+    let workspaceName = "workspace-agent-tool-exec-\(UUID().uuidString)"
+    let sqlitePath = FileManager.default.temporaryDirectory
+        .appendingPathComponent("core-agent-tool-exec-\(UUID().uuidString).sqlite")
+        .path
+
+    var config = CoreConfig.default
+    config.workspace = .init(name: workspaceName, basePath: FileManager.default.temporaryDirectory.path)
+    config.sqlitePath = sqlitePath
+
+    let service = CoreService(config: config)
+    let router = CoreRouter(service: service)
+
+    let createAgentBody = try JSONEncoder().encode(
+        AgentCreateRequest(
+            id: "agent-tools-exec",
+            displayName: "Agent Tools Exec",
+            role: "Tests runtime.exec guardrails"
+        )
+    )
+    let createAgentResponse = await router.handle(method: "POST", path: "/v1/agents", body: createAgentBody)
+    #expect(createAgentResponse.status == 201)
+
+    let createSessionResponse = await router.handle(
+        method: "POST",
+        path: "/v1/agents/agent-tools-exec/sessions",
+        body: try JSONEncoder().encode(AgentSessionCreateRequest(title: "Exec Session"))
+    )
+    #expect(createSessionResponse.status == 201)
+
+    let decoder = JSONDecoder()
+    decoder.dateDecodingStrategy = .iso8601
+    let summary = try decoder.decode(AgentSessionSummary.self, from: createSessionResponse.body)
+
+    let invokeBody = try JSONEncoder().encode(
+        ToolInvocationRequest(
+            tool: "runtime.exec",
+            arguments: [
+                "command": .string("rm"),
+                "arguments": .array([.string("-rf"), .string("/tmp/demo")])
+            ]
+        )
+    )
+
+    let response = await router.handle(
+        method: "POST",
+        path: "/v1/agents/agent-tools-exec/sessions/\(summary.id)/tools/invoke",
+        body: invokeBody
+    )
+    #expect(response.status == 200)
+    let result = try decoder.decode(ToolInvocationResult.self, from: response.body)
+    #expect(result.ok == false)
+    #expect(result.error?.code == "command_blocked")
+}
+
+@Test
+func invokeRuntimeProcessLifecycleWorksPerSession() async throws {
+    let workspaceName = "workspace-agent-tool-process-\(UUID().uuidString)"
+    let sqlitePath = FileManager.default.temporaryDirectory
+        .appendingPathComponent("core-agent-tool-process-\(UUID().uuidString).sqlite")
+        .path
+
+    var config = CoreConfig.default
+    config.workspace = .init(name: workspaceName, basePath: FileManager.default.temporaryDirectory.path)
+    config.sqlitePath = sqlitePath
+
+    let service = CoreService(config: config)
+    let router = CoreRouter(service: service)
+
+    let createAgentBody = try JSONEncoder().encode(
+        AgentCreateRequest(
+            id: "agent-tools-process",
+            displayName: "Agent Tools Process",
+            role: "Tests runtime.process lifecycle"
+        )
+    )
+    let createAgentResponse = await router.handle(method: "POST", path: "/v1/agents", body: createAgentBody)
+    #expect(createAgentResponse.status == 201)
+
+    let createSessionResponse = await router.handle(
+        method: "POST",
+        path: "/v1/agents/agent-tools-process/sessions",
+        body: try JSONEncoder().encode(AgentSessionCreateRequest(title: "Process Session"))
+    )
+    #expect(createSessionResponse.status == 201)
+
+    let decoder = JSONDecoder()
+    decoder.dateDecodingStrategy = .iso8601
+    let summary = try decoder.decode(AgentSessionSummary.self, from: createSessionResponse.body)
+
+    let startBody = try JSONEncoder().encode(
+        ToolInvocationRequest(
+            tool: "runtime.process",
+            arguments: [
+                "action": .string("start"),
+                "command": .string("/bin/sleep"),
+                "arguments": .array([.string("2")])
+            ]
+        )
+    )
+    let startResponse = await router.handle(
+        method: "POST",
+        path: "/v1/agents/agent-tools-process/sessions/\(summary.id)/tools/invoke",
+        body: startBody
+    )
+    #expect(startResponse.status == 200)
+    let startResult = try decoder.decode(ToolInvocationResult.self, from: startResponse.body)
+    #expect(startResult.ok == true)
+    let processId = startResult.data?.asObject?["processId"]?.asString ?? ""
+    #expect(!processId.isEmpty)
+
+    let stopBody = try JSONEncoder().encode(
+        ToolInvocationRequest(
+            tool: "runtime.process",
+            arguments: [
+                "action": .string("stop"),
+                "processId": .string(processId)
+            ]
+        )
+    )
+    let stopResponse = await router.handle(
+        method: "POST",
+        path: "/v1/agents/agent-tools-process/sessions/\(summary.id)/tools/invoke",
+        body: stopBody
+    )
+    #expect(stopResponse.status == 200)
+    let stopResult = try decoder.decode(ToolInvocationResult.self, from: stopResponse.body)
+    #expect(stopResult.ok == true)
+}
+
+@Test
 func createAgentDuplicateIDReturnsConflict() async throws {
     let workspaceName = "workspace-agents-\(UUID().uuidString)"
     let sqlitePath = FileManager.default.temporaryDirectory

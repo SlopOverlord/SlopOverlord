@@ -87,7 +87,7 @@ let package = Package(
         ),
         .testTarget(
             name: "AgentRuntimeTests",
-            dependencies: ["AgentRuntime", "Protocols"],
+            dependencies: ["AgentRuntime", "Protocols", "PluginSDK"],
             path: "Tests/AgentRuntimeTests"
         ),
         .testTarget(

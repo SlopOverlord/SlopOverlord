@@ -91,6 +91,7 @@ private enum HTTPStatus {
     static let ok = 200
     static let created = 201
     static let badRequest = 400
+    static let forbidden = 403
     static let conflict = 409
     static let notFound = 404
     static let internalServerError = 500
@@ -119,6 +120,12 @@ private enum ErrorCode {
     static let invalidAgentModel = "invalid_agent_model"
     static let agentConfigReadFailed = "agent_config_read_failed"
     static let agentConfigWriteFailed = "agent_config_write_failed"
+    static let invalidAgentToolsPayload = "invalid_agent_tools_payload"
+    static let invalidToolInvocationPayload = "invalid_tool_invocation_payload"
+    static let agentToolsReadFailed = "agent_tools_read_failed"
+    static let agentToolsWriteFailed = "agent_tools_write_failed"
+    static let toolForbidden = "tool_forbidden"
+    static let toolInvokeFailed = "tool_invoke_failed"
 }
 
 private struct AcceptResponse: Encodable {
@@ -342,6 +349,23 @@ public actor CoreRouter {
             }
         }
 
+        add(.get, "/v1/agents/:agentId/tools") { request in
+            let agentId = request.pathParam("agentId") ?? ""
+            do {
+                let policy = try await service.getAgentToolsPolicy(agentID: agentId)
+                return Self.encodable(status: HTTPStatus.ok, payload: policy)
+            } catch let error as CoreService.AgentToolsError {
+                return Self.agentToolsErrorResponse(error, fallback: ErrorCode.agentToolsReadFailed)
+            } catch {
+                return Self.json(status: HTTPStatus.internalServerError, payload: ["error": ErrorCode.agentToolsReadFailed])
+            }
+        }
+
+        add(.get, "/v1/agents/:agentId/tools/catalog") { _ in
+            let catalog = await service.toolCatalog()
+            return Self.encodable(status: HTTPStatus.ok, payload: catalog)
+        }
+
         add(.get, "/v1/agents/:agentId/sessions/:sessionId") { request in
             let agentId = request.pathParam("agentId") ?? ""
             let sessionId = request.pathParam("sessionId") ?? ""
@@ -406,6 +430,24 @@ public actor CoreRouter {
                 return Self.agentConfigErrorResponse(error, fallback: ErrorCode.agentConfigWriteFailed)
             } catch {
                 return Self.json(status: HTTPStatus.internalServerError, payload: ["error": ErrorCode.agentConfigWriteFailed])
+            }
+        }
+
+        add(.put, "/v1/agents/:agentId/tools") { request in
+            let agentId = request.pathParam("agentId") ?? ""
+            guard let body = request.body,
+                  let payload = Self.decode(body, as: AgentToolsUpdateRequest.self)
+            else {
+                return Self.json(status: HTTPStatus.badRequest, payload: ["error": ErrorCode.invalidAgentToolsPayload])
+            }
+
+            do {
+                let policy = try await service.updateAgentToolsPolicy(agentID: agentId, request: payload)
+                return Self.encodable(status: HTTPStatus.ok, payload: policy)
+            } catch let error as CoreService.AgentToolsError {
+                return Self.agentToolsErrorResponse(error, fallback: ErrorCode.agentToolsWriteFailed)
+            } catch {
+                return Self.json(status: HTTPStatus.internalServerError, payload: ["error": ErrorCode.agentToolsWriteFailed])
             }
         }
 
@@ -510,6 +552,25 @@ public actor CoreRouter {
             }
         }
 
+        add(.post, "/v1/agents/:agentId/sessions/:sessionId/tools/invoke") { request in
+            let agentId = request.pathParam("agentId") ?? ""
+            let sessionId = request.pathParam("sessionId") ?? ""
+            guard let body = request.body,
+                  let payload = Self.decode(body, as: ToolInvocationRequest.self)
+            else {
+                return Self.json(status: HTTPStatus.badRequest, payload: ["error": ErrorCode.invalidToolInvocationPayload])
+            }
+
+            do {
+                let result = try await service.invokeTool(agentID: agentId, sessionID: sessionId, request: payload)
+                return Self.encodable(status: HTTPStatus.ok, payload: result)
+            } catch let error as CoreService.ToolInvocationError {
+                return Self.toolInvocationErrorResponse(error, fallback: ErrorCode.toolInvokeFailed)
+            } catch {
+                return Self.json(status: HTTPStatus.internalServerError, payload: ["error": ErrorCode.toolInvokeFailed])
+            }
+        }
+
         add(.post, "/v1/channels/:channelId/messages") { request in
             let channelId = request.pathParam("channelId") ?? ""
             guard let body = request.body,
@@ -597,6 +658,38 @@ public actor CoreRouter {
             return json(status: HTTPStatus.badRequest, payload: ["error": ErrorCode.invalidAgentModel])
         case .agentNotFound:
             return json(status: HTTPStatus.notFound, payload: ["error": ErrorCode.agentNotFound])
+        case .storageFailure:
+            return json(status: HTTPStatus.internalServerError, payload: ["error": fallback])
+        }
+    }
+
+    private static func agentToolsErrorResponse(_ error: CoreService.AgentToolsError, fallback: String) -> CoreRouterResponse {
+        switch error {
+        case .invalidAgentID:
+            return json(status: HTTPStatus.badRequest, payload: ["error": ErrorCode.invalidAgentId])
+        case .invalidPayload:
+            return json(status: HTTPStatus.badRequest, payload: ["error": ErrorCode.invalidAgentToolsPayload])
+        case .agentNotFound:
+            return json(status: HTTPStatus.notFound, payload: ["error": ErrorCode.agentNotFound])
+        case .storageFailure:
+            return json(status: HTTPStatus.internalServerError, payload: ["error": fallback])
+        }
+    }
+
+    private static func toolInvocationErrorResponse(_ error: CoreService.ToolInvocationError, fallback: String) -> CoreRouterResponse {
+        switch error {
+        case .invalidAgentID:
+            return json(status: HTTPStatus.badRequest, payload: ["error": ErrorCode.invalidAgentId])
+        case .invalidSessionID:
+            return json(status: HTTPStatus.badRequest, payload: ["error": ErrorCode.invalidSessionId])
+        case .invalidPayload:
+            return json(status: HTTPStatus.badRequest, payload: ["error": ErrorCode.invalidToolInvocationPayload])
+        case .agentNotFound:
+            return json(status: HTTPStatus.notFound, payload: ["error": ErrorCode.agentNotFound])
+        case .sessionNotFound:
+            return json(status: HTTPStatus.notFound, payload: ["error": ErrorCode.sessionNotFound])
+        case .forbidden(_):
+            return json(status: HTTPStatus.forbidden, payload: ["error": ErrorCode.toolForbidden])
         case .storageFailure:
             return json(status: HTTPStatus.internalServerError, payload: ["error": fallback])
         }

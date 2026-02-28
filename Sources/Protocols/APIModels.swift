@@ -110,6 +110,176 @@ public struct AgentConfigUpdateRequest: Codable, Sendable {
     }
 }
 
+public enum AgentPolicyDefault: String, Codable, Sendable {
+    case allow
+    case deny
+}
+
+public struct AgentToolsGuardrails: Codable, Sendable, Equatable {
+    public var maxReadBytes: Int
+    public var maxWriteBytes: Int
+    public var execTimeoutMs: Int
+    public var maxExecOutputBytes: Int
+    public var maxProcessesPerSession: Int
+    public var maxToolCallsPerMinute: Int
+    public var deniedCommandPrefixes: [String]
+    public var allowedWriteRoots: [String]
+    public var allowedExecRoots: [String]
+    public var webTimeoutMs: Int
+    public var webMaxBytes: Int
+    public var webBlockPrivateNetworks: Bool
+
+    public init(
+        maxReadBytes: Int = 512 * 1024,
+        maxWriteBytes: Int = 512 * 1024,
+        execTimeoutMs: Int = 15_000,
+        maxExecOutputBytes: Int = 256 * 1024,
+        maxProcessesPerSession: Int = 3,
+        maxToolCallsPerMinute: Int = 120,
+        deniedCommandPrefixes: [String] = ["rm", "shutdown", "reboot", "mkfs", "dd", "killall", "launchctl"],
+        allowedWriteRoots: [String] = [],
+        allowedExecRoots: [String] = [],
+        webTimeoutMs: Int = 10_000,
+        webMaxBytes: Int = 512 * 1024,
+        webBlockPrivateNetworks: Bool = true
+    ) {
+        self.maxReadBytes = maxReadBytes
+        self.maxWriteBytes = maxWriteBytes
+        self.execTimeoutMs = execTimeoutMs
+        self.maxExecOutputBytes = maxExecOutputBytes
+        self.maxProcessesPerSession = maxProcessesPerSession
+        self.maxToolCallsPerMinute = maxToolCallsPerMinute
+        self.deniedCommandPrefixes = deniedCommandPrefixes
+        self.allowedWriteRoots = allowedWriteRoots
+        self.allowedExecRoots = allowedExecRoots
+        self.webTimeoutMs = webTimeoutMs
+        self.webMaxBytes = webMaxBytes
+        self.webBlockPrivateNetworks = webBlockPrivateNetworks
+    }
+}
+
+public struct AgentToolsPolicy: Codable, Sendable, Equatable {
+    public var version: Int
+    public var defaultPolicy: AgentPolicyDefault
+    public var tools: [String: Bool]
+    public var guardrails: AgentToolsGuardrails
+
+    public init(
+        version: Int = 1,
+        defaultPolicy: AgentPolicyDefault = .allow,
+        tools: [String: Bool] = [:],
+        guardrails: AgentToolsGuardrails = .init()
+    ) {
+        self.version = version
+        self.defaultPolicy = defaultPolicy
+        self.tools = tools
+        self.guardrails = guardrails
+    }
+}
+
+public struct AgentToolsUpdateRequest: Codable, Sendable {
+    public var version: Int?
+    public var defaultPolicy: AgentPolicyDefault
+    public var tools: [String: Bool]
+    public var guardrails: AgentToolsGuardrails
+
+    public init(
+        version: Int? = nil,
+        defaultPolicy: AgentPolicyDefault = .allow,
+        tools: [String: Bool] = [:],
+        guardrails: AgentToolsGuardrails = .init()
+    ) {
+        self.version = version
+        self.defaultPolicy = defaultPolicy
+        self.tools = tools
+        self.guardrails = guardrails
+    }
+}
+
+public struct AgentToolCatalogEntry: Codable, Sendable, Equatable {
+    public var id: String
+    public var domain: String
+    public var title: String
+    public var status: String
+    public var description: String
+
+    public init(id: String, domain: String, title: String, status: String, description: String) {
+        self.id = id
+        self.domain = domain
+        self.title = title
+        self.status = status
+        self.description = description
+    }
+}
+
+public struct ToolInvocationRequest: Codable, Sendable {
+    public var tool: String
+    public var arguments: [String: JSONValue]
+    public var reason: String?
+
+    public init(tool: String, arguments: [String: JSONValue] = [:], reason: String? = nil) {
+        self.tool = tool
+        self.arguments = arguments
+        self.reason = reason
+    }
+}
+
+public struct ToolErrorPayload: Codable, Sendable, Equatable {
+    public var code: String
+    public var message: String
+    public var retryable: Bool
+
+    public init(code: String, message: String, retryable: Bool) {
+        self.code = code
+        self.message = message
+        self.retryable = retryable
+    }
+}
+
+public struct ToolInvocationResult: Codable, Sendable, Equatable {
+    public var tool: String
+    public var ok: Bool
+    public var data: JSONValue?
+    public var error: ToolErrorPayload?
+    public var durationMs: Int
+
+    public init(
+        tool: String,
+        ok: Bool,
+        data: JSONValue? = nil,
+        error: ToolErrorPayload? = nil,
+        durationMs: Int = 0
+    ) {
+        self.tool = tool
+        self.ok = ok
+        self.data = data
+        self.error = error
+        self.durationMs = durationMs
+    }
+}
+
+public struct SessionStatusResponse: Codable, Sendable, Equatable {
+    public var sessionId: String
+    public var status: String
+    public var messageCount: Int
+    public var updatedAt: Date
+    public var activeProcessCount: Int
+
+    public init(
+        sessionId: String,
+        status: String,
+        messageCount: Int,
+        updatedAt: Date,
+        activeProcessCount: Int
+    ) {
+        self.sessionId = sessionId
+        self.status = status
+        self.messageCount = messageCount
+        self.updatedAt = updatedAt
+        self.activeProcessCount = activeProcessCount
+    }
+}
+
 public struct AgentSessionCreateRequest: Codable, Sendable {
     public var title: String?
     public var parentSessionId: String?
@@ -157,6 +327,8 @@ public enum AgentSessionEventType: String, Codable, Sendable {
     case runStatus = "run_status"
     case subSession = "sub_session"
     case runControl = "run_control"
+    case toolCall = "tool_call"
+    case toolResult = "tool_result"
 }
 
 public enum AgentMessageRole: String, Codable, Sendable {
@@ -289,6 +461,40 @@ public struct AgentRunControlEvent: Codable, Sendable, Equatable {
     }
 }
 
+public struct AgentToolCallEvent: Codable, Sendable, Equatable {
+    public var tool: String
+    public var arguments: [String: JSONValue]
+    public var reason: String?
+
+    public init(tool: String, arguments: [String: JSONValue], reason: String? = nil) {
+        self.tool = tool
+        self.arguments = arguments
+        self.reason = reason
+    }
+}
+
+public struct AgentToolResultEvent: Codable, Sendable, Equatable {
+    public var tool: String
+    public var ok: Bool
+    public var data: JSONValue?
+    public var error: ToolErrorPayload?
+    public var durationMs: Int?
+
+    public init(
+        tool: String,
+        ok: Bool,
+        data: JSONValue? = nil,
+        error: ToolErrorPayload? = nil,
+        durationMs: Int? = nil
+    ) {
+        self.tool = tool
+        self.ok = ok
+        self.data = data
+        self.error = error
+        self.durationMs = durationMs
+    }
+}
+
 public struct AgentSessionMetadataEvent: Codable, Sendable, Equatable {
     public var title: String
     public var parentSessionId: String?
@@ -311,6 +517,8 @@ public struct AgentSessionEvent: Codable, Sendable, Equatable {
     public var runStatus: AgentRunStatusEvent?
     public var subSession: AgentSubSessionEvent?
     public var runControl: AgentRunControlEvent?
+    public var toolCall: AgentToolCallEvent?
+    public var toolResult: AgentToolResultEvent?
 
     public init(
         id: String = UUID().uuidString,
@@ -323,7 +531,9 @@ public struct AgentSessionEvent: Codable, Sendable, Equatable {
         message: AgentSessionMessage? = nil,
         runStatus: AgentRunStatusEvent? = nil,
         subSession: AgentSubSessionEvent? = nil,
-        runControl: AgentRunControlEvent? = nil
+        runControl: AgentRunControlEvent? = nil,
+        toolCall: AgentToolCallEvent? = nil,
+        toolResult: AgentToolResultEvent? = nil
     ) {
         self.id = id
         self.version = version
@@ -336,6 +546,8 @@ public struct AgentSessionEvent: Codable, Sendable, Equatable {
         self.runStatus = runStatus
         self.subSession = subSession
         self.runControl = runControl
+        self.toolCall = toolCall
+        self.toolResult = toolResult
     }
 }
 

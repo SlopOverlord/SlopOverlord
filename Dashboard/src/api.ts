@@ -23,3 +23,7 @@ export const subscribeAgentSessionStream = coreApi.subscribeAgentSessionStream;
 export const deleteAgentSession = coreApi.deleteAgentSession;
 export const fetchAgentConfig = coreApi.fetchAgentConfig;
 export const updateAgentConfig = coreApi.updateAgentConfig;
+export const fetchAgentToolsCatalog = coreApi.fetchAgentToolsCatalog;
+export const fetchAgentToolsPolicy = coreApi.fetchAgentToolsPolicy;
+export const updateAgentToolsPolicy = coreApi.updateAgentToolsPolicy;
+export const invokeAgentTool = coreApi.invokeAgentTool;
