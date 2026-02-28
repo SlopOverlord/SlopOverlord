@@ -1,9 +1,5 @@
 import Foundation
-#if canImport(FoundationNetworking)
-import FoundationNetworking
-#endif
 import AgentRuntime
-import PluginSDK
 import Protocols
 
 public actor CoreService {
@@ -35,28 +31,35 @@ public actor CoreService {
 
     private let runtime: RuntimeSystem
     private let store: any PersistenceStore
+    private let openAIProviderCatalog: OpenAIProviderCatalogService
+    private let agentCatalogStore: AgentCatalogFileStore
     private let sessionStore: AgentSessionFileStore
     private let configPath: String
-    private let fileManager: FileManager
     private var agentsRootURL: URL
     private var currentConfig: CoreConfig
     private var eventTask: Task<Void, Never>?
+    private var activeSessionRunChannels: Set<String> = []
+    private var interruptedSessionRunChannels: Set<String> = []
+    private var streamedAssistantByChannel: [String: String] = [:]
+    private var streamedAssistantLastPersistedByChannel: [String: String] = [:]
+    private var streamedAssistantLastPersistedAtByChannel: [String: Date] = [:]
 
     /// Creates core orchestration service with runtime and persistence backend.
     public init(config: CoreConfig, configPath: String = CoreConfig.defaultConfigPath) {
-        let resolvedModels = Self.resolveModelIdentifiers(config: config)
-        let modelProvider = Self.buildModelProvider(config: config, resolvedModels: resolvedModels)
+        let resolvedModels = CoreModelProviderFactory.resolveModelIdentifiers(config: config)
+        let modelProvider = CoreModelProviderFactory.buildModelProvider(config: config, resolvedModels: resolvedModels)
         self.runtime = RuntimeSystem(
             modelProvider: modelProvider,
             defaultModel: modelProvider?.models.first ?? resolvedModels.first
         )
         let schema = Self.loadSchemaSQL()
         self.store = SQLiteStore(path: config.sqlitePath, schemaSQL: schema)
+        self.openAIProviderCatalog = OpenAIProviderCatalogService()
         self.configPath = configPath
-        self.fileManager = FileManager.default
         self.agentsRootURL = config
             .resolvedWorkspaceRootURL(currentDirectory: FileManager.default.currentDirectoryPath)
             .appendingPathComponent("agents", isDirectory: true)
+        self.agentCatalogStore = AgentCatalogFileStore(agentsRootURL: self.agentsRootURL)
         self.sessionStore = AgentSessionFileStore(agentsRootURL: self.agentsRootURL)
         self.currentConfig = config
         Task {
@@ -130,186 +133,53 @@ public actor CoreService {
 
     /// Lists all persisted agents from workspace `/agents`.
     public func listAgents() throws -> [AgentSummary] {
-        try ensureAgentsRootDirectory()
-
-        let entries = try fileManager.contentsOfDirectory(
-            at: agentsRootURL,
-            includingPropertiesForKeys: [.isDirectoryKey],
-            options: [.skipsHiddenFiles]
-        )
-
-        var agents: [AgentSummary] = []
-        for entry in entries {
-            let values = try? entry.resourceValues(forKeys: [.isDirectoryKey])
-            guard values?.isDirectory == true else {
-                continue
-            }
-
-            let agentID = entry.lastPathComponent
-            if let summary = try? readAgentSummary(id: agentID) {
-                agents.append(summary)
-            }
+        do {
+            return try agentCatalogStore.listAgents()
+        } catch {
+            throw mapAgentStorageError(error)
         }
-
-        agents.sort {
-            $0.displayName.localizedCaseInsensitiveCompare($1.displayName) == .orderedAscending
-        }
-        return agents
     }
 
     /// Returns one persisted agent by id.
     public func getAgent(id: String) throws -> AgentSummary {
-        guard let normalizedID = normalizedAgentID(id) else {
-            throw AgentStorageError.invalidID
+        do {
+            return try agentCatalogStore.getAgent(id: id)
+        } catch {
+            throw mapAgentStorageError(error)
         }
-
-        guard fileManager.fileExists(atPath: agentDirectoryURL(for: normalizedID).path) else {
-            throw AgentStorageError.notFound
-        }
-
-        return try readAgentSummary(id: normalizedID)
     }
 
     /// Creates an agent and provisions `/workspace/agents/<agent_id>` directory.
     public func createAgent(_ request: AgentCreateRequest) throws -> AgentSummary {
-        guard let normalizedID = normalizedAgentID(request.id) else {
-            throw AgentStorageError.invalidID
-        }
-
-        let displayName = request.displayName.trimmingCharacters(in: .whitespacesAndNewlines)
-        let role = request.role.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !displayName.isEmpty, !role.isEmpty else {
-            throw AgentStorageError.invalidPayload
-        }
-
-        try ensureAgentsRootDirectory()
-
-        let directoryURL = agentDirectoryURL(for: normalizedID)
-        if fileManager.fileExists(atPath: directoryURL.path) {
-            throw AgentStorageError.alreadyExists
-        }
-
-        try fileManager.createDirectory(at: directoryURL, withIntermediateDirectories: false)
-        let summary = AgentSummary(
-            id: normalizedID,
-            displayName: displayName,
-            role: role,
-            createdAt: Date()
-        )
-
         do {
-            try writeAgentSummary(summary)
-            try writeAgentScaffoldFiles(for: summary)
-            return summary
+            return try agentCatalogStore.createAgent(request, availableModels: availableAgentModels())
         } catch {
-            try? fileManager.removeItem(at: directoryURL)
-            throw error
+            throw mapAgentStorageError(error)
         }
     }
 
     /// Returns agent-specific config including selected model and editable markdown docs.
     public func getAgentConfig(agentID: String) throws -> AgentConfigDetail {
-        guard let normalizedAgentID = normalizedAgentID(agentID) else {
-            throw AgentConfigError.invalidAgentID
-        }
-
-        let summary: AgentSummary
-        do {
-            summary = try getAgent(id: normalizedAgentID)
-        } catch AgentStorageError.notFound {
-            throw AgentConfigError.agentNotFound
-        } catch {
-            throw AgentConfigError.storageFailure
-        }
-
         let availableModels = availableAgentModels()
-        let selectedModel: String
-        let documents: AgentDocumentBundle
         do {
-            selectedModel = try readAgentConfigFile(for: summary, availableModels: availableModels).selectedModel ?? ""
-            documents = try readAgentDocuments(agentID: normalizedAgentID)
+            return try agentCatalogStore.getAgentConfig(agentID: agentID, availableModels: availableModels)
         } catch {
-            throw AgentConfigError.storageFailure
+            throw mapAgentConfigError(error)
         }
-
-        return AgentConfigDetail(
-            agentId: normalizedAgentID,
-            selectedModel: selectedModel,
-            availableModels: availableModels,
-            documents: documents
-        )
     }
 
     /// Updates agent-specific model and markdown docs.
     public func updateAgentConfig(agentID: String, request: AgentConfigUpdateRequest) throws -> AgentConfigDetail {
-        guard let normalizedAgentID = normalizedAgentID(agentID) else {
-            throw AgentConfigError.invalidAgentID
-        }
-
-        let summary: AgentSummary
-        do {
-            summary = try getAgent(id: normalizedAgentID)
-        } catch AgentStorageError.notFound {
-            throw AgentConfigError.agentNotFound
-        } catch {
-            throw AgentConfigError.storageFailure
-        }
-
-        let selectedModel = request.selectedModel.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !selectedModel.isEmpty else {
-            throw AgentConfigError.invalidModel
-        }
-
         let availableModels = availableAgentModels()
-        let allowedModelIDs = Set(availableModels.map(\.id))
-        guard allowedModelIDs.contains(selectedModel) else {
-            throw AgentConfigError.invalidModel
-        }
-
-        let normalizedDocuments = AgentDocumentBundle(
-            userMarkdown: normalizedDocumentText(request.documents.userMarkdown),
-            agentsMarkdown: normalizedDocumentText(request.documents.agentsMarkdown),
-            soulMarkdown: normalizedDocumentText(request.documents.soulMarkdown),
-            identityMarkdown: normalizedDocumentText(request.documents.identityMarkdown)
-        )
-
-        guard !normalizedDocuments.userMarkdown.isEmpty,
-              !normalizedDocuments.agentsMarkdown.isEmpty,
-              !normalizedDocuments.soulMarkdown.isEmpty,
-              !normalizedDocuments.identityMarkdown.isEmpty
-        else {
-            throw AgentConfigError.invalidPayload
-        }
-
         do {
-            try writeAgentConfigFile(
-                AgentConfigFile(
-                    id: summary.id,
-                    displayName: summary.displayName,
-                    role: summary.role,
-                    createdAt: summary.createdAt,
-                    selectedModel: selectedModel
-                )
+            return try agentCatalogStore.updateAgentConfig(
+                agentID: agentID,
+                request: request,
+                availableModels: availableModels
             )
-
-            let agentDirectory = agentDirectoryURL(for: normalizedAgentID)
-            try writeTextFile(contents: normalizedDocuments.agentsMarkdown, at: agentDirectory.appendingPathComponent("Agents.md"))
-            try writeTextFile(contents: normalizedDocuments.userMarkdown, at: agentDirectory.appendingPathComponent("User.md"))
-            try writeTextFile(contents: normalizedDocuments.soulMarkdown, at: agentDirectory.appendingPathComponent("Soul.md"))
-            try writeTextFile(contents: normalizedDocuments.identityMarkdown, at: agentDirectory.appendingPathComponent("Identity.md"))
-
-            let legacyIdentity = normalizedIdentityValue(from: normalizedDocuments.identityMarkdown, fallback: summary.id)
-            try writeTextFile(contents: legacyIdentity + "\n", at: agentDirectory.appendingPathComponent("Identity.id"))
         } catch {
-            throw AgentConfigError.storageFailure
+            throw mapAgentConfigError(error)
         }
-
-        return AgentConfigDetail(
-            agentId: normalizedAgentID,
-            selectedModel: selectedModel,
-            availableModels: availableModels,
-            documents: normalizedDocuments
-        )
     }
 
     /// Lists agent chat sessions backed by JSONL files.
@@ -454,7 +324,7 @@ public actor CoreService {
             expandedText: thinkingText
         )
 
-        var events: [AgentSessionEvent] = [
+        var initialEvents: [AgentSessionEvent] = [
             AgentSessionEvent(
                 agentId: normalizedAgentID,
                 sessionId: normalizedSessionID,
@@ -471,7 +341,7 @@ public actor CoreService {
 
         let shouldSearch = shouldUseSearchStage(content: content, attachmentCount: attachments.count)
         if shouldSearch {
-            events.append(
+            initialEvents.append(
                 AgentSessionEvent(
                     agentId: normalizedAgentID,
                     sessionId: normalizedSessionID,
@@ -485,16 +355,7 @@ public actor CoreService {
             )
         }
 
-        let channelID = "agent:\(normalizedAgentID):session:\(normalizedSessionID)"
-        let routeDecision = await runtime.postMessage(
-            channelId: channelID,
-            request: ChannelMessageRequest(
-                userId: request.userId,
-                content: content.isEmpty ? "User attached files." : content
-            )
-        )
-
-        events.append(
+        initialEvents.append(
             AgentSessionEvent(
                 agentId: normalizedAgentID,
                 sessionId: normalizedSessionID,
@@ -502,36 +363,60 @@ public actor CoreService {
                 runStatus: AgentRunStatusEvent(
                     stage: .responding,
                     label: "Responding",
-                    details: "Route: \(routeDecision.action.rawValue), confidence \(String(format: "%.2f", routeDecision.confidence))."
+                    details: "Generating response..."
                 )
             )
         )
 
-        let snapshot = await runtime.channelState(channelId: channelID)
-        let assistantText = snapshot?.messages.reversed().first(where: {
-            $0.userId == "system" && !$0.content.contains(Self.sessionContextBootstrapMarker)
-        })?.content ?? "Done."
-        let assistantMessage = AgentSessionMessage(
-            role: .assistant,
-            segments: [
-                .init(
-                    kind: .thinking,
-                    text: "Route reason: \(routeDecision.reason). Token budget: \(routeDecision.tokenBudget)."
-                ),
-                .init(kind: .text, text: assistantText)
-            ],
-            userId: "agent"
-        )
-
-        events.append(
-            AgentSessionEvent(
-                agentId: normalizedAgentID,
-                sessionId: normalizedSessionID,
-                type: .message,
-                message: assistantMessage
+        var summary: AgentSessionSummary
+        do {
+            summary = try sessionStore.appendEvents(
+                agentID: normalizedAgentID,
+                sessionID: normalizedSessionID,
+                events: initialEvents
             )
+        } catch {
+            throw mapSessionStoreError(error)
+        }
+
+        let channelID = sessionChannelID(agentID: normalizedAgentID, sessionID: normalizedSessionID)
+        activeSessionRunChannels.insert(channelID)
+        interruptedSessionRunChannels.remove(channelID)
+        streamedAssistantByChannel[channelID] = ""
+        streamedAssistantLastPersistedByChannel[channelID] = ""
+        streamedAssistantLastPersistedAtByChannel[channelID] = .distantPast
+        defer {
+            cleanupSessionRunTracking(channelID: channelID)
+        }
+
+        let messageContent = content.isEmpty ? "User attached files." : content
+        let routeDecision = await runtime.postMessage(
+            channelId: channelID,
+            request: ChannelMessageRequest(userId: request.userId, content: messageContent),
+            onResponseChunk: { [weak self] partialText in
+                guard let self else {
+                    return false
+                }
+                return await self.handleSessionResponseChunk(
+                    agentID: normalizedAgentID,
+                    sessionID: normalizedSessionID,
+                    channelID: channelID,
+                    partialText: partialText
+                )
+            }
         )
 
+        let snapshot = await runtime.channelState(channelId: channelID)
+        let streamedAssistantText = streamedAssistantByChannel[channelID]?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let assistantTextFromSnapshot = snapshot?.messages.reversed().first(where: {
+            $0.userId == "system" && !$0.content.contains(Self.sessionContextBootstrapMarker)
+        })?.content.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let assistantText = !streamedAssistantText.isEmpty
+            ? streamedAssistantText
+            : (!assistantTextFromSnapshot.isEmpty ? assistantTextFromSnapshot : "Done.")
+        let wasInterrupted = interruptedSessionRunChannels.contains(channelID)
+
+        var finalEvents: [AgentSessionEvent] = []
         if request.spawnSubSession {
             let childSummary: AgentSessionSummary
             do {
@@ -550,7 +435,7 @@ public actor CoreService {
                 throw AgentSessionError.storageFailure
             }
 
-            events.append(
+            finalEvents.append(
                 AgentSessionEvent(
                     agentId: normalizedAgentID,
                     sessionId: normalizedSessionID,
@@ -563,33 +448,79 @@ public actor CoreService {
             )
         }
 
-        events.append(
-            AgentSessionEvent(
-                agentId: normalizedAgentID,
-                sessionId: normalizedSessionID,
-                type: .runStatus,
-                runStatus: AgentRunStatusEvent(
-                    stage: .done,
-                    label: "Done",
-                    details: "Response is ready."
+        if !assistantText.isEmpty {
+            finalEvents.append(
+                AgentSessionEvent(
+                    agentId: normalizedAgentID,
+                    sessionId: normalizedSessionID,
+                    type: .message,
+                    message: AgentSessionMessage(
+                        role: .assistant,
+                        segments: [
+                            .init(kind: .text, text: assistantText)
+                        ],
+                        userId: "agent"
+                    )
                 )
             )
-        )
+        }
 
-        let summary: AgentSessionSummary
-        do {
-            summary = try sessionStore.appendEvents(
-                agentID: normalizedAgentID,
-                sessionID: normalizedSessionID,
-                events: events
+        if wasInterrupted {
+            finalEvents.append(
+                AgentSessionEvent(
+                    agentId: normalizedAgentID,
+                    sessionId: normalizedSessionID,
+                    type: .runStatus,
+                    runStatus: AgentRunStatusEvent(
+                        stage: .interrupted,
+                        label: "Interrupted",
+                        details: "Response generation stopped."
+                    )
+                )
             )
-        } catch {
-            throw mapSessionStoreError(error)
+        } else if isAssistantErrorText(assistantText) {
+            finalEvents.append(
+                AgentSessionEvent(
+                    agentId: normalizedAgentID,
+                    sessionId: normalizedSessionID,
+                    type: .runStatus,
+                    runStatus: AgentRunStatusEvent(
+                        stage: .interrupted,
+                        label: "Error",
+                        details: assistantText
+                    )
+                )
+            )
+        } else {
+            finalEvents.append(
+                AgentSessionEvent(
+                    agentId: normalizedAgentID,
+                    sessionId: normalizedSessionID,
+                    type: .runStatus,
+                    runStatus: AgentRunStatusEvent(
+                        stage: .done,
+                        label: "Done",
+                        details: "Response is ready."
+                    )
+                )
+            )
+        }
+
+        if !finalEvents.isEmpty {
+            do {
+                summary = try sessionStore.appendEvents(
+                    agentID: normalizedAgentID,
+                    sessionID: normalizedSessionID,
+                    events: finalEvents
+                )
+            } catch {
+                throw mapSessionStoreError(error)
+            }
         }
 
         return AgentSessionMessageResponse(
             summary: summary,
-            appendedEvents: events,
+            appendedEvents: initialEvents + finalEvents,
             routeDecision: routeDecision
         )
     }
@@ -622,6 +553,9 @@ public actor CoreService {
         case .interrupt:
             statusStage = .interrupted
             statusLabel = "Interrupted"
+            interruptedSessionRunChannels.insert(
+                sessionChannelID(agentID: normalizedAgentID, sessionID: normalizedSessionID)
+            )
         }
 
         let events = [
@@ -663,88 +597,16 @@ public actor CoreService {
 
     /// Returns OpenAI model catalog using API key auth or environment fallback.
     public func listOpenAIModels(request: OpenAIProviderModelsRequest) async -> OpenAIProviderModelsResponse {
-        let primaryOpenAIConfig = currentConfig.models.first {
-            Self.resolvedIdentifier(for: $0).hasPrefix("openai:")
-        }
+        await openAIProviderCatalog.listModels(config: currentConfig, request: request)
+    }
 
-        let configuredURL = primaryOpenAIConfig?.apiUrl.trimmingCharacters(in: .whitespacesAndNewlines)
-        let requestedURL = request.apiUrl?.trimmingCharacters(in: .whitespacesAndNewlines)
-        let baseURL = Self.parseURL(requestedURL) ?? Self.parseURL(configuredURL) ?? URL(string: "https://api.openai.com/v1")
-
-        let configuredKey = primaryOpenAIConfig?.apiKey.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        let envKey = ProcessInfo.processInfo.environment["OPENAI_API_KEY"]?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        let requestKey = request.apiKey?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-
-        var usedEnvironmentKey = false
-        let resolvedKey: String? = {
-            switch request.authMethod {
-            case .apiKey:
-                if !requestKey.isEmpty {
-                    return requestKey
-                }
-                if !configuredKey.isEmpty {
-                    return configuredKey
-                }
-                if !envKey.isEmpty {
-                    usedEnvironmentKey = true
-                    return envKey
-                }
-                return nil
-            case .deeplink:
-                if !envKey.isEmpty {
-                    usedEnvironmentKey = true
-                    return envKey
-                }
-                return nil
-            }
-        }()
-
-        guard let apiKey = resolvedKey, !apiKey.isEmpty, let baseURL else {
-            return OpenAIProviderModelsResponse(
-                provider: "openai",
-                authMethod: request.authMethod,
-                usedEnvironmentKey: usedEnvironmentKey,
-                source: "fallback",
-                warning: "OpenAI API key is missing. Provide API key or set OPENAI_API_KEY.",
-                models: Self.fallbackOpenAIModels
-            )
-        }
-
-        do {
-            let models = try await Self.fetchOpenAIModels(apiKey: apiKey, baseURL: baseURL)
-            if models.isEmpty {
-                return OpenAIProviderModelsResponse(
-                    provider: "openai",
-                    authMethod: request.authMethod,
-                    usedEnvironmentKey: usedEnvironmentKey,
-                    source: "fallback",
-                    warning: "Provider returned empty model list.",
-                    models: Self.fallbackOpenAIModels
-                )
-            }
-
-            return OpenAIProviderModelsResponse(
-                provider: "openai",
-                authMethod: request.authMethod,
-                usedEnvironmentKey: usedEnvironmentKey,
-                source: "remote",
-                warning: nil,
-                models: models
-            )
-        } catch {
-            return OpenAIProviderModelsResponse(
-                provider: "openai",
-                authMethod: request.authMethod,
-                usedEnvironmentKey: usedEnvironmentKey,
-                source: "fallback",
-                warning: "Failed to fetch OpenAI models: \(error.localizedDescription)",
-                models: Self.fallbackOpenAIModels
-            )
-        }
+    /// Returns OpenAI provider key availability without fetching remote model catalog.
+    public func openAIProviderStatus() -> OpenAIProviderStatusResponse {
+        openAIProviderCatalog.status(config: currentConfig)
     }
 
     /// Persists config to file and updates in-memory snapshot.
-    public func updateConfig(_ config: CoreConfig) throws -> CoreConfig {
+    public func updateConfig(_ config: CoreConfig) async throws -> CoreConfig {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
 
@@ -757,7 +619,12 @@ public actor CoreService {
         agentsRootURL = config
             .resolvedWorkspaceRootURL(currentDirectory: FileManager.default.currentDirectoryPath)
             .appendingPathComponent("agents", isDirectory: true)
+        agentCatalogStore.updateAgentsRootURL(agentsRootURL)
         sessionStore.updateAgentsRootURL(agentsRootURL)
+        let resolvedModels = CoreModelProviderFactory.resolveModelIdentifiers(config: config)
+        let modelProvider = CoreModelProviderFactory.buildModelProvider(config: config, resolvedModels: resolvedModels)
+        let defaultModel = modelProvider?.models.first ?? resolvedModels.first
+        await runtime.updateModelProvider(modelProvider: modelProvider, defaultModel: defaultModel)
         return currentConfig
     }
 
@@ -788,293 +655,11 @@ public actor CoreService {
         return embeddedSchemaSQL
     }
 
-    /// Builds model provider plugin for AnyLanguageModel-based agent responses.
-    private static func buildModelProvider(
-        config: CoreConfig,
-        resolvedModels: [String]
-    ) -> AnyLanguageModelProviderPlugin? {
-        let supportsOpenAI = resolvedModels.contains { $0.hasPrefix("openai:") }
-        let supportsOllama = resolvedModels.contains { $0.hasPrefix("ollama:") }
-
-        let primaryOpenAIConfig = config.models.first {
-            resolvedIdentifier(for: $0).hasPrefix("openai:")
-        }
-        let primaryOllamaConfig = config.models.first {
-            resolvedIdentifier(for: $0).hasPrefix("ollama:")
-        }
-
-        var openAISettings: AnyLanguageModelProviderPlugin.OpenAISettings?
-        if supportsOpenAI {
-            let apiKey = ProcessInfo.processInfo.environment["OPENAI_API_KEY"] ?? ""
-            let configuredKey = primaryOpenAIConfig?.apiKey.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-            let resolvedKey = configuredKey.isEmpty ? apiKey : configuredKey
-
-            if !resolvedKey.isEmpty {
-                if let baseURL = parseURL(primaryOpenAIConfig?.apiUrl) {
-                    openAISettings = .init(apiKey: { resolvedKey }, baseURL: baseURL)
-                } else {
-                    openAISettings = .init(apiKey: { resolvedKey })
-                }
-            }
-        }
-
-        let ollamaSettings: AnyLanguageModelProviderPlugin.OllamaSettings? = {
-            guard supportsOllama else {
-                return nil
-            }
-            if let baseURL = parseURL(primaryOllamaConfig?.apiUrl) {
-                return .init(baseURL: baseURL)
-            }
-            return .init()
-        }()
-
-        let availableModels = resolvedModels.filter { model in
-            if model.hasPrefix("openai:") {
-                return openAISettings != nil
-            }
-            if model.hasPrefix("ollama:") {
-                return ollamaSettings != nil
-            }
-            return openAISettings != nil || ollamaSettings != nil
-        }
-
-        guard !availableModels.isEmpty else {
-            return nil
-        }
-
-        return AnyLanguageModelProviderPlugin(
-            id: "any-language-model",
-            models: availableModels,
-            openAI: openAISettings,
-            ollama: ollamaSettings,
-            systemInstructions: "You are SlopOverlord core channel assistant."
-        )
-    }
-
-    private static func resolveModelIdentifiers(config: CoreConfig) -> [String] {
-        var identifiers = config.models.map(resolvedIdentifier(for:))
-        let hasOpenAI = identifiers.contains { $0.hasPrefix("openai:") }
-        let environmentKey = ProcessInfo.processInfo.environment["OPENAI_API_KEY"]?
-            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-
-        if !hasOpenAI, !environmentKey.isEmpty {
-            identifiers.append("openai:gpt-4.1-mini")
-        }
-
-        return identifiers
-    }
-
-    private static func resolvedIdentifier(for model: CoreConfig.ModelConfig) -> String {
-        let modelValue = model.model.trimmingCharacters(in: .whitespacesAndNewlines)
-        if modelValue.hasPrefix("openai:") || modelValue.hasPrefix("ollama:") {
-            return modelValue
-        }
-
-        let provider = inferredProvider(model: model)
-        if let provider {
-            return "\(provider):\(modelValue)"
-        }
-
-        return modelValue
-    }
-
-    private static func inferredProvider(model: CoreConfig.ModelConfig) -> String? {
-        let title = model.title.lowercased()
-        let apiURL = model.apiUrl.lowercased()
-
-        if title.contains("openai") || apiURL.contains("openai") {
-            return "openai"
-        }
-
-        if title.contains("ollama") || apiURL.contains("ollama") || apiURL.contains("11434") {
-            return "ollama"
-        }
-
-        return nil
-    }
-
-    private static func parseURL(_ raw: String?) -> URL? {
-        guard let raw = raw?.trimmingCharacters(in: .whitespacesAndNewlines), !raw.isEmpty else {
-            return nil
-        }
-        return URL(string: raw)
-    }
-
-    private func ensureAgentsRootDirectory() throws {
-        try fileManager.createDirectory(at: agentsRootURL, withIntermediateDirectories: true)
-    }
-
-    private func agentDirectoryURL(for id: String) -> URL {
-        agentsRootURL.appendingPathComponent(id, isDirectory: true)
-    }
-
-    private func agentMetadataURL(for id: String) -> URL {
-        agentDirectoryURL(for: id).appendingPathComponent("agent.json")
-    }
-
-    private func readAgentSummary(id: String) throws -> AgentSummary {
-        let metadataURL = agentMetadataURL(for: id)
-        guard fileManager.fileExists(atPath: metadataURL.path) else {
-            throw AgentStorageError.notFound
-        }
-
-        let data = try Data(contentsOf: metadataURL)
-        let decoder = JSONDecoder()
-        decoder.dateDecodingStrategy = .iso8601
-        return try decoder.decode(AgentSummary.self, from: data)
-    }
-
-    private func writeAgentSummary(_ summary: AgentSummary) throws {
-        let encoder = JSONEncoder()
-        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-        encoder.dateEncodingStrategy = .iso8601
-        let payload = try encoder.encode(summary) + Data("\n".utf8)
-        try payload.write(to: agentMetadataURL(for: summary.id), options: .atomic)
-    }
-
-    private struct AgentConfigFile: Codable {
-        let id: String
-        let displayName: String
-        let role: String
-        let createdAt: Date
-        let selectedModel: String?
-    }
-
-    private func writeAgentScaffoldFiles(for summary: AgentSummary) throws {
-        let agentDirectory = agentDirectoryURL(for: summary.id)
-
-        let agentsMarkdown =
-            """
-            # Agent
-
-            - ID: \(summary.id)
-            - Display Name: \(summary.displayName)
-            - Role: \(summary.role)
-            """
-        try writeTextFile(
-            contents: agentsMarkdown + "\n",
-            at: agentDirectory.appendingPathComponent("Agents.md")
-        )
-
-        let userMarkdown =
-            """
-            # User
-
-            Describe the expected user profile, tone, and communication preferences for this agent.
-            """
-        try writeTextFile(
-            contents: userMarkdown + "\n",
-            at: agentDirectory.appendingPathComponent("User.md")
-        )
-
-        let soulMarkdown =
-            """
-            # Soul
-
-            Define the core principles, values, and behavioral constraints of this agent.
-            """
-        try writeTextFile(
-            contents: soulMarkdown + "\n",
-            at: agentDirectory.appendingPathComponent("Soul.md")
-        )
-
-        try writeTextFile(
-            contents: summary.id + "\n",
-            at: agentDirectory.appendingPathComponent("Identity.id")
-        )
-        try writeTextFile(
-            contents: summary.id + "\n",
-            at: agentDirectory.appendingPathComponent("Identity.md")
-        )
-
-        try writeAgentConfigFile(
-            AgentConfigFile(
-                id: summary.id,
-                displayName: summary.displayName,
-                role: summary.role,
-                createdAt: summary.createdAt,
-                selectedModel: availableAgentModels().first?.id
-            )
-        )
-
-        try fileManager.createDirectory(
-            at: agentDirectory.appendingPathComponent("sessions", isDirectory: true),
-            withIntermediateDirectories: true
-        )
-    }
-
-    private func agentConfigURL(for id: String) -> URL {
-        agentDirectoryURL(for: id).appendingPathComponent("config.json")
-    }
-
-    private func readAgentConfigFile(for summary: AgentSummary, availableModels: [ProviderModelOption]) throws -> AgentConfigFile {
-        let configURL = agentConfigURL(for: summary.id)
-        if !fileManager.fileExists(atPath: configURL.path) {
-            let fallback = AgentConfigFile(
-                id: summary.id,
-                displayName: summary.displayName,
-                role: summary.role,
-                createdAt: summary.createdAt,
-                selectedModel: availableModels.first?.id
-            )
-            try writeAgentConfigFile(fallback)
-            return fallback
-        }
-
-        let data = try Data(contentsOf: configURL)
-        let decoder = JSONDecoder()
-        decoder.dateDecodingStrategy = .iso8601
-        var decoded = try decoder.decode(AgentConfigFile.self, from: data)
-        let selectedModel = decoded.selectedModel?.trimmingCharacters(in: .whitespacesAndNewlines)
-        let availableModelIDs = Set(availableModels.map(\.id))
-        if selectedModel?.isEmpty ?? true || !(selectedModel.map { availableModelIDs.contains($0) } ?? false) {
-            decoded = AgentConfigFile(
-                id: decoded.id,
-                displayName: decoded.displayName,
-                role: decoded.role,
-                createdAt: decoded.createdAt,
-                selectedModel: availableModels.first?.id
-            )
-            try writeAgentConfigFile(decoded)
-        }
-        return decoded
-    }
-
-    private func writeAgentConfigFile(_ configFile: AgentConfigFile) throws {
-        let encoder = JSONEncoder()
-        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-        encoder.dateEncodingStrategy = .iso8601
-        let configPayload = try encoder.encode(configFile) + Data("\n".utf8)
-        try configPayload.write(to: agentConfigURL(for: configFile.id), options: .atomic)
-    }
-
-    private func readAgentDocuments(agentID: String) throws -> AgentDocumentBundle {
-        let agentDirectory = agentDirectoryURL(for: agentID)
-        let userMarkdown = try readTextFile(at: agentDirectory.appendingPathComponent("User.md"), fallback: "# User\n")
-        let agentsMarkdown = try readTextFile(at: agentDirectory.appendingPathComponent("Agents.md"), fallback: "# Agent\n")
-        let soulMarkdown = try readTextFile(at: agentDirectory.appendingPathComponent("Soul.md"), fallback: "# Soul\n")
-
-        let identityMarkdownPath = agentDirectory.appendingPathComponent("Identity.md")
-        let identityLegacyPath = agentDirectory.appendingPathComponent("Identity.id")
-        let identityMarkdown = try readIdentityMarkdown(
-            markdownURL: identityMarkdownPath,
-            legacyURL: identityLegacyPath,
-            fallback: agentID
-        )
-
-        return AgentDocumentBundle(
-            userMarkdown: userMarkdown,
-            agentsMarkdown: agentsMarkdown,
-            soulMarkdown: soulMarkdown,
-            identityMarkdown: identityMarkdown
-        )
-    }
-
     private func availableAgentModels() -> [ProviderModelOption] {
         var seen: Set<String> = []
         var options: [ProviderModelOption] = []
 
-        let candidates = Self.resolveModelIdentifiers(config: currentConfig) + currentConfig.models.map(\.model)
+        let candidates = CoreModelProviderFactory.resolveModelIdentifiers(config: currentConfig) + currentConfig.models.map(\.model)
         for raw in candidates {
             let value = raw.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !value.isEmpty else {
@@ -1093,57 +678,40 @@ public actor CoreService {
         return options
     }
 
-    private func readTextFile(at url: URL, fallback: String) throws -> String {
-        guard fileManager.fileExists(atPath: url.path) else {
-            return fallback
+    private func mapAgentStorageError(_ error: Error) -> AgentStorageError {
+        guard let storeError = error as? AgentCatalogFileStore.StoreError else {
+            return .invalidPayload
         }
 
-        let data = try Data(contentsOf: url)
-        guard let text = String(data: data, encoding: .utf8) else {
-            return fallback
+        switch storeError {
+        case .invalidID:
+            return .invalidID
+        case .invalidPayload, .invalidModel, .storageFailure:
+            return .invalidPayload
+        case .alreadyExists:
+            return .alreadyExists
+        case .notFound:
+            return .notFound
         }
-        return normalizedDocumentText(text)
     }
 
-    private func readIdentityMarkdown(markdownURL: URL, legacyURL: URL, fallback: String) throws -> String {
-        if fileManager.fileExists(atPath: markdownURL.path) {
-            return try readTextFile(at: markdownURL, fallback: fallback + "\n")
+    private func mapAgentConfigError(_ error: Error) -> AgentConfigError {
+        guard let storeError = error as? AgentCatalogFileStore.StoreError else {
+            return .storageFailure
         }
 
-        if fileManager.fileExists(atPath: legacyURL.path) {
-            let legacy = try readTextFile(at: legacyURL, fallback: fallback + "\n")
-            return normalizedDocumentText(legacy)
+        switch storeError {
+        case .invalidID:
+            return .invalidAgentID
+        case .invalidPayload:
+            return .invalidPayload
+        case .invalidModel:
+            return .invalidModel
+        case .notFound:
+            return .agentNotFound
+        case .alreadyExists, .storageFailure:
+            return .storageFailure
         }
-
-        return fallback + "\n"
-    }
-
-    private func writeTextFile(contents: String, at url: URL) throws {
-        guard let data = contents.data(using: .utf8) else {
-            throw AgentStorageError.invalidPayload
-        }
-        try data.write(to: url, options: .atomic)
-    }
-
-    private func normalizedDocumentText(_ raw: String) -> String {
-        let normalized = raw.replacingOccurrences(of: "\r\n", with: "\n")
-        if normalized.hasSuffix("\n") {
-            return normalized
-        }
-        return normalized + "\n"
-    }
-
-    private func normalizedIdentityValue(from markdown: String, fallback: String) -> String {
-        let candidates = markdown
-            .replacingOccurrences(of: "\r\n", with: "\n")
-            .split(whereSeparator: \.isNewline)
-            .map { String($0).trimmingCharacters(in: .whitespacesAndNewlines) }
-            .filter { !$0.isEmpty && !$0.hasPrefix("#") }
-
-        if let first = candidates.first {
-            return first
-        }
-        return fallback
     }
 
     private func normalizedAgentID(_ raw: String) -> String? {
@@ -1182,6 +750,69 @@ public actor CoreService {
         return trimmed
     }
 
+    private func cleanupSessionRunTracking(channelID: String) {
+        activeSessionRunChannels.remove(channelID)
+        interruptedSessionRunChannels.remove(channelID)
+        streamedAssistantByChannel.removeValue(forKey: channelID)
+        streamedAssistantLastPersistedByChannel.removeValue(forKey: channelID)
+        streamedAssistantLastPersistedAtByChannel.removeValue(forKey: channelID)
+    }
+
+    private func handleSessionResponseChunk(
+        agentID: String,
+        sessionID: String,
+        channelID: String,
+        partialText: String
+    ) async -> Bool {
+        let normalized = partialText.replacingOccurrences(of: "\r\n", with: "\n")
+        streamedAssistantByChannel[channelID] = normalized
+
+        if interruptedSessionRunChannels.contains(channelID) {
+            return false
+        }
+
+        let trimmed = normalized.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            return true
+        }
+
+        let lastPersistedText = streamedAssistantLastPersistedByChannel[channelID] ?? ""
+        let lastPersistedAt = streamedAssistantLastPersistedAtByChannel[channelID] ?? .distantPast
+        let now = Date()
+        let progressed = max(0, normalized.count - lastPersistedText.count)
+        let shouldPersist = lastPersistedText.isEmpty ||
+            progressed >= 24 ||
+            now.timeIntervalSince(lastPersistedAt) >= 0.35
+
+        if shouldPersist {
+            do {
+                _ = try sessionStore.appendEvents(
+                    agentID: agentID,
+                    sessionID: sessionID,
+                    events: [
+                        AgentSessionEvent(
+                            agentId: agentID,
+                            sessionId: sessionID,
+                            type: .runStatus,
+                            runStatus: AgentRunStatusEvent(
+                                stage: .responding,
+                                label: "Responding",
+                                details: "Generating response...",
+                                expandedText: normalized
+                            )
+                        )
+                    ]
+                )
+                streamedAssistantLastPersistedByChannel[channelID] = normalized
+                streamedAssistantLastPersistedAtByChannel[channelID] = now
+            } catch {
+                return false
+            }
+        }
+
+        return !interruptedSessionRunChannels.contains(channelID)
+    }
+
     private func shouldUseSearchStage(content: String, attachmentCount: Int) -> Bool {
         if attachmentCount > 0 {
             return true
@@ -1190,6 +821,18 @@ public actor CoreService {
         let lower = content.lowercased()
         let keywords = ["search", "find", "google", "lookup", "research", "найди", "поиск", "исследуй"]
         return keywords.contains(where: lower.contains)
+    }
+
+    private func isAssistantErrorText(_ text: String) -> Bool {
+        let value = text.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !value.isEmpty else {
+            return false
+        }
+
+        return value.hasPrefix("model provider error:") ||
+            value.hasPrefix("error:") ||
+            value.contains(" failed") ||
+            value.contains("exception")
     }
 
     private func sessionChannelID(agentID: String, sessionID: String) -> String {
@@ -1205,7 +848,7 @@ public actor CoreService {
             return
         }
 
-        let documents = try readAgentDocuments(agentID: agentID)
+        let documents = try agentCatalogStore.readAgentDocuments(agentID: agentID)
         let bootstrapMessage = sessionBootstrapContextMessage(
             agentID: agentID,
             sessionID: sessionID,
@@ -1256,59 +899,6 @@ public actor CoreService {
         case .invalidPayload:
             return .invalidPayload
         }
-    }
-
-    private struct OpenAIModelsResponse: Decodable {
-        struct ModelItem: Decodable {
-            let id: String
-        }
-
-        let data: [ModelItem]
-    }
-
-    private static let fallbackOpenAIModels: [ProviderModelOption] = [
-        .init(id: "gpt-4.1", title: "gpt-4.1"),
-        .init(id: "gpt-4.1-mini", title: "gpt-4.1-mini"),
-        .init(id: "gpt-4o", title: "gpt-4o"),
-        .init(id: "gpt-4o-mini", title: "gpt-4o-mini"),
-        .init(id: "o4-mini", title: "o4-mini")
-    ]
-
-    private static func fetchOpenAIModels(apiKey: String, baseURL: URL) async throws -> [ProviderModelOption] {
-        let endpoint = openAIModelsURL(baseURL: baseURL)
-        var request = URLRequest(url: endpoint)
-        request.httpMethod = "GET"
-        request.setValue("application/json", forHTTPHeaderField: "Accept")
-        request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
-
-        let (data, response) = try await URLSession.shared.data(for: request)
-        guard let http = response as? HTTPURLResponse else {
-            throw URLError(.badServerResponse)
-        }
-
-        guard (200..<300).contains(http.statusCode) else {
-            throw URLError(.userAuthenticationRequired)
-        }
-
-        let decoded = try JSONDecoder().decode(OpenAIModelsResponse.self, from: data)
-        return decoded.data
-            .map(\.id)
-            .filter { !$0.isEmpty }
-            .sorted()
-            .map { ProviderModelOption(id: $0, title: $0) }
-    }
-
-    private static func openAIModelsURL(baseURL: URL) -> URL {
-        if baseURL.path.isEmpty || baseURL.path == "/" {
-            return baseURL.appendingPathComponent("models")
-        }
-
-        let normalizedPath = baseURL.path.hasSuffix("/") ? String(baseURL.path.dropLast()) : baseURL.path
-        if normalizedPath.hasSuffix("/models") {
-            return baseURL
-        }
-
-        return baseURL.appendingPathComponent("models")
     }
 
     /// Subscribes to runtime event stream and persists events in background.

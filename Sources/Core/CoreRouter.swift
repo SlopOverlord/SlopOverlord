@@ -265,6 +265,11 @@ public actor CoreRouter {
             return Self.encodable(status: HTTPStatus.ok, payload: workers)
         }
 
+        add(.get, "/v1/providers/openai/status") { _ in
+            let status = await service.openAIProviderStatus()
+            return Self.encodable(status: HTTPStatus.ok, payload: status)
+        }
+
         add(.get, "/v1/config") { _ in
             let config = await service.getConfig()
             return Self.encodable(status: HTTPStatus.ok, payload: config)

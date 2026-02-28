@@ -1,7 +1,11 @@
 import Foundation
 
 public struct CoreConfig: Codable, Sendable {
-    public static let defaultConfigPath = "slopoverlord.config.json"
+    public static let defaultConfigFileName = "slopoverlord.json"
+    public static let legacyDefaultConfigFileName = "slopoverlord.config.json"
+    public static var defaultConfigPath: String {
+        defaultConfigPath(currentDirectory: FileManager.default.currentDirectoryPath)
+    }
     public static let defaultWorkspaceName = "workspace"
     public static let defaultWorkspaceBasePath = "~"
     public static let defaultSQLiteFileName = "core.sqlite"
@@ -133,14 +137,54 @@ public struct CoreConfig: Codable, Sendable {
         )
     }
 
-    public static func load(from path: String = CoreConfig.defaultConfigPath) -> CoreConfig {
+    public static func defaultConfigPath(
+        for workspace: Workspace = Workspace(),
+        currentDirectory: String = FileManager.default.currentDirectoryPath
+    ) -> String {
+        let cwd = URL(fileURLWithPath: currentDirectory, isDirectory: true)
+        return Self.resolvePath(workspace.basePath, currentDirectory: cwd)
+            .appendingPathComponent(workspace.name, isDirectory: true)
+            .appendingPathComponent(defaultConfigFileName)
+            .path
+    }
+
+    public static func load(
+        from path: String? = nil,
+        currentDirectory: String = FileManager.default.currentDirectoryPath
+    ) -> CoreConfig {
+        let normalizedPath = path?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let resolvedPath: String
+        if let normalizedPath, !normalizedPath.isEmpty {
+            resolvedPath = normalizedPath
+        } else {
+            resolvedPath = defaultConfigPath(currentDirectory: currentDirectory)
+        }
+
+        if let decoded = decodeConfigFile(at: resolvedPath) {
+            return decoded
+        }
+
+        if path == nil {
+            let legacyPath = URL(fileURLWithPath: currentDirectory, isDirectory: true)
+                .appendingPathComponent(legacyDefaultConfigFileName)
+                .path
+            if let decodedLegacy = decodeConfigFile(at: legacyPath) {
+                return decodedLegacy
+            }
+        }
+
+        return .default
+    }
+
+    private static func decodeConfigFile(at path: String) -> CoreConfig? {
         let fileURL = URL(fileURLWithPath: path)
         guard let data = try? Data(contentsOf: fileURL) else {
-            return .default
+            return nil
         }
 
         let decoder = JSONDecoder()
-        return (try? decoder.decode(CoreConfig.self, from: data)) ?? .default
+        return try? decoder.decode(CoreConfig.self, from: data)
     }
 
     private enum CodingKeys: String, CodingKey {

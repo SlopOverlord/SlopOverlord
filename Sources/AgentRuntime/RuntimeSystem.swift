@@ -11,8 +11,8 @@ public actor RuntimeSystem {
     private let branches: BranchRuntime
     private let compactor: Compactor
     private let visor: Visor
-    private let modelProvider: (any ModelProviderPlugin)?
-    private let defaultModel: String?
+    private var modelProvider: (any ModelProviderPlugin)?
+    private var defaultModel: String?
 
     public init(modelProvider: (any ModelProviderPlugin)? = nil, defaultModel: String? = nil) {
         let bus = EventBus()
@@ -28,13 +28,35 @@ public actor RuntimeSystem {
         self.defaultModel = defaultModel ?? modelProvider?.models.first
     }
 
+    /// Hot-swaps model provider and default model for subsequent direct responses.
+    public func updateModelProvider(modelProvider: (any ModelProviderPlugin)?, defaultModel: String?) {
+        self.modelProvider = modelProvider
+
+        guard let modelProvider else {
+            self.defaultModel = nil
+            return
+        }
+
+        let normalizedDefault = defaultModel?.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let normalizedDefault, !normalizedDefault.isEmpty, modelProvider.models.contains(normalizedDefault) {
+            self.defaultModel = normalizedDefault
+            return
+        }
+
+        self.defaultModel = modelProvider.models.first
+    }
+
     /// Posts channel message and executes route-specific orchestration flow.
-    public func postMessage(channelId: String, request: ChannelMessageRequest) async -> ChannelRouteDecision {
+    public func postMessage(
+        channelId: String,
+        request: ChannelMessageRequest,
+        onResponseChunk: (@Sendable (String) async -> Bool)? = nil
+    ) async -> ChannelRouteDecision {
         let ingest = await channels.ingest(channelId: channelId, request: request)
 
         switch ingest.decision.action {
         case .respond:
-            await respondInline(channelId: channelId, userMessage: request.content)
+            await respondInline(channelId: channelId, userMessage: request.content, onResponseChunk: onResponseChunk)
 
         case .spawnBranch:
             let branchId = await branches.spawn(channelId: channelId, prompt: request.content)
@@ -85,23 +107,56 @@ public actor RuntimeSystem {
     }
 
     /// Uses configured model provider for direct responses or falls back to static response.
-    private func respondInline(channelId: String, userMessage: String) async {
+    private func respondInline(
+        channelId: String,
+        userMessage: String,
+        onResponseChunk: (@Sendable (String) async -> Bool)?
+    ) async {
         guard let modelProvider, let defaultModel else {
-            await channels.appendSystemMessage(channelId: channelId, content: "Responded inline")
+            let fallback = "Responded inline"
+            if let onResponseChunk {
+                _ = await onResponseChunk(fallback)
+            }
+            await channels.appendSystemMessage(channelId: channelId, content: fallback)
             return
         }
 
         do {
-            let completion = try await modelProvider.complete(
-                model: defaultModel,
-                prompt: userMessage,
-                maxTokens: 1024
-            )
-            await channels.appendSystemMessage(channelId: channelId, content: completion)
+            var latest = ""
+            let stream = modelProvider.stream(model: defaultModel, prompt: userMessage, maxTokens: 1024)
+            for try await partial in stream {
+                latest = partial
+                if let onResponseChunk {
+                    let shouldContinue = await onResponseChunk(latest)
+                    if !shouldContinue {
+                        if !latest.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                            await channels.appendSystemMessage(channelId: channelId, content: latest)
+                        }
+                        return
+                    }
+                }
+            }
+
+            if latest.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                latest = try await modelProvider.complete(
+                    model: defaultModel,
+                    prompt: userMessage,
+                    maxTokens: 1024
+                )
+                if let onResponseChunk {
+                    _ = await onResponseChunk(latest)
+                }
+            }
+
+            await channels.appendSystemMessage(channelId: channelId, content: latest)
         } catch {
+            let text = "Model provider error: \(error)"
+            if let onResponseChunk {
+                _ = await onResponseChunk(text)
+            }
             await channels.appendSystemMessage(
                 channelId: channelId,
-                content: "Model provider error: \(error)"
+                content: text
             )
         }
     }

@@ -9,6 +9,7 @@ import {
   fetchAgentSessions,
   fetchAgents,
   postAgentSessionMessage,
+  postAgentSessionControl,
   updateAgentConfig
 } from "../api";
 
@@ -101,7 +102,10 @@ function AgentChatTab({ agentId }) {
   const [inputText, setInputText] = useState("");
   const [pendingFiles, setPendingFiles] = useState([]);
   const [statusText, setStatusText] = useState("Loading sessions...");
+  const [optimisticUserEvent, setOptimisticUserEvent] = useState(null);
+  const [optimisticAssistantText, setOptimisticAssistantText] = useState("");
   const fileInputRef = useRef(null);
+  const runStateRef = useRef({ watcherId: 0, sessionId: null, abortController: null });
 
   useEffect(() => {
     let isCancelled = false;
@@ -112,6 +116,13 @@ function AgentChatTab({ agentId }) {
       setActiveSession(null);
       setPendingFiles([]);
       setInputText("");
+      setOptimisticUserEvent(null);
+      setOptimisticAssistantText("");
+      setIsSending(false);
+      runStateRef.current.watcherId += 1;
+      runStateRef.current.abortController?.abort();
+      runStateRef.current.sessionId = null;
+      runStateRef.current.abortController = null;
 
       const response = await fetchAgentSessions(agentId);
       if (isCancelled) {
@@ -147,6 +158,10 @@ function AgentChatTab({ agentId }) {
 
     return () => {
       isCancelled = true;
+      runStateRef.current.watcherId += 1;
+      runStateRef.current.abortController?.abort();
+      runStateRef.current.sessionId = null;
+      runStateRef.current.abortController = null;
     };
   }, [agentId]);
 
@@ -206,6 +221,50 @@ function AgentChatTab({ agentId }) {
     return response;
   }
 
+  function latestRunStatusFromEvents(events) {
+    return [...events]
+      .reverse()
+      .find((eventItem) => eventItem.type === "run_status" && eventItem.runStatus)?.runStatus;
+  }
+
+  function latestRespondingTextFromEvents(events) {
+    const responding = [...events].reverse().find(
+      (eventItem) =>
+        eventItem.type === "run_status" &&
+        eventItem.runStatus?.stage === "responding" &&
+        eventItem.runStatus?.expandedText
+    )?.runStatus;
+    return String(responding?.expandedText || "");
+  }
+
+  async function watchSessionWhileRunning(sessionId, watcherId) {
+    while (runStateRef.current.watcherId === watcherId) {
+      const detail = await fetchAgentSession(agentId, sessionId);
+      if (runStateRef.current.watcherId !== watcherId) {
+        return;
+      }
+
+      if (detail && Array.isArray(detail.events)) {
+        const events = detail.events;
+        const latestStatus = latestRunStatusFromEvents(events);
+        const respondingText = latestRespondingTextFromEvents(events);
+        if (respondingText) {
+          setOptimisticAssistantText(respondingText);
+        }
+
+        if (latestStatus) {
+          setStatusText(
+            `Status: ${latestStatus.label}${latestStatus.details ? ` - ${latestStatus.details}` : ""}`
+          );
+        }
+      }
+
+      await new Promise((resolve) => {
+        setTimeout(resolve, 280);
+      });
+    }
+  }
+
   function addFiles(fileList) {
     const next = Array.from(fileList || []);
     if (next.length === 0) {
@@ -220,7 +279,7 @@ function AgentChatTab({ agentId }) {
   }
 
   async function handleSend(event) {
-    event.preventDefault();
+    event?.preventDefault?.();
     if (isSending) {
       return;
     }
@@ -239,8 +298,33 @@ function AgentChatTab({ agentId }) {
       sessionId = created.id;
     }
 
+    const localMessageSegments = [];
+    if (trimmed) {
+      localMessageSegments.push({ kind: "text", text: trimmed });
+    }
+    localMessageSegments.push(
+      ...pendingFiles.map((file) => ({
+        kind: "attachment",
+        attachment: {
+          id: `local-${file.name}-${file.size}-${file.lastModified}`,
+          name: file.name,
+          mimeType: file.type || "application/octet-stream"
+        }
+      }))
+    );
+    setOptimisticUserEvent({
+      id: `local-user-${Date.now()}`,
+      createdAt: new Date().toISOString(),
+      type: "message",
+      message: {
+        role: "user",
+        createdAt: new Date().toISOString(),
+        segments: localMessageSegments
+      }
+    });
+    setOptimisticAssistantText("");
     setIsSending(true);
-    setStatusText("Sending message...");
+    setStatusText("Thinking...");
 
     let oversizedCount = 0;
     const uploads = await Promise.all(
@@ -275,29 +359,83 @@ function AgentChatTab({ agentId }) {
       })
     );
 
-    const response = await postAgentSessionMessage(agentId, sessionId, {
-      userId: "dashboard",
-      content: trimmed,
-      attachments: uploads,
-      spawnSubSession: false
-    });
+    const watcherId = runStateRef.current.watcherId + 1;
+    runStateRef.current.watcherId = watcherId;
+    runStateRef.current.sessionId = sessionId;
+    runStateRef.current.abortController = new AbortController();
+    watchSessionWhileRunning(sessionId, watcherId);
 
-    if (!response) {
-      setStatusText("Failed to send message.");
+    try {
+      const response = await postAgentSessionMessage(
+        agentId,
+        sessionId,
+        {
+          userId: "dashboard",
+          content: trimmed,
+          attachments: uploads,
+          spawnSubSession: false
+        },
+        { signal: runStateRef.current.abortController.signal }
+      );
+
+      if (!response) {
+        setStatusText("Failed to send message.");
+        return;
+      }
+
+      setInputText("");
+      setPendingFiles([]);
+      await refreshSessions(sessionId);
+
+      if (oversizedCount > 0) {
+        setStatusText(`Message sent. ${oversizedCount} file(s) saved without inline preview (size limit).`);
+      } else {
+        setStatusText("Message sent.");
+      }
+    } catch (error) {
+      if (error?.name !== "AbortError") {
+        setStatusText("Failed to send message.");
+      }
+    } finally {
+      if (runStateRef.current.watcherId === watcherId) {
+        runStateRef.current.watcherId += 1;
+      }
+      runStateRef.current.abortController = null;
+      runStateRef.current.sessionId = null;
+      setOptimisticUserEvent(null);
+      setOptimisticAssistantText("");
       setIsSending(false);
+    }
+  }
+
+  async function handleStop() {
+    if (!isSending) {
       return;
     }
 
-    setInputText("");
-    setPendingFiles([]);
-    await refreshSessions(sessionId);
+    const sessionId = runStateRef.current.sessionId || activeSessionId;
+    runStateRef.current.watcherId += 1;
+    runStateRef.current.abortController?.abort();
+    runStateRef.current.abortController = null;
+    runStateRef.current.sessionId = null;
+    setStatusText("Stopping...");
 
-    if (oversizedCount > 0) {
-      setStatusText(`Message sent. ${oversizedCount} file(s) saved without inline preview (size limit).`);
-    } else {
-      setStatusText("Message sent.");
+    if (sessionId) {
+      const response = await postAgentSessionControl(agentId, sessionId, {
+        action: "interrupt",
+        requestedBy: "dashboard",
+        reason: "Stopped by user"
+      });
+      await refreshSessions(sessionId);
+      if (response) {
+        setStatusText("Interrupted.");
+      } else {
+        setStatusText("Failed to interrupt.");
+      }
     }
 
+    setOptimisticUserEvent(null);
+    setOptimisticAssistantText("");
     setIsSending(false);
   }
 
@@ -320,22 +458,41 @@ function AgentChatTab({ agentId }) {
 
   const activeSummary = activeSession?.summary || sessions.find((item) => item.id === activeSessionId) || null;
   const events = Array.isArray(activeSession?.events) ? activeSession.events : [];
-  const chatMessages = events.filter(
+  const persistedMessages = events.filter(
     (eventItem) =>
       eventItem.type === "message" &&
       eventItem.message &&
       (eventItem.message.role === "user" || eventItem.message.role === "assistant")
   );
-  const latestRunStatus = [...events]
-    .reverse()
-    .find((eventItem) => eventItem.type === "run_status" && eventItem.runStatus)?.runStatus;
+  const chatMessages = [...persistedMessages];
+  if (optimisticUserEvent) {
+    chatMessages.push(optimisticUserEvent);
+  }
+  if (isSending || optimisticAssistantText) {
+    chatMessages.push({
+      id: "local-assistant-stream",
+      createdAt: new Date().toISOString(),
+      type: "message",
+      message: {
+        role: "assistant",
+        createdAt: new Date().toISOString(),
+        segments: [
+          {
+            kind: "text",
+            text: optimisticAssistantText || "Thinking..."
+          }
+        ]
+      }
+    });
+  }
+  const latestRunStatus = latestRunStatusFromEvents(events);
 
   return (
     <section className="agent-chat-shell">
       <aside className="agent-chat-sessions">
         <div className="agent-chat-sessions-head">
           <h4>Sessions</h4>
-          <button type="button" onClick={() => createSession()}>
+          <button type="button" onClick={() => createSession()} disabled={isSending}>
             New
           </button>
         </div>
@@ -345,7 +502,7 @@ function AgentChatTab({ agentId }) {
         ) : sessions.length === 0 ? (
           <div className="agent-chat-empty-sessions">
             <p className="placeholder-text">No sessions</p>
-            <button type="button" onClick={() => createSession()}>
+            <button type="button" onClick={() => createSession()} disabled={isSending}>
               Create Session
             </button>
           </div>
@@ -357,6 +514,7 @@ function AgentChatTab({ agentId }) {
                 type="button"
                 className={`agent-chat-session-item ${activeSessionId === session.id ? "active" : ""}`}
                 onClick={() => openSession(session.id)}
+                disabled={isSending}
               >
                 <strong>{session.title}</strong>
                 <span>{session.messageCount} msg</span>
@@ -391,11 +549,16 @@ function AgentChatTab({ agentId }) {
           </div>
           <div className="agent-chat-actions">
             {activeSummary?.parentSessionId ? (
-              <button type="button" onClick={() => openSession(activeSummary.parentSessionId)}>
+              <button type="button" onClick={() => openSession(activeSummary.parentSessionId)} disabled={isSending}>
                 Back To Parent
               </button>
             ) : null}
-            <button type="button" className="danger" onClick={handleDeleteActiveSession} disabled={!activeSessionId}>
+            <button
+              type="button"
+              className="danger"
+              onClick={handleDeleteActiveSession}
+              disabled={!activeSessionId || isSending}
+            >
               Delete
             </button>
           </div>
@@ -459,6 +622,16 @@ function AgentChatTab({ agentId }) {
             rows={3}
             value={inputText}
             onChange={(event) => setInputText(event.target.value)}
+            disabled={isSending}
+            onKeyDown={(event) => {
+              if (event.key !== "Enter" || event.shiftKey || event.nativeEvent.isComposing) {
+                return;
+              }
+              event.preventDefault();
+              if (!isSending) {
+                handleSend();
+              }
+            }}
             placeholder="Type a message to your agent..."
           />
 
@@ -482,13 +655,18 @@ function AgentChatTab({ agentId }) {
                 addFiles(event.target.files);
                 event.target.value = "";
               }}
+              disabled={isSending}
             />
-            <button type="button" onClick={() => fileInputRef.current?.click()}>
+            <button type="button" onClick={() => fileInputRef.current?.click()} disabled={isSending}>
               Attach Files
             </button>
-            <button type="submit" disabled={isSending}>
-              {isSending ? "Sending..." : "Send"}
-            </button>
+            {isSending ? (
+              <button type="button" className="danger" onClick={handleStop}>
+                Stop
+              </button>
+            ) : (
+              <button type="submit">Send</button>
+            )}
           </div>
         </form>
 

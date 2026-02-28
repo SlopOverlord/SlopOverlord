@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { fetchOpenAIModels, fetchRuntimeConfig, updateRuntimeConfig } from "../api";
+import { fetchOpenAIModels, fetchOpenAIProviderStatus, fetchRuntimeConfig, updateRuntimeConfig } from "../api";
 
 const SETTINGS_ITEMS = [
   { id: "logging", title: "Logging", icon: "LG" },
@@ -249,6 +249,11 @@ export function ConfigView({ sectionId = "providers", onSectionChange = null }) 
   const [providerForm, setProviderForm] = useState(null);
   const [providerModelOptions, setProviderModelOptions] = useState({});
   const [providerModelStatus, setProviderModelStatus] = useState({});
+  const [openAIProviderStatus, setOpenAIProviderStatus] = useState({
+    hasEnvironmentKey: false,
+    hasConfiguredKey: false,
+    hasAnyKey: false
+  });
 
   useEffect(() => {
     loadConfig().catch(() => {
@@ -335,6 +340,7 @@ export function ConfigView({ sectionId = "providers", onSectionChange = null }) 
     setProviderForm(null);
     setProviderModelOptions({});
     setProviderModelStatus({});
+    await loadOpenAIProviderStatus();
     setStatusText("Config loaded");
   }
 
@@ -352,10 +358,24 @@ export function ConfigView({ sectionId = "providers", onSectionChange = null }) 
       setDraftConfig(normalized);
       setSavedConfig(normalized);
       setRawConfig(JSON.stringify(normalized, null, 2));
+      await loadOpenAIProviderStatus();
       setStatusText("Config saved");
     } catch {
       setStatusText("Invalid raw JSON");
     }
+  }
+
+  async function loadOpenAIProviderStatus() {
+    const response = await fetchOpenAIProviderStatus();
+    if (!response) {
+      return;
+    }
+
+    setOpenAIProviderStatus({
+      hasEnvironmentKey: Boolean(response.hasEnvironmentKey),
+      hasConfiguredKey: Boolean(response.hasConfiguredKey),
+      hasAnyKey: Boolean(response.hasAnyKey)
+    });
   }
 
   function mutateDraft(mutator) {
@@ -442,6 +462,14 @@ export function ConfigView({ sectionId = "providers", onSectionChange = null }) 
     } else {
       setProviderStatus(provider.id, `Loaded fallback catalog (${response.models.length} models)`);
     }
+
+    if (provider.id === "openai-api" || provider.id === "openai-oauth") {
+      setOpenAIProviderStatus((previous) => ({
+        ...previous,
+        hasEnvironmentKey: Boolean(response.usedEnvironmentKey),
+        hasAnyKey: previous.hasConfiguredKey || Boolean(response.usedEnvironmentKey)
+      }));
+    }
   }
 
   function saveProviderFromModal() {
@@ -507,8 +535,16 @@ export function ConfigView({ sectionId = "providers", onSectionChange = null }) 
         <section className="providers-grid">
           {PROVIDER_CATALOG.map((provider) => {
             const providerEntry = getProviderEntry(draftConfig.models, provider.id)?.entry;
-            const configured = providerIsConfigured(provider, providerEntry);
+            const entryModel = String(providerEntry?.model || provider.defaultEntry.model || "").trim();
+            const entryURL = String(providerEntry?.apiUrl || provider.defaultEntry.apiUrl || "").trim();
+            const configuredViaEnvironment =
+              provider.id === "openai-api" &&
+              openAIProviderStatus.hasEnvironmentKey &&
+              !Boolean(String(providerEntry?.apiKey || "").trim()) &&
+              Boolean(entryModel && entryURL);
+            const configured = configuredViaEnvironment || providerIsConfigured(provider, providerEntry);
             const actionText = configured ? "Configure" : provider.requiresApiKey ? "Add Key" : "Setup";
+            const configuredBadgeText = configuredViaEnvironment ? "env" : configured ? "configured" : "not set";
 
             return (
               <button
@@ -519,7 +555,7 @@ export function ConfigView({ sectionId = "providers", onSectionChange = null }) 
               >
                 <div className="provider-card-head">
                   <h4>{provider.title}</h4>
-                  <span className={`provider-state ${configured ? "on" : "off"}`}>{configured ? "configured" : "not set"}</span>
+                  <span className={`provider-state ${configured ? "on" : "off"}`}>{configuredBadgeText}</span>
                 </div>
                 <p>{provider.description}</p>
                 <span className="provider-model-line">
@@ -552,6 +588,9 @@ export function ConfigView({ sectionId = "providers", onSectionChange = null }) 
                       onChange={(event) => updateProviderForm("apiKey", event.target.value)}
                       placeholder="sk-..."
                     />
+                    {providerModalMeta.id === "openai-api" && openAIProviderStatus.hasEnvironmentKey ? (
+                      <span className="placeholder-text">Using OPENAI_API_KEY from Core environment.</span>
+                    ) : null}
                   </label>
                 ) : null}
 

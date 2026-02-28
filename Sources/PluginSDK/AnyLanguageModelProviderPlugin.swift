@@ -94,6 +94,102 @@ public struct AnyLanguageModelProviderPlugin: ModelProviderPlugin {
         }
     }
 
+    /// Streams single-turn completion snapshots, yielding progressively built text.
+    public func stream(model: String, prompt: String, maxTokens: Int) -> AsyncThrowingStream<String, any Error> {
+        AsyncThrowingStream { continuation in
+            let task = Task {
+                do {
+                    switch try backend(for: model) {
+                    case .openAI(let settings):
+                        let session = LanguageModelSession(
+                            model: OpenAILanguageModel(
+                                baseURL: settings.baseURL,
+                                apiKey: settings.apiKey(),
+                                model: normalizeModelName(model, removing: "openai:"),
+                                apiVariant: settings.apiVariant
+                            ),
+                            instructions: resolvedInstructions
+                        )
+                        let options = GenerationOptions(maximumResponseTokens: maxTokens)
+                        if #available(macOS 26.0, *) {
+                            let stream = session.streamResponse(to: Prompt(prompt), options: options)
+                            var aggregated = ""
+                            for try await snapshot in stream {
+                                let next = snapshot.content
+                                if next.hasPrefix(aggregated) {
+                                    aggregated = next
+                                } else {
+                                    aggregated += next
+                                }
+                                continuation.yield(aggregated)
+                            }
+                        } else {
+                            let completion = try await complete(model: model, prompt: prompt, maxTokens: maxTokens)
+                            try await yieldSimulatedStream(from: completion, continuation: continuation)
+                        }
+                        continuation.finish()
+
+                    case .ollama(let settings):
+                        let session = LanguageModelSession(
+                            model: OllamaLanguageModel(
+                                baseURL: settings.baseURL,
+                                model: normalizeModelName(model, removing: "ollama:")
+                            ),
+                            instructions: resolvedInstructions
+                        )
+                        let options = GenerationOptions(maximumResponseTokens: maxTokens)
+                        if #available(macOS 26.0, *) {
+                            let stream = session.streamResponse(to: Prompt(prompt), options: options)
+                            var aggregated = ""
+                            for try await snapshot in stream {
+                                let next = snapshot.content
+                                if next.hasPrefix(aggregated) {
+                                    aggregated = next
+                                } else {
+                                    aggregated += next
+                                }
+                                continuation.yield(aggregated)
+                            }
+                        } else {
+                            let completion = try await complete(model: model, prompt: prompt, maxTokens: maxTokens)
+                            try await yieldSimulatedStream(from: completion, continuation: continuation)
+                        }
+                        continuation.finish()
+                    }
+                } catch {
+                    continuation.finish(throwing: error)
+                }
+            }
+
+            continuation.onTermination = { _ in
+                task.cancel()
+            }
+        }
+    }
+
+    private func yieldSimulatedStream(
+        from text: String,
+        continuation: AsyncThrowingStream<String, any Error>.Continuation
+    ) async throws {
+        let normalized = text.replacingOccurrences(of: "\r\n", with: "\n")
+        if normalized.isEmpty {
+            continuation.yield("")
+            return
+        }
+
+        var built = ""
+        for token in normalized.split(separator: " ", omittingEmptySubsequences: false) {
+            try Task.checkCancellation()
+            if built.isEmpty {
+                built = String(token)
+            } else {
+                built += " \(token)"
+            }
+            continuation.yield(built)
+            try await Task.sleep(nanoseconds: 12_000_000)
+        }
+    }
+
     /// Default instruction fallback when config does not provide system instructions.
     private var resolvedInstructions: String {
         if let systemInstructions, !systemInstructions.isEmpty {

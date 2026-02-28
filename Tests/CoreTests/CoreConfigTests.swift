@@ -68,3 +68,27 @@ func resolvedWorkspaceSupportsHomeShortcuts() {
     let envWorkspace = envConfig.resolvedWorkspaceRootURL(currentDirectory: "/tmp/slop")
     #expect(envWorkspace.standardizedFileURL.path == "\(homePath)/workspace")
 }
+
+@Test
+func defaultConfigPathResolvesInsideWorkspaceRoot() {
+    let workspace = CoreConfig.Workspace(name: "workspace-dev", basePath: "/tmp/slop")
+    let resolved = CoreConfig.defaultConfigPath(for: workspace, currentDirectory: "/unused")
+    #expect(resolved == "/tmp/slop/workspace-dev/slopoverlord.json")
+}
+
+@Test
+func loadFallsBackToLegacyConfigFileInCurrentDirectory() throws {
+    let fixtureDirectory = FileManager.default.temporaryDirectory
+        .appendingPathComponent("core-config-legacy-\(UUID().uuidString)", isDirectory: true)
+    try FileManager.default.createDirectory(at: fixtureDirectory, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: fixtureDirectory) }
+
+    var config = CoreConfig.default
+    config.listen.port = 25999
+    let payload = try JSONEncoder().encode(config)
+    let legacyPath = fixtureDirectory.appendingPathComponent(CoreConfig.legacyDefaultConfigFileName)
+    try payload.write(to: legacyPath, options: .atomic)
+
+    let loaded = CoreConfig.load(currentDirectory: fixtureDirectory.path)
+    #expect(loaded.listen.port == 25999)
+}

@@ -67,6 +67,14 @@ export async function fetchOpenAIModels(payload) {
   return response.json();
 }
 
+export async function fetchOpenAIProviderStatus() {
+  const response = await fetch(`${API_BASE}/v1/providers/openai/status`);
+  if (!response.ok) {
+    return null;
+  }
+  return response.json();
+}
+
 export async function fetchAgents() {
   const response = await fetch(`${API_BASE}/v1/agents`);
   if (!response.ok) {
@@ -127,13 +135,14 @@ export async function fetchAgentSession(agentId, sessionId) {
   return response.json();
 }
 
-export async function postAgentSessionMessage(agentId, sessionId, payload) {
+export async function postAgentSessionMessage(agentId, sessionId, payload, options = {}) {
   const response = await fetch(
     `${API_BASE}/v1/agents/${encodeURIComponent(agentId)}/sessions/${encodeURIComponent(sessionId)}/messages`,
     {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify(payload)
+      body: JSON.stringify(payload),
+      signal: options.signal
     }
   );
   if (!response.ok) {
@@ -142,13 +151,14 @@ export async function postAgentSessionMessage(agentId, sessionId, payload) {
   return response.json();
 }
 
-export async function postAgentSessionControl(agentId, sessionId, payload) {
+export async function postAgentSessionControl(agentId, sessionId, payload, options = {}) {
   const response = await fetch(
     `${API_BASE}/v1/agents/${encodeURIComponent(agentId)}/sessions/${encodeURIComponent(sessionId)}/control`,
     {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify(payload)
+      body: JSON.stringify(payload),
+      signal: options.signal
     }
   );
   if (!response.ok) {

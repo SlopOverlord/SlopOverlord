@@ -12,7 +12,7 @@ struct CoreMain: AsyncParsableCommand {
     )
 
     @Option(name: [.short, .long], help: "Path to JSON config file")
-    var configPath: String = CoreConfig.defaultConfigPath
+    var configPath: String?
 
     @Option(name: .long, help: "Generates an immediate visor bulletin after boot")
     var bootstrapBulletin: Bool = true
@@ -27,31 +27,39 @@ struct CoreMain: AsyncParsableCommand {
         await LoggingBootstrapper.shared.bootstrapIfNeeded()
         let logger = Logger(label: "slopoverlord.core.main")
 
-        var resolvedConfigPath = configPath
-        var config = CoreConfig.load(from: resolvedConfigPath)
+        var explicitConfigPath = normalizedConfigPath(configPath)
+        var config = CoreConfig.load(from: explicitConfigPath)
 
         if #available(macOS 15.0, *) {
             let envConfig = ConfigReader(providers: [EnvironmentVariablesProvider()])
-            resolvedConfigPath = envConfig.string(forKey: "core.config.path", default: configPath)
-            config = CoreConfig.load(from: resolvedConfigPath)
-            config.listen.host = envConfig.string(forKey: "core.listen.host", default: config.listen.host)
-            config.listen.port = envConfig.int(forKey: "core.listen.port", default: config.listen.port)
-            config.workspace.name = envConfig.string(forKey: "core.workspace.name", default: config.workspace.name)
-            let workspaceBasePath = envConfig.string(
-                forKey: "core.workspace.base_path",
-                default: config.workspace.basePath
-            )
-            config.workspace.basePath = envConfig.string(
-                forKey: "core.workspace.basePath",
-                default: workspaceBasePath
-            )
-            config.auth.token = envConfig.string(forKey: "core.auth.token", default: config.auth.token)
-            config.sqlitePath = envConfig.string(forKey: "core.sqlite.path", default: config.sqlitePath)
+            if let envConfigPath = normalizedConfigPath(
+                envConfig.string(forKey: "core.config.path", default: "")
+            ) {
+                explicitConfigPath = envConfigPath
+                config = CoreConfig.load(from: explicitConfigPath)
+            }
+
+            applyEnvironmentOverrides(config: &config, envConfig: envConfig)
+
+            if explicitConfigPath == nil {
+                let workspaceConfigPath = CoreConfig.defaultConfigPath(for: config.workspace)
+                if FileManager.default.fileExists(atPath: workspaceConfigPath) {
+                    config = CoreConfig.load(from: workspaceConfigPath)
+                    applyEnvironmentOverrides(config: &config, envConfig: envConfig)
+                }
+            }
+        } else if explicitConfigPath == nil {
+            let workspaceConfigPath = CoreConfig.defaultConfigPath(for: config.workspace)
+            if FileManager.default.fileExists(atPath: workspaceConfigPath) {
+                config = CoreConfig.load(from: workspaceConfigPath)
+            }
         }
 
         let workspaceRoot = try prepareWorkspace(config: &config, logger: logger)
         logger.info("Workspace prepared at \(workspaceRoot.path)")
 
+        let resolvedConfigPath = explicitConfigPath ??
+            workspaceRoot.appendingPathComponent(CoreConfig.defaultConfigFileName).path
         let service = CoreService(config: config, configPath: resolvedConfigPath)
         let router = CoreRouter(service: service)
         let server = CoreHTTPServer(
@@ -97,6 +105,35 @@ struct CoreMain: AsyncParsableCommand {
             try server.waitUntilClosed()
         }
     }
+}
+
+@available(macOS 15.0, *)
+private func applyEnvironmentOverrides(config: inout CoreConfig, envConfig: ConfigReader) {
+    config.listen.host = envConfig.string(forKey: "core.listen.host", default: config.listen.host)
+    config.listen.port = envConfig.int(forKey: "core.listen.port", default: config.listen.port)
+    config.workspace.name = envConfig.string(forKey: "core.workspace.name", default: config.workspace.name)
+    let workspaceBasePath = envConfig.string(
+        forKey: "core.workspace.base_path",
+        default: config.workspace.basePath
+    )
+    config.workspace.basePath = envConfig.string(
+        forKey: "core.workspace.basePath",
+        default: workspaceBasePath
+    )
+    config.auth.token = envConfig.string(forKey: "core.auth.token", default: config.auth.token)
+    config.sqlitePath = envConfig.string(forKey: "core.sqlite.path", default: config.sqlitePath)
+}
+
+private func normalizedConfigPath(_ raw: String?) -> String? {
+    guard let raw else {
+        return nil
+    }
+
+    let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !trimmed.isEmpty else {
+        return nil
+    }
+    return trimmed
 }
 
 private func prepareWorkspace(config: inout CoreConfig, logger: Logger) throws -> URL {

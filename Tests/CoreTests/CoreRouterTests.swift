@@ -68,6 +68,19 @@ func openAIModelsEndpoint() async throws {
 }
 
 @Test
+func openAIProviderStatusEndpoint() async throws {
+    let service = CoreService(config: .default)
+    let router = CoreRouter(service: service)
+
+    let response = await router.handle(method: "GET", path: "/v1/providers/openai/status", body: nil)
+    #expect(response.status == 200)
+
+    let payload = try JSONDecoder().decode(OpenAIProviderStatusResponse.self, from: response.body)
+    #expect(payload.provider == "openai")
+    #expect(payload.hasAnyKey == (payload.hasEnvironmentKey || payload.hasConfiguredKey))
+}
+
+@Test
 func channelStateReturnsEmptySnapshotWhenChannelMissing() async throws {
     let service = CoreService(config: .default)
     let router = CoreRouter(service: service)
@@ -114,6 +127,54 @@ func putConfigEndpoint() async throws {
 
     let updated = try JSONDecoder().decode(CoreConfig.self, from: response.body)
     #expect(updated.listen.port == 25155)
+}
+
+@Test
+func putConfigHotReloadsRuntimeModelProvider() async throws {
+    let tempPath = FileManager.default.temporaryDirectory
+        .appendingPathComponent("slopoverlord-config-\(UUID().uuidString).json")
+        .path
+
+    var initialConfig = CoreConfig.default
+    initialConfig.models = []
+
+    let service = CoreService(config: initialConfig, configPath: tempPath)
+    let router = CoreRouter(service: service)
+
+    let channelID = "reload-check"
+    let firstMessageBody = try JSONEncoder().encode(ChannelMessageRequest(userId: "u1", content: "hello"))
+    let firstResponse = await router.handle(method: "POST", path: "/v1/channels/\(channelID)/messages", body: firstMessageBody)
+    #expect(firstResponse.status == 200)
+
+    let firstStateResponse = await router.handle(method: "GET", path: "/v1/channels/\(channelID)/state", body: nil)
+    #expect(firstStateResponse.status == 200)
+    let decoder = JSONDecoder()
+    decoder.dateDecodingStrategy = .iso8601
+    let firstSnapshot = try decoder.decode(ChannelSnapshot.self, from: firstStateResponse.body)
+    #expect(firstSnapshot.messages.last(where: { $0.userId == "system" })?.content == "Responded inline")
+
+    var updatedConfig = initialConfig
+    updatedConfig.models = [
+        .init(
+            title: "openai-main",
+            apiKey: "test-key",
+            apiUrl: "http://127.0.0.1:1/v1",
+            model: "gpt-4.1-mini"
+        )
+    ]
+    let updatePayload = try JSONEncoder().encode(updatedConfig)
+    let updateResponse = await router.handle(method: "PUT", path: "/v1/config", body: updatePayload)
+    #expect(updateResponse.status == 200)
+
+    let secondMessageBody = try JSONEncoder().encode(ChannelMessageRequest(userId: "u1", content: "hello again"))
+    let secondResponse = await router.handle(method: "POST", path: "/v1/channels/\(channelID)/messages", body: secondMessageBody)
+    #expect(secondResponse.status == 200)
+
+    let secondStateResponse = await router.handle(method: "GET", path: "/v1/channels/\(channelID)/state", body: nil)
+    #expect(secondStateResponse.status == 200)
+    let secondSnapshot = try decoder.decode(ChannelSnapshot.self, from: secondStateResponse.body)
+    let latestSystemMessage = secondSnapshot.messages.last(where: { $0.userId == "system" })?.content ?? ""
+    #expect(latestSystemMessage != "Responded inline")
 }
 
 @Test

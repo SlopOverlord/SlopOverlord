@@ -462,3 +462,22 @@ public struct OpenAIProviderModelsResponse: Codable, Sendable {
         self.models = models
     }
 }
+
+public struct OpenAIProviderStatusResponse: Codable, Sendable {
+    public var provider: String
+    public var hasEnvironmentKey: Bool
+    public var hasConfiguredKey: Bool
+    public var hasAnyKey: Bool
+
+    public init(
+        provider: String,
+        hasEnvironmentKey: Bool,
+        hasConfiguredKey: Bool,
+        hasAnyKey: Bool
+    ) {
+        self.provider = provider
+        self.hasEnvironmentKey = hasEnvironmentKey
+        self.hasConfiguredKey = hasConfiguredKey
+        self.hasAnyKey = hasAnyKey
+    }
+}
