@@ -36,6 +36,136 @@ public struct ArtifactContentResponse: Codable, Sendable {
     }
 }
 
+public struct ProjectChannel: Codable, Sendable, Equatable {
+    public var id: String
+    public var title: String
+    public var channelId: String
+    public var createdAt: Date
+
+    public init(id: String, title: String, channelId: String, createdAt: Date = Date()) {
+        self.id = id
+        self.title = title
+        self.channelId = channelId
+        self.createdAt = createdAt
+    }
+}
+
+public struct ProjectTask: Codable, Sendable, Equatable {
+    public var id: String
+    public var title: String
+    public var description: String
+    public var priority: String
+    public var status: String
+    public var createdAt: Date
+    public var updatedAt: Date
+
+    public init(
+        id: String,
+        title: String,
+        description: String,
+        priority: String,
+        status: String,
+        createdAt: Date = Date(),
+        updatedAt: Date = Date()
+    ) {
+        self.id = id
+        self.title = title
+        self.description = description
+        self.priority = priority
+        self.status = status
+        self.createdAt = createdAt
+        self.updatedAt = updatedAt
+    }
+}
+
+public struct ProjectRecord: Codable, Sendable, Equatable {
+    public var id: String
+    public var name: String
+    public var description: String
+    public var channels: [ProjectChannel]
+    public var tasks: [ProjectTask]
+    public var createdAt: Date
+    public var updatedAt: Date
+
+    public init(
+        id: String,
+        name: String,
+        description: String,
+        channels: [ProjectChannel],
+        tasks: [ProjectTask],
+        createdAt: Date = Date(),
+        updatedAt: Date = Date()
+    ) {
+        self.id = id
+        self.name = name
+        self.description = description
+        self.channels = channels
+        self.tasks = tasks
+        self.createdAt = createdAt
+        self.updatedAt = updatedAt
+    }
+}
+
+public struct ProjectCreateRequest: Codable, Sendable {
+    public var name: String
+    public var description: String?
+    public var channels: [ProjectChannelCreateRequest]
+
+    public init(name: String, description: String? = nil, channels: [ProjectChannelCreateRequest] = []) {
+        self.name = name
+        self.description = description
+        self.channels = channels
+    }
+}
+
+public struct ProjectUpdateRequest: Codable, Sendable {
+    public var name: String?
+    public var description: String?
+
+    public init(name: String? = nil, description: String? = nil) {
+        self.name = name
+        self.description = description
+    }
+}
+
+public struct ProjectChannelCreateRequest: Codable, Sendable {
+    public var title: String
+    public var channelId: String
+
+    public init(title: String, channelId: String) {
+        self.title = title
+        self.channelId = channelId
+    }
+}
+
+public struct ProjectTaskCreateRequest: Codable, Sendable {
+    public var title: String
+    public var description: String?
+    public var priority: String
+    public var status: String
+
+    public init(title: String, description: String? = nil, priority: String, status: String) {
+        self.title = title
+        self.description = description
+        self.priority = priority
+        self.status = status
+    }
+}
+
+public struct ProjectTaskUpdateRequest: Codable, Sendable {
+    public var title: String?
+    public var description: String?
+    public var priority: String?
+    public var status: String?
+
+    public init(title: String? = nil, description: String? = nil, priority: String? = nil, status: String? = nil) {
+        self.title = title
+        self.description = description
+        self.priority = priority
+        self.status = status
+    }
+}
+
 public struct AgentCreateRequest: Codable, Sendable {
     public var id: String
     public var displayName: String

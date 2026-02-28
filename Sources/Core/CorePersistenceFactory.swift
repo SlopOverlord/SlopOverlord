@@ -26,6 +26,7 @@ public actor InMemoryPersistenceStore: PersistenceStore {
     private var tokenUsages: [(channelId: String, taskId: String?, usage: TokenUsage)] = []
     private var bulletins: [MemoryBulletin] = []
     private var artifacts: [String: String] = [:]
+    private var projects: [String: ProjectRecord] = [:]
 
     public init() {}
 
@@ -51,6 +52,22 @@ public actor InMemoryPersistenceStore: PersistenceStore {
 
     public func listBulletins() async -> [MemoryBulletin] {
         bulletins
+    }
+
+    public func listProjects() async -> [ProjectRecord] {
+        projects.values.sorted { $0.createdAt < $1.createdAt }
+    }
+
+    public func project(id: String) async -> ProjectRecord? {
+        projects[id]
+    }
+
+    public func saveProject(_ project: ProjectRecord) async {
+        projects[project.id] = project
+    }
+
+    public func deleteProject(id: String) async {
+        projects[id] = nil
     }
 }
 
@@ -138,5 +155,37 @@ enum CorePersistenceFactory {
             total_tokens INTEGER NOT NULL,
             created_at TEXT NOT NULL
         );
+
+        CREATE TABLE IF NOT EXISTS dashboard_projects (
+            id TEXT PRIMARY KEY,
+            name TEXT NOT NULL,
+            description TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS dashboard_project_channels (
+            id TEXT PRIMARY KEY,
+            project_id TEXT NOT NULL,
+            title TEXT NOT NULL,
+            channel_id TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            UNIQUE(project_id, channel_id)
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_dashboard_project_channels_project ON dashboard_project_channels(project_id);
+
+        CREATE TABLE IF NOT EXISTS dashboard_project_tasks (
+            id TEXT PRIMARY KEY,
+            project_id TEXT NOT NULL,
+            title TEXT NOT NULL,
+            description TEXT NOT NULL,
+            priority TEXT NOT NULL,
+            status TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_dashboard_project_tasks_project ON dashboard_project_tasks(project_id);
         """
 }

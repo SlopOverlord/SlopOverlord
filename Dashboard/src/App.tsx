@@ -85,7 +85,7 @@ export function App() {
     {
       id: "projects",
       label: { icon: "PR", title: "Projects" },
-      content: <ProjectsView channelState={runtime.channelState} workers={runtime.workers} />
+      content: <ProjectsView channelState={runtime.channelState} workers={runtime.workers} bulletins={runtime.bulletins} />
     },
     {
       id: "sessions",

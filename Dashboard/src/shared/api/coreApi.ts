@@ -22,6 +22,16 @@ export interface CoreApi {
   updateRuntimeConfig: (config: AnyRecord) => Promise<AnyRecord | null>;
   fetchOpenAIModels: (payload: AnyRecord) => Promise<AnyRecord | null>;
   fetchOpenAIProviderStatus: () => Promise<AnyRecord | null>;
+  fetchProjects: () => Promise<AnyRecord[] | null>;
+  fetchProject: (projectId: string) => Promise<AnyRecord | null>;
+  createProject: (payload: AnyRecord) => Promise<AnyRecord | null>;
+  updateProject: (projectId: string, payload: AnyRecord) => Promise<AnyRecord | null>;
+  deleteProject: (projectId: string) => Promise<boolean>;
+  createProjectChannel: (projectId: string, payload: AnyRecord) => Promise<AnyRecord | null>;
+  deleteProjectChannel: (projectId: string, channelId: string) => Promise<AnyRecord | null>;
+  createProjectTask: (projectId: string, payload: AnyRecord) => Promise<AnyRecord | null>;
+  updateProjectTask: (projectId: string, taskId: string, payload: AnyRecord) => Promise<AnyRecord | null>;
+  deleteProjectTask: (projectId: string, taskId: string) => Promise<AnyRecord | null>;
   fetchAgents: () => Promise<AnyRecord[] | null>;
   fetchAgent: (agentId: string) => Promise<AnyRecord | null>;
   createAgent: (payload: AnyRecord) => Promise<AnyRecord | null>;
@@ -138,6 +148,116 @@ export function createCoreApi(): CoreApi {
     fetchOpenAIProviderStatus: async () => {
       const response = await requestJson<AnyRecord>({
         path: "/v1/providers/openai/status"
+      });
+      if (!response.ok) {
+        return null;
+      }
+      return response.data;
+    },
+
+    fetchProjects: async () => {
+      const response = await requestJson<AnyRecord[]>({
+        path: "/v1/projects"
+      });
+      if (!response.ok || !Array.isArray(response.data)) {
+        return null;
+      }
+      return response.data;
+    },
+
+    fetchProject: async (projectId) => {
+      const response = await requestJson<AnyRecord>({
+        path: `/v1/projects/${encodeURIComponent(projectId)}`
+      });
+      if (!response.ok) {
+        return null;
+      }
+      return response.data;
+    },
+
+    createProject: async (payload) => {
+      const response = await requestJson<AnyRecord, AnyRecord>({
+        path: "/v1/projects",
+        method: "POST",
+        body: payload
+      });
+      if (!response.ok) {
+        return null;
+      }
+      return response.data;
+    },
+
+    updateProject: async (projectId, payload) => {
+      const response = await requestJson<AnyRecord, AnyRecord>({
+        path: `/v1/projects/${encodeURIComponent(projectId)}`,
+        method: "PATCH",
+        body: payload
+      });
+      if (!response.ok) {
+        return null;
+      }
+      return response.data;
+    },
+
+    deleteProject: async (projectId) => {
+      const response = await requestJson<AnyRecord>({
+        path: `/v1/projects/${encodeURIComponent(projectId)}`,
+        method: "DELETE"
+      });
+      return response.ok;
+    },
+
+    createProjectChannel: async (projectId, payload) => {
+      const response = await requestJson<AnyRecord, AnyRecord>({
+        path: `/v1/projects/${encodeURIComponent(projectId)}/channels`,
+        method: "POST",
+        body: payload
+      });
+      if (!response.ok) {
+        return null;
+      }
+      return response.data;
+    },
+
+    deleteProjectChannel: async (projectId, channelId) => {
+      const response = await requestJson<AnyRecord>({
+        path: `/v1/projects/${encodeURIComponent(projectId)}/channels/${encodeURIComponent(channelId)}`,
+        method: "DELETE"
+      });
+      if (!response.ok) {
+        return null;
+      }
+      return response.data;
+    },
+
+    createProjectTask: async (projectId, payload) => {
+      const response = await requestJson<AnyRecord, AnyRecord>({
+        path: `/v1/projects/${encodeURIComponent(projectId)}/tasks`,
+        method: "POST",
+        body: payload
+      });
+      if (!response.ok) {
+        return null;
+      }
+      return response.data;
+    },
+
+    updateProjectTask: async (projectId, taskId, payload) => {
+      const response = await requestJson<AnyRecord, AnyRecord>({
+        path: `/v1/projects/${encodeURIComponent(projectId)}/tasks/${encodeURIComponent(taskId)}`,
+        method: "PATCH",
+        body: payload
+      });
+      if (!response.ok) {
+        return null;
+      }
+      return response.data;
+    },
+
+    deleteProjectTask: async (projectId, taskId) => {
+      const response = await requestJson<AnyRecord>({
+        path: `/v1/projects/${encodeURIComponent(projectId)}/tasks/${encodeURIComponent(taskId)}`,
+        method: "DELETE"
       });
       if (!response.ok) {
         return null;

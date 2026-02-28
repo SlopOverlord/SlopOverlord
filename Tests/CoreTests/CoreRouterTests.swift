@@ -53,6 +53,114 @@ func workersEndpoint() async throws {
 }
 
 @Test
+func projectCrudEndpoints() async throws {
+    let sqlitePath = FileManager.default.temporaryDirectory
+        .appendingPathComponent("core-projects-\(UUID().uuidString).sqlite")
+        .path
+
+    var config = CoreConfig.default
+    config.sqlitePath = sqlitePath
+
+    let service = CoreService(config: config)
+    let router = CoreRouter(service: service)
+
+    let createBody = try JSONEncoder().encode(
+        ProjectCreateRequest(
+            name: "Platform Board",
+            description: "Core + dashboard roadmap",
+            channels: [.init(title: "General", channelId: "general")]
+        )
+    )
+
+    let createResponse = await router.handle(method: "POST", path: "/v1/projects", body: createBody)
+    #expect(createResponse.status == 201)
+
+    let decoder = JSONDecoder()
+    decoder.dateDecodingStrategy = .iso8601
+
+    let created = try decoder.decode(ProjectRecord.self, from: createResponse.body)
+    #expect(created.name == "Platform Board")
+    #expect(created.channels.count == 1)
+    #expect(created.tasks.isEmpty)
+
+    let listResponse = await router.handle(method: "GET", path: "/v1/projects", body: nil)
+    #expect(listResponse.status == 200)
+    let list = try decoder.decode([ProjectRecord].self, from: listResponse.body)
+    #expect(list.contains(where: { $0.id == created.id }))
+
+    let updateBody = try JSONEncoder().encode(ProjectUpdateRequest(name: "Platform Board v2"))
+    let updateResponse = await router.handle(method: "PATCH", path: "/v1/projects/\(created.id)", body: updateBody)
+    #expect(updateResponse.status == 200)
+    let updated = try decoder.decode(ProjectRecord.self, from: updateResponse.body)
+    #expect(updated.name == "Platform Board v2")
+
+    let createTaskBody = try JSONEncoder().encode(
+        ProjectTaskCreateRequest(
+            title: "Wire API",
+            description: "Implement CRUD for projects and tasks",
+            priority: "high",
+            status: "backlog"
+        )
+    )
+    let createTaskResponse = await router.handle(
+        method: "POST",
+        path: "/v1/projects/\(created.id)/tasks",
+        body: createTaskBody
+    )
+    #expect(createTaskResponse.status == 200)
+    let withTask = try decoder.decode(ProjectRecord.self, from: createTaskResponse.body)
+    #expect(withTask.tasks.count == 1)
+
+    let taskID = try #require(withTask.tasks.first?.id)
+    let patchTaskBody = try JSONEncoder().encode(ProjectTaskUpdateRequest(status: "in_progress"))
+    let patchTaskResponse = await router.handle(
+        method: "PATCH",
+        path: "/v1/projects/\(created.id)/tasks/\(taskID)",
+        body: patchTaskBody
+    )
+    #expect(patchTaskResponse.status == 200)
+    let patchedTaskProject = try decoder.decode(ProjectRecord.self, from: patchTaskResponse.body)
+    #expect(patchedTaskProject.tasks.first?.status == "in_progress")
+
+    let createChannelBody = try JSONEncoder().encode(ProjectChannelCreateRequest(title: "Backend", channelId: "backend"))
+    let createChannelResponse = await router.handle(
+        method: "POST",
+        path: "/v1/projects/\(created.id)/channels",
+        body: createChannelBody
+    )
+    #expect(createChannelResponse.status == 200)
+    let withSecondChannel = try decoder.decode(ProjectRecord.self, from: createChannelResponse.body)
+    #expect(withSecondChannel.channels.count == 2)
+
+    let removableChannelID = try #require(
+        withSecondChannel.channels.first(where: { $0.channelId == "backend" })?.id
+    )
+    let removeChannelResponse = await router.handle(
+        method: "DELETE",
+        path: "/v1/projects/\(created.id)/channels/\(removableChannelID)",
+        body: nil
+    )
+    #expect(removeChannelResponse.status == 200)
+    let afterChannelDelete = try decoder.decode(ProjectRecord.self, from: removeChannelResponse.body)
+    #expect(afterChannelDelete.channels.count == 1)
+
+    let removeTaskResponse = await router.handle(
+        method: "DELETE",
+        path: "/v1/projects/\(created.id)/tasks/\(taskID)",
+        body: nil
+    )
+    #expect(removeTaskResponse.status == 200)
+    let afterTaskDelete = try decoder.decode(ProjectRecord.self, from: removeTaskResponse.body)
+    #expect(afterTaskDelete.tasks.isEmpty)
+
+    let deleteProjectResponse = await router.handle(method: "DELETE", path: "/v1/projects/\(created.id)", body: nil)
+    #expect(deleteProjectResponse.status == 200)
+
+    let fetchDeletedResponse = await router.handle(method: "GET", path: "/v1/projects/\(created.id)", body: nil)
+    #expect(fetchDeletedResponse.status == 404)
+}
+
+@Test
 func openAIModelsEndpoint() async throws {
     let service = CoreService(config: .default)
     let router = CoreRouter(service: service)

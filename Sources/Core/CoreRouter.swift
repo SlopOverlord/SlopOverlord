@@ -38,6 +38,7 @@ public enum HTTPRouteMethod: String, Sendable {
     case get = "GET"
     case post = "POST"
     case put = "PUT"
+    case patch = "PATCH"
     case delete = "DELETE"
 }
 
@@ -119,6 +120,17 @@ private enum ErrorCode {
     static let invalidAgentModel = "invalid_agent_model"
     static let agentConfigReadFailed = "agent_config_read_failed"
     static let agentConfigWriteFailed = "agent_config_write_failed"
+    static let invalidProjectId = "invalid_project_id"
+    static let invalidProjectPayload = "invalid_project_payload"
+    static let invalidProjectTaskId = "invalid_project_task_id"
+    static let invalidProjectChannelId = "invalid_project_channel_id"
+    static let projectNotFound = "project_not_found"
+    static let projectConflict = "project_conflict"
+    static let projectCreateFailed = "project_create_failed"
+    static let projectUpdateFailed = "project_update_failed"
+    static let projectDeleteFailed = "project_delete_failed"
+    static let projectListFailed = "project_list_failed"
+    static let projectReadFailed = "project_read_failed"
 }
 
 private struct AcceptResponse: Encodable {
@@ -285,6 +297,23 @@ public actor CoreRouter {
             return Self.encodable(status: HTTPStatus.ok, payload: workers)
         }
 
+        add(.get, "/v1/projects") { _ in
+            let projects = await service.listProjects()
+            return Self.encodable(status: HTTPStatus.ok, payload: projects)
+        }
+
+        add(.get, "/v1/projects/:projectId") { request in
+            let projectId = request.pathParam("projectId") ?? ""
+            do {
+                let project = try await service.getProject(id: projectId)
+                return Self.encodable(status: HTTPStatus.ok, payload: project)
+            } catch let error as CoreService.ProjectError {
+                return Self.projectErrorResponse(error, fallback: ErrorCode.projectReadFailed)
+            } catch {
+                return Self.json(status: HTTPStatus.internalServerError, payload: ["error": ErrorCode.projectReadFailed])
+            }
+        }
+
         add(.get, "/v1/providers/openai/status") { _ in
             let status = await service.openAIProviderStatus()
             return Self.encodable(status: HTTPStatus.ok, payload: status)
@@ -420,6 +449,59 @@ public actor CoreRouter {
             return Self.encodable(status: HTTPStatus.ok, payload: response)
         }
 
+        add(.post, "/v1/projects") { request in
+            guard let body = request.body,
+                  let payload = Self.decode(body, as: ProjectCreateRequest.self)
+            else {
+                return Self.json(status: HTTPStatus.badRequest, payload: ["error": ErrorCode.invalidBody])
+            }
+
+            do {
+                let project = try await service.createProject(payload)
+                return Self.encodable(status: HTTPStatus.created, payload: project)
+            } catch let error as CoreService.ProjectError {
+                return Self.projectErrorResponse(error, fallback: ErrorCode.projectCreateFailed)
+            } catch {
+                return Self.json(status: HTTPStatus.internalServerError, payload: ["error": ErrorCode.projectCreateFailed])
+            }
+        }
+
+        add(.post, "/v1/projects/:projectId/channels") { request in
+            let projectId = request.pathParam("projectId") ?? ""
+            guard let body = request.body,
+                  let payload = Self.decode(body, as: ProjectChannelCreateRequest.self)
+            else {
+                return Self.json(status: HTTPStatus.badRequest, payload: ["error": ErrorCode.invalidBody])
+            }
+
+            do {
+                let project = try await service.createProjectChannel(projectID: projectId, request: payload)
+                return Self.encodable(status: HTTPStatus.ok, payload: project)
+            } catch let error as CoreService.ProjectError {
+                return Self.projectErrorResponse(error, fallback: ErrorCode.projectUpdateFailed)
+            } catch {
+                return Self.json(status: HTTPStatus.internalServerError, payload: ["error": ErrorCode.projectUpdateFailed])
+            }
+        }
+
+        add(.post, "/v1/projects/:projectId/tasks") { request in
+            let projectId = request.pathParam("projectId") ?? ""
+            guard let body = request.body,
+                  let payload = Self.decode(body, as: ProjectTaskCreateRequest.self)
+            else {
+                return Self.json(status: HTTPStatus.badRequest, payload: ["error": ErrorCode.invalidBody])
+            }
+
+            do {
+                let project = try await service.createProjectTask(projectID: projectId, request: payload)
+                return Self.encodable(status: HTTPStatus.ok, payload: project)
+            } catch let error as CoreService.ProjectError {
+                return Self.projectErrorResponse(error, fallback: ErrorCode.projectUpdateFailed)
+            } catch {
+                return Self.json(status: HTTPStatus.internalServerError, payload: ["error": ErrorCode.projectUpdateFailed])
+            }
+        }
+
         add(.post, "/v1/agents") { request in
             guard let body = request.body,
                   let payload = Self.decode(body, as: AgentCreateRequest.self)
@@ -553,6 +635,43 @@ public actor CoreRouter {
             return Self.encodable(status: HTTPStatus.created, payload: WorkerCreateResponse(workerId: workerId))
         }
 
+        add(.patch, "/v1/projects/:projectId") { request in
+            let projectId = request.pathParam("projectId") ?? ""
+            guard let body = request.body,
+                  let payload = Self.decode(body, as: ProjectUpdateRequest.self)
+            else {
+                return Self.json(status: HTTPStatus.badRequest, payload: ["error": ErrorCode.invalidBody])
+            }
+
+            do {
+                let project = try await service.updateProject(projectID: projectId, request: payload)
+                return Self.encodable(status: HTTPStatus.ok, payload: project)
+            } catch let error as CoreService.ProjectError {
+                return Self.projectErrorResponse(error, fallback: ErrorCode.projectUpdateFailed)
+            } catch {
+                return Self.json(status: HTTPStatus.internalServerError, payload: ["error": ErrorCode.projectUpdateFailed])
+            }
+        }
+
+        add(.patch, "/v1/projects/:projectId/tasks/:taskId") { request in
+            let projectId = request.pathParam("projectId") ?? ""
+            let taskId = request.pathParam("taskId") ?? ""
+            guard let body = request.body,
+                  let payload = Self.decode(body, as: ProjectTaskUpdateRequest.self)
+            else {
+                return Self.json(status: HTTPStatus.badRequest, payload: ["error": ErrorCode.invalidBody])
+            }
+
+            do {
+                let project = try await service.updateProjectTask(projectID: projectId, taskID: taskId, request: payload)
+                return Self.encodable(status: HTTPStatus.ok, payload: project)
+            } catch let error as CoreService.ProjectError {
+                return Self.projectErrorResponse(error, fallback: ErrorCode.projectUpdateFailed)
+            } catch {
+                return Self.json(status: HTTPStatus.internalServerError, payload: ["error": ErrorCode.projectUpdateFailed])
+            }
+        }
+
         add(.delete, "/v1/agents/:agentId/sessions/:sessionId") { request in
             let agentId = request.pathParam("agentId") ?? ""
             let sessionId = request.pathParam("sessionId") ?? ""
@@ -564,6 +683,44 @@ public actor CoreRouter {
                 return Self.agentSessionErrorResponse(error, fallback: ErrorCode.sessionDeleteFailed)
             } catch {
                 return Self.json(status: HTTPStatus.internalServerError, payload: ["error": ErrorCode.sessionDeleteFailed])
+            }
+        }
+
+        add(.delete, "/v1/projects/:projectId") { request in
+            let projectId = request.pathParam("projectId") ?? ""
+            do {
+                try await service.deleteProject(projectID: projectId)
+                return Self.json(status: HTTPStatus.ok, payload: ["status": "deleted"])
+            } catch let error as CoreService.ProjectError {
+                return Self.projectErrorResponse(error, fallback: ErrorCode.projectDeleteFailed)
+            } catch {
+                return Self.json(status: HTTPStatus.internalServerError, payload: ["error": ErrorCode.projectDeleteFailed])
+            }
+        }
+
+        add(.delete, "/v1/projects/:projectId/channels/:channelId") { request in
+            let projectId = request.pathParam("projectId") ?? ""
+            let channelId = request.pathParam("channelId") ?? ""
+            do {
+                let project = try await service.deleteProjectChannel(projectID: projectId, channelID: channelId)
+                return Self.encodable(status: HTTPStatus.ok, payload: project)
+            } catch let error as CoreService.ProjectError {
+                return Self.projectErrorResponse(error, fallback: ErrorCode.projectUpdateFailed)
+            } catch {
+                return Self.json(status: HTTPStatus.internalServerError, payload: ["error": ErrorCode.projectUpdateFailed])
+            }
+        }
+
+        add(.delete, "/v1/projects/:projectId/tasks/:taskId") { request in
+            let projectId = request.pathParam("projectId") ?? ""
+            let taskId = request.pathParam("taskId") ?? ""
+            do {
+                let project = try await service.deleteProjectTask(projectID: projectId, taskID: taskId)
+                return Self.encodable(status: HTTPStatus.ok, payload: project)
+            } catch let error as CoreService.ProjectError {
+                return Self.projectErrorResponse(error, fallback: ErrorCode.projectUpdateFailed)
+            } catch {
+                return Self.json(status: HTTPStatus.internalServerError, payload: ["error": ErrorCode.projectUpdateFailed])
             }
         }
 
@@ -599,6 +756,23 @@ public actor CoreRouter {
             return json(status: HTTPStatus.notFound, payload: ["error": ErrorCode.agentNotFound])
         case .storageFailure:
             return json(status: HTTPStatus.internalServerError, payload: ["error": fallback])
+        }
+    }
+
+    private static func projectErrorResponse(_ error: CoreService.ProjectError, fallback: String) -> CoreRouterResponse {
+        switch error {
+        case .invalidProjectID:
+            return json(status: HTTPStatus.badRequest, payload: ["error": ErrorCode.invalidProjectId])
+        case .invalidChannelID:
+            return json(status: HTTPStatus.badRequest, payload: ["error": ErrorCode.invalidProjectChannelId])
+        case .invalidTaskID:
+            return json(status: HTTPStatus.badRequest, payload: ["error": ErrorCode.invalidProjectTaskId])
+        case .invalidPayload:
+            return json(status: HTTPStatus.badRequest, payload: ["error": ErrorCode.invalidProjectPayload])
+        case .notFound:
+            return json(status: HTTPStatus.notFound, payload: ["error": ErrorCode.projectNotFound])
+        case .conflict:
+            return json(status: HTTPStatus.conflict, payload: ["error": ErrorCode.projectConflict])
         }
     }
 

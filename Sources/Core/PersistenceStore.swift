@@ -19,4 +19,16 @@ public protocol PersistenceStore: Sendable {
 
     /// Lists recent memory bulletins from persistence.
     func listBulletins() async -> [MemoryBulletin]
+
+    /// Lists dashboard projects with embedded channels and tasks.
+    func listProjects() async -> [ProjectRecord]
+
+    /// Returns one dashboard project by identifier.
+    func project(id: String) async -> ProjectRecord?
+
+    /// Creates or replaces one dashboard project.
+    func saveProject(_ project: ProjectRecord) async
+
+    /// Deletes one dashboard project and all nested records.
+    func deleteProject(id: String) async
 }
