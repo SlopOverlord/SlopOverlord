@@ -994,6 +994,9 @@ private func splitPath(_ rawPath: String) -> [String] {
     let withoutQuery = withoutHash.split(separator: "?", maxSplits: 1, omittingEmptySubsequences: false).first.map(String.init) ?? withoutHash
     return withoutQuery
         .split(separator: "/")
-        .map { String($0).trimmingCharacters(in: .whitespacesAndNewlines) }
+        .map { segment in
+            let rawSegment = String(segment).trimmingCharacters(in: .whitespacesAndNewlines)
+            return rawSegment.removingPercentEncoding ?? rawSegment
+        }
         .filter { !$0.isEmpty }
 }

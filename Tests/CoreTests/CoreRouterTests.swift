@@ -993,7 +993,7 @@ func actorCRUDEndpointsManageNodesLinksAndTeams() async throws {
     board = try decoder.decode(ActorBoardSnapshot.self, from: deleteLinkResponse.body)
     #expect(!board.links.contains(where: { $0.id == "link-admin-qa" }))
 
-    let deleteTeamResponse = await router.handle(method: "DELETE", path: "/v1/actors/teams/team:ops", body: nil)
+    let deleteTeamResponse = await router.handle(method: "DELETE", path: "/v1/actors/teams/team%3Aops", body: nil)
     #expect(deleteTeamResponse.status == 200)
     board = try decoder.decode(ActorBoardSnapshot.self, from: deleteTeamResponse.body)
     #expect(!board.teams.contains(where: { $0.id == "team:ops" }))

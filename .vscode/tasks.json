@@ -1,0 +1,38 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Docker: Build",
+      "type": "shell",
+      "command": "bash",
+      "args": ["${workspaceFolder}/utils/docker/scripts/build.sh"],
+      "options": { "cwd": "${workspaceFolder}" },
+      "group": "build",
+      "presentation": { "reveal": "always", "panel": "shared" }
+    },
+    {
+      "label": "Docker: Up",
+      "type": "shell",
+      "command": "bash",
+      "args": ["${workspaceFolder}/utils/docker/scripts/up.sh"],
+      "options": { "cwd": "${workspaceFolder}" },
+      "group": "none",
+      "presentation": { "reveal": "always", "panel": "dedicated" }
+    },
+    {
+      "label": "Docker: Down",
+      "type": "shell",
+      "command": "bash",
+      "args": ["${workspaceFolder}/utils/docker/scripts/down.sh"],
+      "options": { "cwd": "${workspaceFolder}" },
+      "group": "none",
+      "presentation": { "reveal": "always", "panel": "shared" }
+    },
+    {
+      "label": "Docker: Build and Up",
+      "dependsOrder": "sequence",
+      "dependsOn": ["Docker: Build", "Docker: Up"],
+      "group": "none"
+    }
+  ]
+}

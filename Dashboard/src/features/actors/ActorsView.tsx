@@ -8,6 +8,7 @@ import {
   deleteActorTeam,
   fetchActorsBoard,
   resolveActorRoute,
+  updateActorsBoard,
   updateActorLink,
   updateActorNode,
   updateActorTeam
@@ -238,6 +239,9 @@ export function ActorsView() {
   const [teamName, setTeamName] = useState("");
   const [teamMembers, setTeamMembers] = useState([]);
   const [editingTeamId, setEditingTeamId] = useState(null);
+  const [teamMemberSearch, setTeamMemberSearch] = useState("");
+  const [teamMemberDropdownOpen, setTeamMemberDropdownOpen] = useState(false);
+  const teamMemberSearchRef = useRef(null);
   const [nodeDraftName, setNodeDraftName] = useState("");
   const [nodeDraftRole, setNodeDraftRole] = useState("");
   const [nodeDraftChannel, setNodeDraftChannel] = useState("");
@@ -245,6 +249,8 @@ export function ActorsView() {
   const [portDrag, setPortDrag] = useState(null);
   const [hoverInputPort, setHoverInputPort] = useState(null);
   const [linkMenu, setLinkMenu] = useState(null);
+  const [showNewActorPopup, setShowNewActorPopup] = useState(false);
+  const [showNewTeamPopup, setShowNewTeamPopup] = useState(false);
 
   const boardRef = useRef(board);
   const boardCanvasRef = useRef(null);
@@ -302,16 +308,18 @@ export function ActorsView() {
     };
   }, []);
 
-  async function persistDraggedNode(nodeId) {
-    const node = boardRef.current.nodes.find((entry) => entry.id === nodeId);
-    if (!node) {
-      return;
-    }
-
+  /** Persist current board state to server (nodes, links, teams). Use after any user-driven change. */
+  async function persistBoard(successMessage = "Board saved") {
+    const current = boardRef.current;
+    const payload = {
+      nodes: current.nodes,
+      links: current.links,
+      teams: current.teams
+    };
     setIsSaving(true);
-    const response = await updateActorNode(nodeId, node);
+    const response = await updateActorsBoard(payload);
     setIsSaving(false);
-    applyBoardResponse(response, "Board layout saved");
+    applyBoardResponse(response, successMessage);
   }
 
   function toBoardCoordinates(clientX, clientY) {
@@ -353,10 +361,9 @@ export function ActorsView() {
     function handlePointerUp() {
       const shouldPersist = dragMovedRef.current;
       dragMovedRef.current = false;
-      const movedNodeId = dragState.nodeId;
       setDragState(null);
       if (shouldPersist) {
-        void persistDraggedNode(movedNodeId);
+        void persistBoard("Board layout saved");
       }
     }
 
@@ -606,6 +613,7 @@ export function ActorsView() {
       setSelectedNodeId(nodeID);
       setSelectedLinkId(null);
       setLinkMenu(null);
+      setShowNewActorPopup(false);
     }
   }
 
@@ -658,7 +666,7 @@ export function ActorsView() {
     });
   }
 
-  async function saveLinkMenu() {
+  async function updateLinkDirection(newDirection) {
     if (!linkMenu) {
       return;
     }
@@ -669,16 +677,20 @@ export function ActorsView() {
       return;
     }
 
+    // Optimistically update UI
+    setLinkMenu((previous) => (previous ? { ...previous, direction: newDirection } : previous));
+    setLinkDirection(newDirection);
+
+    // Auto-save to server
     setIsSaving(true);
     const response = await updateActorLink(link.id, {
       ...link,
-      direction: linkMenu.direction
+      direction: newDirection
     });
     setIsSaving(false);
 
-    if (applyBoardResponse(response, "Link updated")) {
-      setLinkDirection(linkMenu.direction);
-      setLinkMenu((previous) => (previous ? { ...previous, direction: linkMenu.direction } : previous));
+    if (response) {
+      applyBoardResponse(response, "Link updated");
     }
   }
 
@@ -706,6 +718,8 @@ export function ActorsView() {
     setEditingTeamId(null);
     setTeamName("");
     setTeamMembers([]);
+    setTeamMemberSearch("");
+    setTeamMemberDropdownOpen(false);
   }
 
   async function submitTeam(event) {
@@ -812,37 +826,24 @@ export function ActorsView() {
     };
   }, [linkMenu]);
 
+  const nodeMenuPosition = useMemo(() => {
+    if (!selectedNode) {
+      return null;
+    }
+    const MENU_WIDTH = 240;
+    const MENU_HEIGHT = 280;
+    let left = selectedNode.positionX + NODE_WIDTH + 14;
+    if (left + MENU_WIDTH > BOARD_WIDTH - 10) {
+      left = selectedNode.positionX - MENU_WIDTH - 14;
+    }
+    return {
+      left: clamp(left, 10, BOARD_WIDTH - MENU_WIDTH - 10),
+      top: clamp(selectedNode.positionY, 10, BOARD_HEIGHT - MENU_HEIGHT - 10)
+    };
+  }, [selectedNode?.positionX, selectedNode?.positionY]);
+
   return (
     <main className="actors-shell">
-      <header className="actors-toolbar">
-        <div className="actors-toolbar-left">
-          <h2>Actors</h2>
-          <p className="placeholder-text">
-            Visual board for agents, people, and action actors. Drag nodes, connect sockets, and build teams.
-          </p>
-        </div>
-        <div className="actors-toolbar-right">
-          <label>
-            Direction
-            <select value={linkDirection} onChange={(event) => setLinkDirection(event.target.value)}>
-              <option value="one_way">One-way</option>
-              <option value="two_way">Two-way</option>
-            </select>
-          </label>
-          <label>
-            Type
-            <select value={linkCommunicationType} onChange={(event) => setLinkCommunicationType(event.target.value)}>
-              <option value="chat">Chat</option>
-              <option value="task">Task</option>
-              <option value="event">Event</option>
-            </select>
-          </label>
-          <button type="button" onClick={previewRoute} disabled={!selectedNodeId}>
-            Preview Route
-          </button>
-        </div>
-      </header>
-
       <div className="actors-layout">
         <section className="actors-board-pane">
           <div className="actors-board-scroller">
@@ -879,12 +880,16 @@ export function ActorsView() {
                     <g key={link.id}>
                       <path
                         d={path}
-                        className={`actor-link ${isSelected ? "selected" : ""}`}
+                        className="actor-link-hit"
                         onClick={(event) => {
                           event.stopPropagation();
                           const point = toBoardCoordinates(event.clientX, event.clientY);
                           openLinkMenuForLink(link, point);
                         }}
+                      />
+                      <path
+                        d={path}
+                        className={`actor-link ${isSelected ? "selected" : ""}`}
                       />
                       <text x={midX} y={midY} className="actor-link-label">
                         {link.communicationType}
@@ -956,184 +961,315 @@ export function ActorsView() {
                 >
                   <header>
                     <strong>Link Settings</strong>
-                    <button
-                      type="button"
-                      onClick={() => setLinkMenu(null)}
-                      className="actor-link-menu-close"
-                    >
-                      Close
-                    </button>
                   </header>
                   <p className="actor-link-menu-title">
-                    {selectedLink ? `${selectedLink.sourceActorId} -> ${selectedLink.targetActorId}` : linkMenu.linkId}
+                    {selectedLink ? `${selectedLink.sourceActorId} → ${selectedLink.targetActorId}` : linkMenu.linkId}
                   </p>
                   <div className="actor-link-menu-actions">
                     <button
                       type="button"
                       className={linkMenu.direction === "one_way" ? "active" : ""}
-                      onClick={() => setLinkMenu((previous) => (previous ? { ...previous, direction: "one_way" } : previous))}
+                      onClick={() => void updateLinkDirection("one_way")}
                     >
                       One-Way
                     </button>
                     <button
                       type="button"
                       className={linkMenu.direction === "two_way" ? "active" : ""}
-                      onClick={() => setLinkMenu((previous) => (previous ? { ...previous, direction: "two_way" } : previous))}
+                      onClick={() => void updateLinkDirection("two_way")}
                     >
                       Two-Way
                     </button>
                   </div>
-                  <div className="actor-link-menu-footer">
-                    <button type="button" onClick={saveLinkMenu}>
-                      Save
+                </div>
+              ) : null}
+
+              {selectedNode && nodeMenuPosition && !linkMenu ? (
+                <div
+                  className="actor-node-menu"
+                  style={{ left: nodeMenuPosition.left, top: nodeMenuPosition.top }}
+                  onPointerDown={(event) => event.stopPropagation()}
+                >
+                  <header>
+                    <strong>{selectedNode.displayName}</strong>
+                    <button
+                      type="button"
+                      className="actor-link-menu-close"
+                      onClick={() => setSelectedNodeId(null)}
+                    >
+                      ×
                     </button>
-                    <button type="button" className="danger" onClick={() => void deleteSelectedLink(linkMenu.linkId)}>
-                      Delete
-                    </button>
-                  </div>
+                  </header>
+                  <p className="actor-link-menu-title">
+                    {selectedNode.id} · <span className="actor-node-menu-kind">{selectedNode.kind}</span>
+                  </p>
+                  {isSystemNode(selectedNode.id) ? (
+                    <p className="actor-link-menu-title">System actor — position only</p>
+                  ) : (
+                    <form
+                      className="actor-node-menu-form"
+                      onSubmit={(event) => {
+                        event.preventDefault();
+                        void saveSelectedNode();
+                      }}
+                    >
+                      <label>
+                        Name
+                        <input
+                          value={nodeDraftName}
+                          onChange={(event) => setNodeDraftName(event.target.value)}
+                        />
+                      </label>
+                      <label>
+                        Role
+                        <input
+                          value={nodeDraftRole}
+                          onChange={(event) => setNodeDraftRole(event.target.value)}
+                          placeholder="optional"
+                        />
+                      </label>
+                      <label>
+                        Channel
+                        <input
+                          value={nodeDraftChannel}
+                          onChange={(event) => setNodeDraftChannel(event.target.value)}
+                          placeholder="optional"
+                        />
+                      </label>
+                      <div className="actor-link-menu-footer">
+                        <button type="submit" disabled={isSaving}>
+                          Save
+                        </button>
+                        <button
+                          type="button"
+                          className="danger"
+                          disabled={isSaving}
+                          onClick={() => void deleteSelectedNode()}
+                        >
+                          Delete
+                        </button>
+                      </div>
+                    </form>
+                  )}
                 </div>
               ) : null}
             </div>
           </div>
-        </section>
 
-        <aside className="actors-side-panel">
-          <section className="entry-editor-card actor-side-card">
-            <h3>Create Actor</h3>
-            <form className="actor-side-form" onSubmit={createActor}>
-              <label>
-                Name
-                <input
-                  value={newActorName}
-                  onChange={(event) => setNewActorName(event.target.value)}
-                  placeholder="e.g. Product Manager"
-                />
-              </label>
-              <label>
-                Kind
-                <select value={newActorKind} onChange={(event) => setNewActorKind(event.target.value)}>
-                  <option value="human">Human</option>
-                  <option value="action">Action</option>
-                </select>
-              </label>
-              <button type="submit">Create Actor</button>
-            </form>
-          </section>
+          <div className="actors-fast-actions" onPointerDown={(event) => event.stopPropagation()}>
+            <p className="actors-hint">Drag between handles to link</p>
+            <p className="actors-hint">Top/Bottom → Hierarchical</p>
+            <p className="actors-hint">Left/Right → Peer</p>
+            <button
+              type="button"
+              className={showNewActorPopup ? "active" : ""}
+              onClick={() => {
+                setShowNewActorPopup((previous) => !previous);
+                setShowNewTeamPopup(false);
+              }}
+            >
+              + New Actor
+            </button>
+            <button
+              type="button"
+              className={showNewTeamPopup ? "active" : ""}
+              onClick={() => {
+                setShowNewTeamPopup((previous) => !previous);
+                setShowNewActorPopup(false);
+              }}
+            >
+              + New Team
+            </button>
+          </div>
 
-          <section className="entry-editor-card actor-side-card">
-            <h3>{editingTeamId ? "Update Team" : "Create Team"}</h3>
-            <form className="actor-side-form" onSubmit={submitTeam}>
-              <label>
-                Team Name
-                <input
-                  value={teamName}
-                  onChange={(event) => setTeamName(event.target.value)}
-                  placeholder="e.g. Delivery Team"
-                />
-              </label>
-              <div className="actor-team-members">
-                {board.nodes.map((node) => (
-                  <label key={node.id}>
+          <div className="actors-board-status">
+            {isLoading ? "Loading…" : isSaving ? "Saving…" : statusText}
+          </div>
+
+          {showNewActorPopup ? (
+            <div
+              className="actor-modal-backdrop"
+              onPointerDown={(event) => {
+                if (event.target === event.currentTarget) {
+                  setShowNewActorPopup(false);
+                }
+              }}
+            >
+              <div className="actor-modal-card" onPointerDown={(event) => event.stopPropagation()}>
+                <header>
+                  <strong>New Actor</strong>
+                  <button
+                    type="button"
+                    className="actor-link-menu-close"
+                    onClick={() => setShowNewActorPopup(false)}
+                  >
+                    ×
+                  </button>
+                </header>
+                <form className="actor-node-menu-form" onSubmit={createActor}>
+                  <label>
+                    Name
                     <input
-                      type="checkbox"
-                      checked={teamMembers.includes(node.id)}
-                      onChange={(event) => {
-                        if (event.target.checked) {
-                          setTeamMembers((previous) => Array.from(new Set([...previous, node.id])));
-                        } else {
-                          setTeamMembers((previous) => previous.filter((entry) => entry !== node.id));
-                        }
-                      }}
+                      value={newActorName}
+                      onChange={(event) => setNewActorName(event.target.value)}
+                      placeholder="e.g. Product Manager"
+                      autoFocus
                     />
-                    {node.displayName}
                   </label>
-                ))}
+                  <label>
+                    Kind
+                    <select value={newActorKind} onChange={(event) => setNewActorKind(event.target.value)}>
+                      <option value="human">Human</option>
+                      <option value="action">Action</option>
+                    </select>
+                  </label>
+                  <button type="submit" disabled={isSaving}>
+                    Create Actor
+                  </button>
+                </form>
               </div>
-              <button type="submit">{editingTeamId ? "Save Team" : "Create Team"}</button>
-              {editingTeamId ? (
-                <button type="button" onClick={resetTeamForm}>
-                  Cancel Edit
-                </button>
-              ) : null}
-            </form>
-            <div className="actor-team-list">
-              {board.teams.map((team) => (
-                <article key={team.id}>
-                  <strong>{team.name}</strong>
-                  <p>{team.memberActorIds.length} members</p>
-                  <button type="button" onClick={() => beginTeamEdit(team)}>
-                    Edit
-                  </button>
-                  <button type="button" onClick={() => deleteTeam(team.id)}>
-                    Delete
-                  </button>
-                </article>
-              ))}
             </div>
-          </section>
+          ) : null}
 
-          <section className="entry-editor-card actor-side-card">
-            <h3>Selection</h3>
-            {selectedNode ? (
-              <div className="actor-selection">
-                <strong>{selectedNode.displayName}</strong>
-                <p>{selectedNode.id}</p>
-                <p>Kind: {selectedNode.kind}</p>
+          {showNewTeamPopup ? (
+            <div
+              className="actor-modal-backdrop"
+              onPointerDown={(event) => {
+                if (event.target === event.currentTarget) {
+                  setShowNewTeamPopup(false);
+                  resetTeamForm();
+                }
+              }}
+            >
+            <div className="actor-modal-card actor-modal-card--wide" onPointerDown={(event) => event.stopPropagation()}>
+              <header>
+                <strong>{editingTeamId ? "Edit Team" : "New Team"}</strong>
+                <button
+                  type="button"
+                  className="actor-link-menu-close"
+                  onClick={() => {
+                    setShowNewTeamPopup(false);
+                    resetTeamForm();
+                  }}
+                >
+                  ×
+                </button>
+              </header>
+              <form className="actor-node-menu-form" onSubmit={submitTeam}>
                 <label>
                   Name
                   <input
-                    value={nodeDraftName}
-                    onChange={(event) => setNodeDraftName(event.target.value)}
-                    disabled={isSystemNode(selectedNode.id)}
+                    value={teamName}
+                    onChange={(event) => setTeamName(event.target.value)}
+                    placeholder="e.g. Delivery Team"
+                    autoFocus
                   />
                 </label>
-                <label>
-                  Role
-                  <input
-                    value={nodeDraftRole}
-                    onChange={(event) => setNodeDraftRole(event.target.value)}
-                    disabled={isSystemNode(selectedNode.id)}
-                  />
-                </label>
-                <label>
-                  Channel
-                  <input
-                    value={nodeDraftChannel}
-                    onChange={(event) => setNodeDraftChannel(event.target.value)}
-                    disabled={isSystemNode(selectedNode.id)}
-                  />
-                </label>
-                <button type="button" onClick={saveSelectedNode} disabled={isSystemNode(selectedNode.id)}>
-                  Save Node
-                </button>
-                <button type="button" onClick={deleteSelectedNode} disabled={isSystemNode(selectedNode.id)}>
-                  Delete Node
-                </button>
-              </div>
-            ) : selectedLink ? (
-              <div className="actor-selection">
-                <p>{selectedLink.id}</p>
-                <p>
-                  {selectedLink.sourceActorId} {"->"} {selectedLink.targetActorId}
-                </p>
-                <p>Direction: {selectedLink.direction === "two_way" ? "Two-Way" : "One-Way"}</p>
-                <p className="placeholder-text">Click the link arrow on canvas to edit direction.</p>
-                <button type="button" onClick={deleteSelectedLink}>
-                  Delete Link
-                </button>
-              </div>
-            ) : (
-              <p className="placeholder-text">Select a node or a link.</p>
-            )}
-          </section>
-
-          <section className="entry-editor-card actor-side-card status">
-            <p className="placeholder-text">{isLoading ? "Loading..." : statusText}</p>
-            <p className="placeholder-text">
-              {isSaving ? "Saving..." : `Updated: ${new Date(board.updatedAt).toLocaleString()}`}
-            </p>
-          </section>
-        </aside>
+                <div className="actor-team-members-picker">
+                  {teamMembers.length > 0 ? (
+                    <div className="actor-team-tags">
+                      {teamMembers.map((memberId) => {
+                        const node = board.nodes.find((n) => n.id === memberId);
+                        return (
+                          <span key={memberId} className="actor-team-tag">
+                            {node ? node.displayName : memberId}
+                            <button
+                              type="button"
+                              className="actor-team-tag-remove"
+                              onClick={() => setTeamMembers((previous) => previous.filter((entry) => entry !== memberId))}
+                              title="Remove"
+                            >
+                              ×
+                            </button>
+                          </span>
+                        );
+                      })}
+                    </div>
+                  ) : null}
+                  <div className="actor-team-search-wrap">
+                    <input
+                      ref={teamMemberSearchRef}
+                      className="actor-team-search"
+                      value={teamMemberSearch}
+                      onChange={(event) => {
+                        setTeamMemberSearch(event.target.value);
+                        setTeamMemberDropdownOpen(true);
+                      }}
+                      onFocus={() => setTeamMemberDropdownOpen(true)}
+                      onBlur={() => setTimeout(() => setTeamMemberDropdownOpen(false), 150)}
+                      placeholder="Search actors…"
+                      autoComplete="off"
+                    />
+                    {teamMemberDropdownOpen ? (
+                      <ul className="actor-team-dropdown">
+                        {board.nodes
+                          .filter((node) => {
+                            const q = teamMemberSearch.toLowerCase();
+                            return node.displayName.toLowerCase().includes(q) || node.id.toLowerCase().includes(q);
+                          })
+                          .map((node) => {
+                            const isMember = teamMembers.includes(node.id);
+                            return (
+                              <li
+                                key={node.id}
+                                className={`actor-team-dropdown-item ${isMember ? "selected" : ""}`}
+                                onMouseDown={(event) => {
+                                  event.preventDefault();
+                                  if (isMember) {
+                                    setTeamMembers((previous) => previous.filter((entry) => entry !== node.id));
+                                  } else {
+                                    setTeamMembers((previous) => Array.from(new Set([...previous, node.id])));
+                                  }
+                                  setTeamMemberSearch("");
+                                }}
+                              >
+                                <span className="actor-team-dropdown-name">{node.displayName}</span>
+                                <span className="actor-team-dropdown-id">{node.id}</span>
+                                {isMember ? <span className="actor-team-dropdown-check">✓</span> : null}
+                              </li>
+                            );
+                          })}
+                        {board.nodes.filter((node) => {
+                          const q = teamMemberSearch.toLowerCase();
+                          return node.displayName.toLowerCase().includes(q) || node.id.toLowerCase().includes(q);
+                        }).length === 0 ? (
+                          <li className="actor-team-dropdown-empty">No actors found</li>
+                        ) : null}
+                      </ul>
+                    ) : null}
+                  </div>
+                </div>
+                <div className="actor-link-menu-footer">
+                  <button type="submit" disabled={isSaving}>
+                    {editingTeamId ? "Save Team" : "Create Team"}
+                  </button>
+                  {editingTeamId ? (
+                    <button type="button" onClick={resetTeamForm}>
+                      Cancel
+                    </button>
+                  ) : null}
+                </div>
+              </form>
+              {board.teams.length > 0 ? (
+                <div className="actor-team-list">
+                  {board.teams.map((team) => (
+                    <article key={team.id}>
+                      <strong>{team.name}</strong>
+                      <p>{team.memberActorIds.length} members</p>
+                      <button type="button" onClick={() => beginTeamEdit(team)}>
+                        Edit
+                      </button>
+                      <button type="button" onClick={() => void deleteTeam(team.id)}>
+                        Delete
+                      </button>
+                    </article>
+                  ))}
+                </div>
+              ) : null}
+            </div>
+            </div>
+          ) : null}
+        </section>
       </div>
     </main>
   );

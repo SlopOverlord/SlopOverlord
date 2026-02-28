@@ -59,6 +59,25 @@
             "target": "App",
             "configuration": "release",
             "preLaunchTask": "swift: Build Release App"
+        },
+        {
+            "type": "node",
+            "request": "launch",
+            "name": "Docker: Core + Dashboard",
+            "skipFiles": ["<node_internals>/**"],
+            "program": "${workspaceFolder}/utils/docker/scripts/docker-compose-up.js",
+            "cwd": "${workspaceFolder}",
+            "preLaunchTask": "Docker: Build",
+            "console": "integratedTerminal"
+        },
+        {
+            "type": "node",
+            "request": "launch",
+            "name": "Docker: Up (no build)",
+            "skipFiles": ["<node_internals>/**"],
+            "program": "${workspaceFolder}/utils/docker/scripts/docker-compose-up.js",
+            "cwd": "${workspaceFolder}",
+            "console": "integratedTerminal"
         }
     ]
 }
