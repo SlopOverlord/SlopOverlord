@@ -1,4 +1,5 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { fetchOpenAIModels, fetchOpenAIProviderStatus, fetchRuntimeConfig, updateRuntimeConfig } from "../api";
 
 const SETTINGS_ITEMS = [
@@ -235,6 +236,35 @@ function isSettingsSection(id) {
   return SETTINGS_ITEMS.some((item) => item.id === id);
 }
 
+function normalizeSearch(value) {
+  return String(value || "").trim().toLowerCase();
+}
+
+function filterProviderModels(models, query) {
+  const needle = normalizeSearch(query);
+  if (!needle) {
+    return models;
+  }
+
+  return [...models]
+    .map((model) => {
+      const id = normalizeSearch(model?.id);
+      const title = normalizeSearch(model?.title);
+      const idIndex = id.indexOf(needle);
+      const titleIndex = title.indexOf(needle);
+      const rank = Math.min(idIndex >= 0 ? idIndex : Number.MAX_SAFE_INTEGER, titleIndex >= 0 ? titleIndex : Number.MAX_SAFE_INTEGER);
+      return { model, rank };
+    })
+    .filter((item) => item.rank !== Number.MAX_SAFE_INTEGER)
+    .sort((left, right) => {
+      if (left.rank !== right.rank) {
+        return left.rank - right.rank;
+      }
+      return String(left.model?.id || "").localeCompare(String(right.model?.id || ""));
+    })
+    .map((item) => item.model);
+}
+
 export function ConfigView({ sectionId = "providers", onSectionChange = null }) {
   const initialSectionId = isSettingsSection(sectionId) ? sectionId : "providers";
   const [mode, setMode] = useState("form");
@@ -249,11 +279,17 @@ export function ConfigView({ sectionId = "providers", onSectionChange = null }) 
   const [providerForm, setProviderForm] = useState(null);
   const [providerModelOptions, setProviderModelOptions] = useState({});
   const [providerModelStatus, setProviderModelStatus] = useState({});
+  const [providerModelMenuOpen, setProviderModelMenuOpen] = useState(false);
+  const [providerModelMenuRect, setProviderModelMenuRect] = useState(null);
   const [openAIProviderStatus, setOpenAIProviderStatus] = useState({
     hasEnvironmentKey: false,
     hasConfiguredKey: false,
     hasAnyKey: false
   });
+  const providerModelLoadTimerRef = useRef(null);
+  const providerModelLoadTokenRef = useRef(0);
+  const providerModelPickerRef = useRef(null);
+  const providerModelMenuRef = useRef(null);
 
   useEffect(() => {
     loadConfig().catch(() => {
@@ -389,7 +425,7 @@ export function ConfigView({ sectionId = "providers", onSectionChange = null }) 
 
   function openCodexOpenAIDeepLink() {
     window.location.href = "codex://auth/openai?source=slopoverlord";
-    setProviderStatus("openai-oauth", "Codex deeplink opened. Complete auth there, then refresh models.");
+    setProviderStatus("openai-oauth", "Codex deeplink opened. Complete auth there; model catalog will update automatically.");
   }
 
   function setProviderStatus(providerId, message) {
@@ -410,11 +446,18 @@ export function ConfigView({ sectionId = "providers", onSectionChange = null }) 
       apiUrl: initial.apiUrl,
       model: initial.model
     });
+    setProviderModelMenuOpen(false);
   }
 
   function closeProviderModal() {
+    if (providerModelLoadTimerRef.current) {
+      clearTimeout(providerModelLoadTimerRef.current);
+      providerModelLoadTimerRef.current = null;
+    }
     setProviderModalId(null);
     setProviderForm(null);
+    setProviderModelMenuOpen(false);
+    setProviderModelMenuRect(null);
   }
 
   function updateProviderForm(field, value) {
@@ -427,6 +470,10 @@ export function ConfigView({ sectionId = "providers", onSectionChange = null }) 
         [field]: value
       };
     });
+
+    if (field === "model") {
+      setProviderModelMenuOpen(true);
+    }
   }
 
   async function loadProviderModels(providerId, entryOverride = null) {
@@ -471,6 +518,110 @@ export function ConfigView({ sectionId = "providers", onSectionChange = null }) 
       }));
     }
   }
+
+  useEffect(() => {
+    if (!providerModalMeta || !providerForm || !providerModalMeta.supportsModelCatalog) {
+      return;
+    }
+
+    const provider = providerModalMeta;
+    const hasEnvironmentKeyForOpenAI = provider.id === "openai-api" && openAIProviderStatus.hasEnvironmentKey;
+    const requiresApiKey = provider.authMethod === "api_key";
+    const hasKey = Boolean(String(providerForm.apiKey || "").trim()) || hasEnvironmentKeyForOpenAI;
+
+    if (requiresApiKey && !hasKey) {
+      setProviderStatus(provider.id, "Set API Key to load models.");
+      setProviderModelOptions((previous) => ({
+        ...previous,
+        [provider.id]: []
+      }));
+      return;
+    }
+
+    if (providerModelLoadTimerRef.current) {
+      clearTimeout(providerModelLoadTimerRef.current);
+      providerModelLoadTimerRef.current = null;
+    }
+
+    const token = providerModelLoadTokenRef.current + 1;
+    providerModelLoadTokenRef.current = token;
+    providerModelLoadTimerRef.current = setTimeout(() => {
+      if (providerModelLoadTokenRef.current !== token) {
+        return;
+      }
+      loadProviderModels(provider.id, providerForm).catch(() => {
+        setProviderStatus(provider.id, "Failed to load models from Core");
+      });
+    }, 450);
+
+    return () => {
+      if (providerModelLoadTimerRef.current) {
+        clearTimeout(providerModelLoadTimerRef.current);
+        providerModelLoadTimerRef.current = null;
+      }
+    };
+  }, [
+    providerModalMeta,
+    providerForm?.apiKey,
+    providerForm?.apiUrl,
+    openAIProviderStatus.hasEnvironmentKey
+  ]);
+
+  useEffect(() => {
+    if (!providerModelMenuOpen) {
+      return;
+    }
+
+    function syncProviderModelMenuRect() {
+      const picker = providerModelPickerRef.current;
+      if (!picker) {
+        return;
+      }
+      const rect = picker.getBoundingClientRect();
+      const viewportHeight = window.innerHeight || document.documentElement.clientHeight;
+      const viewportPadding = 10;
+      const menuGap = 6;
+      const defaultMaxHeight = 260;
+      const minMaxHeight = 140;
+      const spaceBelow = viewportHeight - rect.bottom - viewportPadding;
+      const spaceAbove = rect.top - viewportPadding;
+
+      let maxHeight = Math.max(minMaxHeight, Math.min(defaultMaxHeight, spaceBelow));
+      let top = rect.bottom + menuGap;
+      if (spaceBelow < minMaxHeight && spaceAbove > spaceBelow) {
+        maxHeight = Math.max(minMaxHeight, Math.min(defaultMaxHeight, spaceAbove - menuGap));
+        top = rect.top - menuGap - maxHeight;
+      }
+      top = Math.max(viewportPadding, Math.round(top));
+
+      setProviderModelMenuRect({
+        top,
+        left: Math.round(rect.left),
+        width: Math.round(rect.width),
+        maxHeight: Math.round(maxHeight)
+      });
+    }
+
+    function handlePointerDown(event) {
+      const target = event.target;
+      const pickerContainsTarget = providerModelPickerRef.current?.contains(target);
+      const menuContainsTarget = providerModelMenuRef.current?.contains(target);
+      if (!pickerContainsTarget && !menuContainsTarget) {
+        setProviderModelMenuOpen(false);
+        setProviderModelMenuRect(null);
+      }
+    }
+
+    syncProviderModelMenuRect();
+    window.addEventListener("resize", syncProviderModelMenuRect);
+    window.addEventListener("scroll", syncProviderModelMenuRect, true);
+    window.addEventListener("pointerdown", handlePointerDown);
+    return () => {
+      window.removeEventListener("resize", syncProviderModelMenuRect);
+      window.removeEventListener("scroll", syncProviderModelMenuRect, true);
+      window.removeEventListener("pointerdown", handlePointerDown);
+    };
+  }, [providerModelMenuOpen, providerModalMeta?.id]);
 
   function saveProviderFromModal() {
     if (!providerModalMeta || !providerForm) {
@@ -519,6 +670,7 @@ export function ConfigView({ sectionId = "providers", onSectionChange = null }) 
     const activeProviderStatus = providerModalMeta ? providerModelStatus[providerModalMeta.id] : "";
     const activeProviderModels = providerModalMeta ? providerModelOptions[providerModalMeta.id] || [] : [];
     const activeProviderEntry = providerModalMeta ? getProviderEntry(draftConfig.models, providerModalMeta.id) : null;
+    const filteredProviderModels = filterProviderModels(activeProviderModels, providerForm?.model);
 
     return (
       <div className="providers-shell">
@@ -601,36 +753,26 @@ export function ConfigView({ sectionId = "providers", onSectionChange = null }) 
 
                 <label>
                   Model
-                  <input value={providerForm.model} onChange={(event) => updateProviderForm("model", event.target.value)} />
+                  <div ref={providerModelPickerRef} className="provider-model-picker">
+                    <input
+                      value={providerForm.model}
+                      onFocus={() => setProviderModelMenuOpen(true)}
+                      onClick={() => setProviderModelMenuOpen(true)}
+                      onChange={(event) => updateProviderForm("model", event.target.value)}
+                      placeholder="Select model id..."
+                    />
+                  </div>
                 </label>
               </div>
 
               {providerModalMeta.supportsModelCatalog ? (
                 <div className="provider-modal-catalog">
-                  <div className="provider-modal-actions">
-                    <button type="button" onClick={() => loadProviderModels(providerModalMeta.id, providerForm)}>
-                      Refresh models
-                    </button>
-                    {providerModalMeta.id === "openai-oauth" ? (
+                  <p className="placeholder-text">{activeProviderStatus || "Model catalog is loading automatically."}</p>
+                  {providerModalMeta.id === "openai-oauth" ? (
+                    <div className="provider-modal-actions">
                       <button type="button" onClick={openCodexOpenAIDeepLink}>
                         Open OAuth in Codex
                       </button>
-                    ) : null}
-                  </div>
-                  <p className="placeholder-text">{activeProviderStatus || "Model catalog is not loaded yet."}</p>
-                  {activeProviderModels.length > 0 ? (
-                    <div className="provider-model-options">
-                      {activeProviderModels.map((model) => (
-                        <button
-                          key={model.id}
-                          type="button"
-                          className={`provider-model-option ${providerForm.model === model.id ? "active" : ""}`}
-                          onClick={() => updateProviderForm("model", model.id)}
-                        >
-                          <strong>{model.title}</strong>
-                          <span>{model.id}</span>
-                        </button>
-                      ))}
                     </div>
                   ) : null}
                 </div>
@@ -655,6 +797,50 @@ export function ConfigView({ sectionId = "providers", onSectionChange = null }) 
             </section>
           </div>
         ) : null}
+        {providerModalMeta && providerForm && providerModelMenuOpen && filteredProviderModels.length > 0 && providerModelMenuRect
+          ? createPortal(
+              <div
+                ref={providerModelMenuRef}
+                className="provider-model-picker-menu provider-model-picker-menu-floating"
+                style={{
+                  top: `${providerModelMenuRect.top}px`,
+                  left: `${providerModelMenuRect.left}px`,
+                  width: `${providerModelMenuRect.width}px`
+                }}
+              >
+                <div className="provider-model-picker-group">{providerModalMeta.title}</div>
+                <div className="provider-model-options" style={{ maxHeight: `${providerModelMenuRect.maxHeight}px` }}>
+                  {filteredProviderModels.map((model) => (
+                    <button
+                      key={model.id}
+                      type="button"
+                      className={`provider-model-option ${providerForm.model === model.id ? "active" : ""}`}
+                      onMouseDown={(event) => event.preventDefault()}
+                      onClick={() => {
+                        updateProviderForm("model", model.id);
+                        setProviderModelMenuOpen(false);
+                        setProviderModelMenuRect(null);
+                      }}
+                    >
+                      <div className="provider-model-option-main">
+                        <strong>{model.title || model.id}</strong>
+                        {model.contextWindow ? <span className="provider-model-context">{model.contextWindow}</span> : null}
+                      </div>
+                      <span>{model.id}</span>
+                      {Array.isArray(model.capabilities) && model.capabilities.length > 0 ? (
+                        <div className="provider-model-capabilities">
+                          {model.capabilities.map((capability) => (
+                            <span key={`${model.id}-${capability}`}>{capability}</span>
+                          ))}
+                        </div>
+                      ) : null}
+                    </button>
+                  ))}
+                </div>
+              </div>,
+              document.body
+            )
+          : null}
       </div>
     );
   }

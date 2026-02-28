@@ -59,22 +59,27 @@ public struct AnyLanguageModelProviderPlugin: ModelProviderPlugin {
     public func complete(model: String, prompt: String, maxTokens: Int) async throws -> String {
         switch try backend(for: model) {
         case .openAI(let settings):
-            let session = LanguageModelSession(
-                model: OpenAILanguageModel(
-                    baseURL: settings.baseURL,
-                    apiKey: settings.apiKey(),
-                    model: normalizeModelName(model, removing: "openai:"),
+            let resolvedModel = normalizeModelName(model, removing: "openai:")
+            do {
+                return try await completeOpenAI(
+                    settings: settings,
+                    model: resolvedModel,
+                    prompt: prompt,
+                    maxTokens: maxTokens,
                     apiVariant: settings.apiVariant
-                ),
-                instructions: resolvedInstructions
-            )
-            let options = GenerationOptions(maximumResponseTokens: maxTokens)
-            let response: LanguageModelSession.Response<String> = try await session.respond(
-                to: Prompt(prompt),
-                generating: String.self,
-                options: options
-            )
-            return response.content
+                )
+            } catch {
+                if shouldRetryOpenAIWithResponses(error: error, currentVariant: settings.apiVariant) {
+                    return try await completeOpenAI(
+                        settings: settings,
+                        model: resolvedModel,
+                        prompt: prompt,
+                        maxTokens: maxTokens,
+                        apiVariant: .responses
+                    )
+                }
+                throw error
+            }
 
         case .ollama(let settings):
             let session = LanguageModelSession(
@@ -101,33 +106,36 @@ public struct AnyLanguageModelProviderPlugin: ModelProviderPlugin {
                 do {
                     switch try backend(for: model) {
                     case .openAI(let settings):
-                        let session = LanguageModelSession(
-                            model: OpenAILanguageModel(
-                                baseURL: settings.baseURL,
-                                apiKey: settings.apiKey(),
-                                model: normalizeModelName(model, removing: "openai:"),
-                                apiVariant: settings.apiVariant
-                            ),
-                            instructions: resolvedInstructions
-                        )
-                        let options = GenerationOptions(maximumResponseTokens: maxTokens)
-                        if #available(macOS 26.0, *) {
-                            let stream = session.streamResponse(to: Prompt(prompt), options: options)
-                            var aggregated = ""
-                            for try await snapshot in stream {
-                                let next = snapshot.content
-                                if next.hasPrefix(aggregated) {
-                                    aggregated = next
-                                } else {
-                                    aggregated += next
+                        let resolvedModel = normalizeModelName(model, removing: "openai:")
+                        do {
+                            try await streamOpenAI(
+                                settings: settings,
+                                model: resolvedModel,
+                                prompt: prompt,
+                                maxTokens: maxTokens,
+                                apiVariant: settings.apiVariant,
+                                continuation: continuation
+                            )
+                            continuation.finish()
+                        } catch {
+                            if shouldRetryOpenAIWithResponses(error: error, currentVariant: settings.apiVariant) {
+                                do {
+                                    try await streamOpenAI(
+                                        settings: settings,
+                                        model: resolvedModel,
+                                        prompt: prompt,
+                                        maxTokens: maxTokens,
+                                        apiVariant: .responses,
+                                        continuation: continuation
+                                    )
+                                    continuation.finish()
+                                } catch {
+                                    continuation.finish(throwing: error)
                                 }
-                                continuation.yield(aggregated)
+                            } else {
+                                continuation.finish(throwing: error)
                             }
-                        } else {
-                            let completion = try await complete(model: model, prompt: prompt, maxTokens: maxTokens)
-                            try await yieldSimulatedStream(from: completion, continuation: continuation)
                         }
-                        continuation.finish()
 
                     case .ollama(let settings):
                         let session = LanguageModelSession(
@@ -165,6 +173,91 @@ public struct AnyLanguageModelProviderPlugin: ModelProviderPlugin {
                 task.cancel()
             }
         }
+    }
+
+    private func completeOpenAI(
+        settings: OpenAISettings,
+        model: String,
+        prompt: String,
+        maxTokens: Int,
+        apiVariant: OpenAILanguageModel.APIVariant
+    ) async throws -> String {
+        let session = LanguageModelSession(
+            model: OpenAILanguageModel(
+                baseURL: settings.baseURL,
+                apiKey: settings.apiKey(),
+                model: model,
+                apiVariant: apiVariant
+            ),
+            instructions: resolvedInstructions
+        )
+        let options = GenerationOptions(maximumResponseTokens: maxTokens)
+        let response: LanguageModelSession.Response<String> = try await session.respond(
+            to: Prompt(prompt),
+            generating: String.self,
+            options: options
+        )
+        return response.content
+    }
+
+    private func streamOpenAI(
+        settings: OpenAISettings,
+        model: String,
+        prompt: String,
+        maxTokens: Int,
+        apiVariant: OpenAILanguageModel.APIVariant,
+        continuation: AsyncThrowingStream<String, any Error>.Continuation
+    ) async throws {
+        if #available(macOS 26.0, *) {
+            let session = LanguageModelSession(
+                model: OpenAILanguageModel(
+                    baseURL: settings.baseURL,
+                    apiKey: settings.apiKey(),
+                    model: model,
+                    apiVariant: apiVariant
+                ),
+                instructions: resolvedInstructions
+            )
+            let options = GenerationOptions(maximumResponseTokens: maxTokens)
+            let stream = session.streamResponse(to: Prompt(prompt), options: options)
+            var aggregated = ""
+            for try await snapshot in stream {
+                let next = snapshot.content
+                if next.hasPrefix(aggregated) {
+                    aggregated = next
+                } else {
+                    aggregated += next
+                }
+                continuation.yield(aggregated)
+            }
+            return
+        }
+
+        let completion = try await completeOpenAI(
+            settings: settings,
+            model: model,
+            prompt: prompt,
+            maxTokens: maxTokens,
+            apiVariant: apiVariant
+        )
+        try await yieldSimulatedStream(from: completion, continuation: continuation)
+    }
+
+    private func shouldRetryOpenAIWithResponses(
+        error: any Error,
+        currentVariant: OpenAILanguageModel.APIVariant
+    ) -> Bool {
+        guard currentVariant == .chatCompletions else {
+            return false
+        }
+        let text = String(describing: error).lowercased()
+        if text.contains("not a chat model") {
+            return true
+        }
+        if text.contains("v1/chat/completions") && text.contains("did you mean to use v1/completions") {
+            return true
+        }
+        return false
     }
 
     private func yieldSimulatedStream(

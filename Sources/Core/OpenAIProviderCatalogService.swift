@@ -14,11 +14,12 @@ struct OpenAIProviderCatalogService {
     }
 
     private static let fallbackOpenAIModels: [ProviderModelOption] = [
-        .init(id: "gpt-4.1", title: "gpt-4.1"),
-        .init(id: "gpt-4.1-mini", title: "gpt-4.1-mini"),
-        .init(id: "gpt-4o", title: "gpt-4o"),
-        .init(id: "gpt-4o-mini", title: "gpt-4o-mini"),
-        .init(id: "o4-mini", title: "o4-mini")
+        .init(id: "gpt-4.1", title: "GPT-4.1", contextWindow: "1.0M", capabilities: ["tools"]),
+        .init(id: "gpt-4.1-mini", title: "GPT-4.1 mini", contextWindow: "1.0M", capabilities: ["tools"]),
+        .init(id: "gpt-4.1-nano", title: "GPT-4.1 nano", contextWindow: "1.0M", capabilities: ["tools"]),
+        .init(id: "gpt-4o", title: "GPT-4o", contextWindow: "128K", capabilities: ["tools"]),
+        .init(id: "gpt-4o-mini", title: "GPT-4o mini", contextWindow: "128K", capabilities: ["tools"]),
+        .init(id: "o4-mini", title: "o4-mini", contextWindow: "200K", capabilities: ["reasoning", "tools"])
     ]
 
     func listModels(config: CoreConfig, request: OpenAIProviderModelsRequest) async -> OpenAIProviderModelsResponse {
@@ -143,7 +144,7 @@ struct OpenAIProviderCatalogService {
             .map(\.id)
             .filter { !$0.isEmpty }
             .sorted()
-            .map { ProviderModelOption(id: $0, title: $0) }
+            .map(Self.enrichedOpenAIModelOption)
     }
 
     private func openAIModelsURL(baseURL: URL) -> URL {
@@ -157,5 +158,61 @@ struct OpenAIProviderCatalogService {
         }
 
         return baseURL.appendingPathComponent("models")
+    }
+
+    private static func enrichedOpenAIModelOption(id: String) -> ProviderModelOption {
+        let lowered = id.lowercased()
+        let title = humanReadableOpenAIModelTitle(id: id)
+        var contextWindow: String?
+        var capabilities: [String] = []
+
+        if lowered.hasPrefix("gpt-4.1") {
+            contextWindow = "1.0M"
+            capabilities.append("tools")
+        } else if lowered.hasPrefix("gpt-4o") {
+            contextWindow = "128K"
+            capabilities.append("tools")
+        } else if lowered.hasPrefix("o4") || lowered.hasPrefix("o3") {
+            contextWindow = "200K"
+            capabilities.append(contentsOf: ["reasoning", "tools"])
+        } else if lowered.hasPrefix("o1") {
+            contextWindow = "128K"
+            capabilities.append(contentsOf: ["reasoning", "tools"])
+        }
+
+        return ProviderModelOption(
+            id: id,
+            title: title,
+            contextWindow: contextWindow,
+            capabilities: capabilities
+        )
+    }
+
+    private static func humanReadableOpenAIModelTitle(id: String) -> String {
+        let lower = id.lowercased()
+        if lower.hasPrefix("gpt-4.1") {
+            let suffix = lower.replacingOccurrences(of: "gpt-4.1", with: "")
+            return "GPT-4.1" + titleSuffix(from: suffix)
+        }
+        if lower.hasPrefix("gpt-4o") {
+            let suffix = lower.replacingOccurrences(of: "gpt-4o", with: "")
+            return "GPT-4o" + titleSuffix(from: suffix)
+        }
+        return id
+    }
+
+    private static func titleSuffix(from raw: String) -> String {
+        let trimmed = raw.trimmingCharacters(in: CharacterSet(charactersIn: "-_ "))
+        guard !trimmed.isEmpty else {
+            return ""
+        }
+
+        let parts = trimmed
+            .split(whereSeparator: { $0 == "-" || $0 == "_" })
+            .map { $0.capitalized }
+        guard !parts.isEmpty else {
+            return ""
+        }
+        return " " + parts.joined(separator: " ")
     }
 }
