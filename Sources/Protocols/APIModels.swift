@@ -151,11 +151,13 @@ public struct ProjectRecord: Codable, Sendable, Equatable {
 }
 
 public struct ProjectCreateRequest: Codable, Sendable {
+    public var id: String?
     public var name: String
     public var description: String?
     public var channels: [ProjectChannelCreateRequest]
 
-    public init(name: String, description: String? = nil, channels: [ProjectChannelCreateRequest] = []) {
+    public init(id: String? = nil, name: String, description: String? = nil, channels: [ProjectChannelCreateRequest] = []) {
+        self.id = id
         self.name = name
         self.description = description
         self.channels = channels

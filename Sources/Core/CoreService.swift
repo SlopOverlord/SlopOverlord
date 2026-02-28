@@ -261,9 +261,21 @@ public actor CoreService {
         let now = Date()
         let normalizedName = try normalizeProjectName(request.name)
         let normalizedDescription = normalizeProjectDescription(request.description)
+        let normalizedID: String
+        if let requestedID = request.id, !requestedID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            guard let validID = normalizedProjectID(requestedID) else {
+                throw ProjectError.invalidProjectID
+            }
+            guard await store.project(id: validID) == nil else {
+                throw ProjectError.conflict
+            }
+            normalizedID = validID
+        } else {
+            normalizedID = UUID().uuidString
+        }
         let channels = try normalizeInitialProjectChannels(request.channels, fallbackName: normalizedName)
         let project = ProjectRecord(
-            id: UUID().uuidString,
+            id: normalizedID,
             name: normalizedName,
             description: normalizedDescription,
             channels: channels,

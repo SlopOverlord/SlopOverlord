@@ -24,7 +24,7 @@ interface SidebarItem {
 export function App() {
   const dependencies = useMemo(() => createDependencies(), []);
   const runtime = useRuntimeOverview(dependencies.coreApi);
-  const { route, setSection, setConfigSection, setAgentRoute } = useDashboardRoute();
+  const { route, setSection, setConfigSection, setProjectRoute, setAgentRoute } = useDashboardRoute();
   const [sidebarCompact, setSidebarCompact] = useState(false);
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
 
@@ -80,53 +80,51 @@ export function App() {
 
   const sidebarItems: SidebarItem[] = [
     {
-      id: "chats",
-      label: { icon: "CH", title: "Chats" },
+      id: "overview",
+      label: { icon: "dashboard", title: "Overview" },
       content: runtimeContent
     },
     {
       id: "projects",
-      label: { icon: "PR", title: "Projects" },
-      content: <ProjectsView channelState={runtime.channelState} workers={runtime.workers} bulletins={runtime.bulletins} />
+      label: { icon: "folder", title: "Projects" },
+      content: (
+        <ProjectsView
+          channelState={runtime.channelState}
+          workers={runtime.workers}
+          bulletins={runtime.bulletins}
+          routeProjectId={route.projectId}
+          onRouteProjectChange={setProjectRoute}
+        />
+      )
     },
     {
       id: "sessions",
-      label: { icon: "SE", title: "Sessions" },
+      label: { icon: "chat", title: "Sessions" },
       content: <PlaceholderView title="Sessions" />
     },
     {
-      id: "overview",
-      label: { icon: "OV", title: "Overview" },
-      content: runtimeContent
-    },
-    {
       id: "actors",
-      label: { icon: "AT", title: "Actors" },
+      label: { icon: "smart_toy", title: "Actors" },
       content: <ActorsView />
     },
     {
       id: "agents",
-      label: { icon: "AG", title: "Agents" },
+      label: { icon: "support_agent", title: "Agents" },
       content: <AgentsView routeAgentId={route.agentId} routeTab={route.agentTab} onRouteChange={onAgentRouteChange} />
     },
     {
-      id: "usafe",
-      label: { icon: "US", title: "Usafe" },
-      content: <PlaceholderView title="Usafe" />
-    },
-    {
       id: "nodes",
-      label: { icon: "ND", title: "Nodes" },
+      label: { icon: "dns", title: "Nodes" },
       content: <PlaceholderView title="Nodes" />
     },
     {
       id: "config",
-      label: { icon: "CF", title: "Config" },
+      label: { icon: "settings", title: "Config" },
       content: <ConfigView sectionId={route.configSection} onSectionChange={setConfigSection} />
     },
     {
       id: "logs",
-      label: { icon: "LG", title: "Logs" },
+      label: { icon: "description", title: "Logs" },
       content: <LogsView coreApi={dependencies.coreApi} />
     }
   ];

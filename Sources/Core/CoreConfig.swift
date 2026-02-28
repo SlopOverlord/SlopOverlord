@@ -154,24 +154,27 @@ public struct CoreConfig: Codable, Sendable {
     ) -> CoreConfig {
         let normalizedPath = path?
             .trimmingCharacters(in: .whitespacesAndNewlines)
-        let resolvedPath: String
         if let normalizedPath, !normalizedPath.isEmpty {
-            resolvedPath = normalizedPath
-        } else {
-            resolvedPath = defaultConfigPath(currentDirectory: currentDirectory)
+            if let decoded = decodeConfigFile(at: normalizedPath) {
+                return decoded
+            }
+            return .default
         }
 
-        if let decoded = decodeConfigFile(at: resolvedPath) {
-            return decoded
-        }
-
-        if path == nil {
+        // Keep backward compatibility for repositories that still rely on
+        // slopoverlord.config.json in the working directory.
+        if path == nil || normalizedPath?.isEmpty == true {
             let legacyPath = URL(fileURLWithPath: currentDirectory, isDirectory: true)
                 .appendingPathComponent(legacyDefaultConfigFileName)
                 .path
             if let decodedLegacy = decodeConfigFile(at: legacyPath) {
                 return decodedLegacy
             }
+        }
+
+        let resolvedPath = defaultConfigPath(currentDirectory: currentDirectory)
+        if let decoded = decodeConfigFile(at: resolvedPath) {
+            return decoded
         }
 
         return .default

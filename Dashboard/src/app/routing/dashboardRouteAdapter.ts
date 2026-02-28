@@ -25,6 +25,7 @@ export const DEFAULT_AGENT_TAB: AgentTab = "overview";
 export interface DashboardRoute {
   section: TopLevelSection;
   configSection: string | null;
+  projectId: string | null;
   agentId: string | null;
   agentTab: AgentTab | null;
 }
@@ -62,10 +63,11 @@ export function parseRouteFromPath(pathname: string): DashboardRoute {
   const sectionArg2 = decodePathSegment(sectionArg2Raw).toLowerCase();
 
   const configSection = section === "config" && sectionArg ? sectionArg : null;
+  const projectId = section === "projects" && sectionArg ? sectionArg : null;
   const agentId = section === "agents" && sectionArg ? sectionArg : null;
   const agentTab = section === "agents" && agentId ? normalizeAgentTab(sectionArg2) : null;
 
-  return { section, configSection, agentId, agentTab };
+  return { section, configSection, projectId, agentId, agentTab };
 }
 
 export function buildPathFromRoute(route: DashboardRoute) {
@@ -73,6 +75,10 @@ export function buildPathFromRoute(route: DashboardRoute) {
 
   if (route.section === "config" && route.configSection) {
     nextPathname = `${nextPathname}/${encodeURIComponent(route.configSection)}`;
+  }
+
+  if (route.section === "projects" && route.projectId) {
+    nextPathname = `/projects/${encodeURIComponent(route.projectId)}`;
   }
 
   if (route.section === "agents") {

@@ -66,6 +66,7 @@ func projectCrudEndpoints() async throws {
 
     let createBody = try JSONEncoder().encode(
         ProjectCreateRequest(
+            id: "platform-board",
             name: "Platform Board",
             description: "Core + dashboard roadmap",
             channels: [.init(title: "General", channelId: "general")]
@@ -79,6 +80,7 @@ func projectCrudEndpoints() async throws {
     decoder.dateDecodingStrategy = .iso8601
 
     let created = try decoder.decode(ProjectRecord.self, from: createResponse.body)
+    #expect(created.id == "platform-board")
     #expect(created.name == "Platform Board")
     #expect(created.channels.count == 1)
     #expect(created.tasks.isEmpty)

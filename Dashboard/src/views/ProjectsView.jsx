@@ -227,6 +227,154 @@ function extractCreatedItems(project, snapshotsByChannel) {
   return result.slice(0, 24);
 }
 
+function normalizeProjectIdentifier(value) {
+  return String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9-_.]+/g, "-")
+    .replace(/^[-_.]+|[-_.]+$/g, "");
+}
+
+function parseListInput(value) {
+  if (typeof value !== "string") {
+    return [];
+  }
+  const unique = new Set();
+  const parsed = [];
+  for (const rawItem of value.split(/[\n,]+/g)) {
+    const item = rawItem.trim();
+    if (!item || unique.has(item.toLowerCase())) {
+      continue;
+    }
+    unique.add(item.toLowerCase());
+    parsed.push(item);
+  }
+  return parsed;
+}
+
+function buildProjectChannels(projectId, actors = [], teams = []) {
+  const base = normalizeProjectIdentifier(projectId) || "project";
+  const channels = [{ title: "Main channel", channelId: `${base}-main` }];
+  const used = new Set(channels.map((channel) => channel.channelId));
+
+  for (const actor of actors) {
+    const actorSlug = toSlug(actor);
+    const channelId = `${base}-actor-${actorSlug || createId("actor")}`;
+    if (!used.has(channelId)) {
+      used.add(channelId);
+      channels.push({
+        title: `Actor · ${actor}`,
+        channelId
+      });
+    }
+  }
+
+  for (const team of teams) {
+    const teamSlug = toSlug(team);
+    const channelId = `${base}-team-${teamSlug || createId("team")}`;
+    if (!used.has(channelId)) {
+      used.add(channelId);
+      channels.push({
+        title: `Team · ${team}`,
+        channelId
+      });
+    }
+  }
+
+  return channels;
+}
+
+function emptyProjectDraft(index = 1) {
+  return {
+    projectId: `project-${index}`,
+    displayName: `Project ${index}`,
+    description: "",
+    actors: "",
+    teams: ""
+  };
+}
+
+function ProjectCreateModal({ isOpen, draft, onChange, onClose, onCreate }) {
+  if (!isOpen) {
+    return null;
+  }
+
+  return (
+    <div className="project-modal-overlay" onClick={onClose}>
+      <section className="project-modal" onClick={(event) => event.stopPropagation()}>
+        <div className="project-modal-head">
+          <h3>New Project</h3>
+          <button type="button" className="project-modal-close" aria-label="Close" onClick={onClose}>
+            ×
+          </button>
+        </div>
+
+        <form className="project-task-form" onSubmit={onCreate}>
+          <label>
+            Project ID
+            <input
+              value={draft.projectId}
+              onChange={(event) => onChange("projectId", event.target.value)}
+              placeholder="project-alpha"
+              autoFocus
+            />
+          </label>
+
+          <label>
+            Display Name
+            <input
+              value={draft.displayName}
+              onChange={(event) => onChange("displayName", event.target.value)}
+              placeholder="Project Alpha"
+            />
+          </label>
+
+          <label>
+            Description
+            <textarea
+              value={draft.description}
+              onChange={(event) => onChange("description", event.target.value)}
+              rows={3}
+              placeholder="What this project is about..."
+            />
+          </label>
+
+          <div className="project-task-form-grid">
+            <label>
+              Actors
+              <textarea
+                value={draft.actors}
+                onChange={(event) => onChange("actors", event.target.value)}
+                rows={3}
+                placeholder="actor.one, actor.two"
+              />
+            </label>
+
+            <label>
+              Teams
+              <textarea
+                value={draft.teams}
+                onChange={(event) => onChange("teams", event.target.value)}
+                rows={3}
+                placeholder="Team Red, Team Blue"
+              />
+            </label>
+          </div>
+
+          <div className="project-modal-actions">
+            <button type="button" onClick={onClose}>
+              Cancel
+            </button>
+            <button type="submit" className="project-primary" disabled={!draft.displayName.trim()}>
+              Create Project
+            </button>
+          </div>
+        </form>
+      </section>
+    </div>
+  );
+}
+
 function ProjectTaskCreateModal({ isOpen, draft, onChange, onClose, onCreate }) {
   if (!isOpen) {
     return null;
@@ -301,6 +449,89 @@ function ProjectTaskCreateModal({ isOpen, draft, onChange, onClose, onCreate }) 
   );
 }
 
+function ProjectTaskEditModal({ isOpen, task, draft, onChange, onClose, onSave, onDelete }) {
+  if (!isOpen || !task) {
+    return null;
+  }
+
+  return (
+    <div className="project-modal-overlay" onClick={onClose}>
+      <section className="project-modal" onClick={(event) => event.stopPropagation()}>
+        <div className="project-modal-head">
+          <h3>Edit Task</h3>
+          <button type="button" className="project-modal-close" aria-label="Close" onClick={onClose}>
+            ×
+          </button>
+        </div>
+
+        <form
+          className="project-task-form"
+          onSubmit={(event) => {
+            event.preventDefault();
+            onSave();
+          }}
+        >
+          <label>
+            Title
+            <input
+              value={draft.title}
+              onChange={(event) => onChange("title", event.target.value)}
+              placeholder="Task title..."
+              autoFocus
+            />
+          </label>
+
+          <label>
+            Description
+            <textarea
+              value={draft.description}
+              onChange={(event) => onChange("description", event.target.value)}
+              rows={4}
+              placeholder="Optional description..."
+            />
+          </label>
+
+          <div className="project-task-form-grid">
+            <label>
+              Priority
+              <select value={draft.priority} onChange={(event) => onChange("priority", event.target.value)}>
+                {TASK_PRIORITIES.map((priority) => (
+                  <option key={priority} value={priority}>
+                    {TASK_PRIORITY_LABELS[priority]}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <label>
+              Status
+              <select value={draft.status} onChange={(event) => onChange("status", event.target.value)}>
+                {TASK_STATUSES.map((status) => (
+                  <option key={status.id} value={status.id}>
+                    {status.title}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </div>
+
+          <div className="project-modal-actions">
+            <button type="button" className="danger" onClick={onDelete}>
+              Delete task
+            </button>
+            <button type="button" onClick={onClose}>
+              Cancel
+            </button>
+            <button type="submit" className="project-primary" disabled={!draft.title.trim()}>
+              Save
+            </button>
+          </div>
+        </form>
+      </section>
+    </div>
+  );
+}
+
 function ProjectTabPlaceholder({ title, text }) {
   return (
     <section className="project-pane">
@@ -310,20 +541,29 @@ function ProjectTabPlaceholder({ title, text }) {
   );
 }
 
-export function ProjectsView({ channelState, workers, bulletins = [] }) {
+export function ProjectsView({
+  channelState,
+  workers,
+  bulletins = [],
+  routeProjectId = null,
+  onRouteProjectChange = () => {}
+}) {
   const [projects, setProjects] = useState([]);
   const [isLoadingProjects, setIsLoadingProjects] = useState(true);
   const [statusText, setStatusText] = useState("Loading projects...");
-  const [selectedProjectId, setSelectedProjectId] = useState(null);
   const [selectedTab, setSelectedTab] = useState("overview");
   const [chatSnapshots, setChatSnapshots] = useState({});
+  const [isCreateProjectModalOpen, setIsCreateProjectModalOpen] = useState(false);
+  const [projectDraft, setProjectDraft] = useState(() => emptyProjectDraft(1));
   const [isCreateTaskModalOpen, setIsCreateTaskModalOpen] = useState(false);
   const [taskDraft, setTaskDraft] = useState(emptyTaskDraft);
+  const [editingTask, setEditingTask] = useState(null);
+  const [editDraft, setEditDraft] = useState(emptyTaskDraft);
   const [projectNameDraft, setProjectNameDraft] = useState("");
 
   const selectedProject = useMemo(
-    () => projects.find((project) => project.id === selectedProjectId) || null,
-    [projects, selectedProjectId]
+    () => projects.find((project) => project.id === routeProjectId) || null,
+    [projects, routeProjectId]
   );
 
   useEffect(() => {
@@ -345,6 +585,16 @@ export function ProjectsView({ channelState, workers, bulletins = [] }) {
       setSelectedTab("overview");
     }
   }, [selectedProject?.id, selectedProject?.name, selectedTab]);
+
+  useEffect(() => {
+    if (isLoadingProjects || !routeProjectId) {
+      return;
+    }
+    if (!selectedProject) {
+      onRouteProjectChange(null);
+      setStatusText("Project not found.");
+    }
+  }, [isLoadingProjects, routeProjectId, selectedProject, onRouteProjectChange]);
 
   useEffect(() => {
     if (!selectedProject) {
@@ -403,12 +653,9 @@ export function ProjectsView({ channelState, workers, bulletins = [] }) {
     setProjects(normalized);
     setStatusText(normalized.length > 0 ? `Loaded ${normalized.length} projects from Core` : "No projects yet.");
     setIsLoadingProjects(false);
-    setSelectedProjectId((previous) => {
-      if (!previous) {
-        return previous;
-      }
-      return normalized.some((project) => project.id === previous) ? previous : null;
-    });
+    if (routeProjectId && !normalized.some((project) => project.id === routeProjectId)) {
+      onRouteProjectChange(null);
+    }
   }
 
   function replaceProjectInState(rawProject) {
@@ -426,33 +673,55 @@ export function ProjectsView({ channelState, workers, bulletins = [] }) {
   }
 
   function openProject(projectId) {
-    setSelectedProjectId(projectId);
+    onRouteProjectChange(projectId);
     setSelectedTab("overview");
   }
 
   function closeProject() {
-    setSelectedProjectId(null);
+    onRouteProjectChange(null);
     setSelectedTab("overview");
   }
 
-  async function createProject() {
+  function openCreateProjectModal() {
+    setProjectDraft(emptyProjectDraft(projects.length + 1));
+    setIsCreateProjectModalOpen(true);
+  }
+
+  function closeCreateProjectModal() {
+    setIsCreateProjectModalOpen(false);
+    setProjectDraft(emptyProjectDraft(projects.length + 1));
+  }
+
+  function updateProjectDraft(field, value) {
+    setProjectDraft((previous) => ({
+      ...previous,
+      [field]: value
+    }));
+  }
+
+  async function createProject(event) {
+    event.preventDefault();
+
+    const displayName = String(projectDraft.displayName || "").trim();
+    if (!displayName) {
+      return;
+    }
+
     const nextIndex = projects.length + 1;
-    const suggested = `Project ${nextIndex}`;
-    const providedName = window.prompt("Project name", suggested);
-    if (providedName == null) {
-      return;
-    }
+    const projectId =
+      normalizeProjectIdentifier(projectDraft.projectId) ||
+      normalizeProjectIdentifier(toSlug(displayName)) ||
+      `project-${nextIndex}`;
+    const actors = parseListInput(projectDraft.actors);
+    const teams = parseListInput(projectDraft.teams);
 
-    const name = String(providedName || "").trim();
-    if (!name) {
-      return;
-    }
-
-    const slug = toSlug(name) || `project-${nextIndex}`;
     const created = await createProjectRequest({
-      name,
-      description: "",
-      channels: [{ title: "Main channel", channelId: `${slug}-main` }]
+      id: projectId,
+      name: displayName,
+      description: String(projectDraft.description || "").trim(),
+      channels: buildProjectChannels(projectId, actors, teams),
+      actors,
+      teams
     });
 
     if (!created) {
@@ -461,8 +730,9 @@ export function ProjectsView({ channelState, workers, bulletins = [] }) {
     }
 
     replaceProjectInState(created);
-    setSelectedProjectId(String(created.id || ""));
-    setStatusText(`Project ${name} created.`);
+    onRouteProjectChange(String(created.id || ""));
+    closeCreateProjectModal();
+    setStatusText(`Project ${displayName} created.`);
   }
 
   async function renameProject(projectId, explicitName = null) {
@@ -509,7 +779,9 @@ export function ProjectsView({ channelState, workers, bulletins = [] }) {
     }
 
     setProjects((previous) => previous.filter((candidate) => candidate.id !== projectId));
-    setSelectedProjectId((previous) => (previous === projectId ? null : previous));
+    if (routeProjectId === projectId) {
+      onRouteProjectChange(null);
+    }
     setStatusText(`Project ${project.name} deleted.`);
   }
 
@@ -528,6 +800,69 @@ export function ProjectsView({ channelState, workers, bulletins = [] }) {
   function closeCreateTaskModal() {
     setTaskDraft(emptyTaskDraft());
     setIsCreateTaskModalOpen(false);
+  }
+
+  function openEditTaskModal(task) {
+    setEditingTask(task);
+    setEditDraft({
+      title: task.title,
+      description: task.description || "",
+      priority: task.priority,
+      status: task.status
+    });
+  }
+
+  function closeEditTaskModal() {
+    setEditingTask(null);
+    setEditDraft(emptyTaskDraft());
+  }
+
+  function updateEditDraft(field, value) {
+    setEditDraft((prev) => ({ ...prev, [field]: value }));
+  }
+
+  async function saveTaskEdit() {
+    if (!selectedProject || !editingTask) {
+      return;
+    }
+    const title = String(editDraft.title || "").trim();
+    if (!title) {
+      return;
+    }
+    const updated = await updateProjectTaskRequest(selectedProject.id, editingTask.id, {
+      title,
+      description: String(editDraft.description || "").trim(),
+      priority: editDraft.priority,
+      status: editDraft.status
+    });
+    if (!updated) {
+      setStatusText("Failed to update task in Core.");
+      return;
+    }
+    replaceProjectInState(updated);
+    closeEditTaskModal();
+    setStatusText("Task updated.");
+  }
+
+  async function deleteTaskFromModal() {
+    if (!editingTask) {
+      return;
+    }
+    const accepted = window.confirm("Delete this task?");
+    if (!accepted) {
+      return;
+    }
+    if (!selectedProject) {
+      return;
+    }
+    const updated = await deleteProjectTaskRequest(selectedProject.id, editingTask.id);
+    if (!updated) {
+      setStatusText("Failed to delete task.");
+      return;
+    }
+    replaceProjectInState(updated);
+    closeEditTaskModal();
+    setStatusText("Task deleted.");
   }
 
   async function createTask(event) {
@@ -677,12 +1012,14 @@ export function ProjectsView({ channelState, workers, bulletins = [] }) {
 
     if (projects.length === 0) {
       return (
-        <section className="project-board-list">
-          <article className="project-board-card">
-            <p className="placeholder-text">No projects yet. Create your first project.</p>
-            <div className="project-board-card-actions">
-              <button type="button" className="project-primary" onClick={createProject}>
-                Create Project
+        <section className="project-board-list project-board-list--empty">
+          <article className="project-board-empty">
+            <div className="project-board-empty-actions">
+              <button type="button" className="project-new-action project-new-action--hero" onClick={openCreateProjectModal}>
+                Start your first project!
+              </button>
+              <button type="button" className="project-new-action" onClick={openCreateProjectModal}>
+                New Projects
               </button>
             </div>
           </article>
@@ -698,27 +1035,22 @@ export function ProjectsView({ channelState, workers, bulletins = [] }) {
           const taskCounts = buildTaskCounts(project.tasks);
 
           return (
-            <article key={project.id} className="project-board-card">
+            <article
+              key={project.id}
+              className="project-board-card project-board-card--clickable"
+              role="button"
+              tabIndex={0}
+              onClick={() => openProject(project.id)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter" || event.key === " ") {
+                  event.preventDefault();
+                  openProject(project.id);
+                }
+              }}
+            >
               <div className="project-board-card-head">
-                <button type="button" className="project-open-link" onClick={() => openProject(project.id)}>
-                  <h3>{project.name}</h3>
-                </button>
-                <details
-                  className="project-board-menu"
-                  onClick={(event) => {
-                    event.stopPropagation();
-                  }}
-                >
-                  <summary aria-label="Project actions">...</summary>
-                  <div className="project-board-menu-list">
-                    <button type="button" onClick={() => renameProject(project.id)}>
-                      Rename
-                    </button>
-                    <button type="button" className="danger" onClick={() => deleteProject(project.id)}>
-                      Delete
-                    </button>
-                  </div>
-                </details>
+                <h3>{project.name}</h3>
+                <span className="project-board-updated">{formatRelativeTime(project.updatedAt)}</span>
               </div>
 
               <p className="project-board-description placeholder-text">
@@ -726,16 +1058,10 @@ export function ProjectsView({ channelState, workers, bulletins = [] }) {
               </p>
 
               <div className="project-board-stats">
-                <span>{taskCounts.total} tasks</span>
-                <span>{taskCounts.in_progress} in progress</span>
-                <span>{activeWorkers.length} active workers</span>
-                <span>{relatedWorkers.length} workers total</span>
-              </div>
-
-              <div className="project-board-card-actions">
-                <button type="button" onClick={() => openProject(project.id)}>
-                  Open Details
-                </button>
+                <span className="project-badge project-badge--tasks">{taskCounts.total} tasks</span>
+                <span className="project-badge project-badge--progress">{taskCounts.in_progress} in progress</span>
+                <span className="project-badge project-badge--active">{activeWorkers.length} active workers</span>
+                <span className="project-badge project-badge--workers">{relatedWorkers.length} workers total</span>
               </div>
             </article>
           );
@@ -853,7 +1179,7 @@ export function ProjectsView({ channelState, workers, bulletins = [] }) {
                     }
                   }}
                 >
-                  <header className="project-kanban-column-head">
+                  <header className={`project-kanban-column-head project-kanban-column-head--${column.id}`}>
                     <span>{column.title}</span>
                     <strong>{tasks.length}</strong>
                   </header>
@@ -865,8 +1191,17 @@ export function ProjectsView({ channelState, workers, bulletins = [] }) {
                       tasks.map((task) => (
                         <article
                           key={task.id}
-                          className="project-kanban-task"
+                          className="project-kanban-task project-kanban-task--clickable"
+                          role="button"
+                          tabIndex={0}
                           draggable
+                          onClick={() => openEditTaskModal(task)}
+                          onKeyDown={(event) => {
+                            if (event.key === "Enter" || event.key === " ") {
+                              event.preventDefault();
+                              openEditTaskModal(task);
+                            }
+                          }}
                           onDragStart={(event) => {
                             event.dataTransfer.setData("text/project-task-id", task.id);
                             event.dataTransfer.effectAllowed = "move";
@@ -882,7 +1217,7 @@ export function ProjectsView({ channelState, workers, bulletins = [] }) {
                             <span className="project-task-age">{formatRelativeTime(task.createdAt)}</span>
                           </div>
 
-                          <div className="project-task-actions">
+                          <div className="project-task-actions" onClick={(e) => e.stopPropagation()}>
                             <select
                               value={task.status}
                               onChange={(event) => moveTask(task.id, String(event.target.value))}
@@ -1152,7 +1487,7 @@ export function ProjectsView({ channelState, workers, bulletins = [] }) {
     <main className="projects-shell">
       <header className="projects-head">
         <h2>Projects</h2>
-        <button type="button" className="project-primary" onClick={createProject}>
+        <button type="button" className="project-new-action" onClick={openCreateProjectModal}>
           New Project
         </button>
       </header>
@@ -1161,12 +1496,30 @@ export function ProjectsView({ channelState, workers, bulletins = [] }) {
 
       <p className="placeholder-text">{statusText}</p>
 
+      <ProjectCreateModal
+        isOpen={isCreateProjectModalOpen}
+        draft={projectDraft}
+        onChange={updateProjectDraft}
+        onClose={closeCreateProjectModal}
+        onCreate={createProject}
+      />
+
       <ProjectTaskCreateModal
         isOpen={isCreateTaskModalOpen}
         draft={taskDraft}
         onChange={updateTaskDraft}
         onClose={closeCreateTaskModal}
         onCreate={createTask}
+      />
+
+      <ProjectTaskEditModal
+        isOpen={Boolean(editingTask)}
+        task={editingTask}
+        draft={editDraft}
+        onChange={updateEditDraft}
+        onClose={closeEditTaskModal}
+        onSave={saveTaskEdit}
+        onDelete={deleteTaskFromModal}
       />
     </main>
   );

@@ -800,20 +800,15 @@ body.mobile-menu-open {
   min-width: 32px;
   height: 30px;
   border-radius: 8px;
-  border: 1px solid var(--line);
+  border: 1px solid transparent;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  font-size: 0.67rem;
-  font-weight: 700;
-  letter-spacing: 0.04em;
+  font-size: 1.25rem;
+  font-weight: 400;
+  letter-spacing: normal;
   color: var(--muted);
-  background: var(--surface-3);
-}
-
-.sidebar-item.active .sidebar-icon {
-  border-color: var(--accent);
-  color: var(--accent);
+  background: transparent;
 }
 
 .sidebar-label {
@@ -945,6 +940,25 @@ body.mobile-menu-open {
 
 .projects-head h2 {
   margin: 0;
+}
+
+.project-new-action {
+  border: 0;
+  background: transparent;
+  color: var(--accent);
+  padding: 2px 0;
+  min-width: auto;
+  font-size: 0.9rem;
+}
+
+.project-new-action:hover {
+  border: 0;
+  background: transparent;
+  color: #c9a9ff;
+}
+
+.project-new-action--hero {
+  font-size: 1rem;
 }
 
 .projects-list {
@@ -1099,87 +1113,72 @@ body.mobile-menu-open {
 
 .project-board-list {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
-  gap: 12px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.project-board-list--empty {
+  min-height: 360px;
+  place-items: center;
+}
+
+.project-board-empty {
+  display: grid;
+  place-items: center;
+  width: 100%;
+  min-height: 100%;
+}
+
+.project-board-empty-actions {
+  display: grid;
+  place-items: center;
+  gap: 8px;
 }
 
 .project-board-card {
   border: 1px solid var(--line);
   border-radius: 12px;
-  padding: 12px;
+  padding: 14px;
   display: grid;
-  gap: 10px;
-  background: rgba(10, 13, 21, 0.72);
+  gap: 8px;
+  background: rgba(10, 13, 21, 0.55);
+}
+
+.project-board-card--clickable {
+  cursor: pointer;
+  transition: border-color 120ms ease, background-color 120ms ease, transform 120ms ease;
+}
+
+.project-board-card--clickable:hover,
+.project-board-card--clickable:focus-visible {
+  border-color: var(--line-strong);
+  background: rgba(11, 16, 24, 0.72);
+  transform: translateY(-1px);
 }
 
 .project-board-card-head {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
-  gap: 10px;
+  gap: 8px;
 }
 
-.project-open-link {
-  border: 0;
-  background: transparent;
-  padding: 0;
-  min-width: auto;
-  text-align: left;
-}
-
-.project-open-link:hover {
-  border: 0;
-  background: transparent;
-}
-
-.project-open-link h3 {
+.project-board-card-head h3 {
   margin: 0;
-  font-size: 1rem;
+  font-size: 0.98rem;
 }
 
-.project-board-menu {
-  position: relative;
-}
-
-.project-board-menu summary {
-  list-style: none;
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  padding: 3px 8px;
+.project-board-updated {
   color: var(--muted);
-  cursor: pointer;
-}
-
-.project-board-menu summary::-webkit-details-marker {
-  display: none;
-}
-
-.project-board-menu[open] summary {
-  border-color: var(--line-strong);
-  color: var(--text);
-}
-
-.project-board-menu-list {
-  position: absolute;
-  right: 0;
-  top: calc(100% + 6px);
-  min-width: 140px;
-  border: 1px solid var(--line);
-  border-radius: 10px;
-  background: #0c0f15;
-  padding: 8px;
-  display: grid;
-  gap: 6px;
-  z-index: 12;
-}
-
-.project-board-menu-list button {
-  width: 100%;
+  font-size: 0.76rem;
+  white-space: nowrap;
 }
 
 .project-board-description {
   margin: 0;
-  min-height: 18px;
+  min-height: 32px;
+  line-height: 1.35;
+  font-size: 0.84rem;
 }
 
 .project-board-stats {
@@ -1188,17 +1187,36 @@ body.mobile-menu-open {
   gap: 6px;
 }
 
-.project-board-stats span {
+.project-badge {
   border: 1px solid var(--line);
   border-radius: 999px;
-  padding: 2px 8px;
+  padding: 2px 9px;
   font-size: 0.78rem;
   color: var(--muted);
 }
 
-.project-board-card-actions {
-  display: flex;
-  justify-content: flex-end;
+.project-badge--tasks {
+  border-color: rgba(96, 165, 250, 0.5);
+  background: rgba(96, 165, 250, 0.12);
+  color: #bfdbfe;
+}
+
+.project-badge--progress {
+  border-color: rgba(251, 191, 36, 0.5);
+  background: rgba(251, 191, 36, 0.12);
+  color: #fde68a;
+}
+
+.project-badge--active {
+  border-color: rgba(74, 222, 128, 0.55);
+  background: rgba(74, 222, 128, 0.12);
+  color: #bbf7d0;
+}
+
+.project-badge--workers {
+  border-color: rgba(244, 114, 182, 0.45);
+  background: rgba(244, 114, 182, 0.1);
+  color: #fbcfe8;
 }
 
 .project-workspace {
@@ -1384,6 +1402,7 @@ body.mobile-menu-open {
   gap: 8px;
   padding: 10px;
   border-bottom: 1px solid var(--line);
+  border-radius: 12px 12px 0 0;
 }
 
 .project-kanban-column-head span {
@@ -1393,6 +1412,46 @@ body.mobile-menu-open {
 
 .project-kanban-column-head strong {
   color: var(--muted);
+}
+
+.project-kanban-column-head--backlog {
+  background: linear-gradient(135deg, rgba(71, 85, 105, 0.5) 0%, rgba(51, 65, 85, 0.6) 100%);
+  border-bottom-color: rgba(71, 85, 105, 0.6);
+}
+
+.project-kanban-column-head--backlog span,
+.project-kanban-column-head--backlog strong {
+  color: #cbd5e1;
+}
+
+.project-kanban-column-head--ready {
+  background: linear-gradient(135deg, rgba(59, 130, 246, 0.35) 0%, rgba(37, 99, 235, 0.45) 100%);
+  border-bottom-color: rgba(59, 130, 246, 0.5);
+}
+
+.project-kanban-column-head--ready span,
+.project-kanban-column-head--ready strong {
+  color: #bfdbfe;
+}
+
+.project-kanban-column-head--in_progress {
+  background: linear-gradient(135deg, rgba(245, 158, 11, 0.35) 0%, rgba(217, 119, 6, 0.45) 100%);
+  border-bottom-color: rgba(245, 158, 11, 0.5);
+}
+
+.project-kanban-column-head--in_progress span,
+.project-kanban-column-head--in_progress strong {
+  color: #fde68a;
+}
+
+.project-kanban-column-head--done {
+  background: linear-gradient(135deg, rgba(34, 197, 94, 0.35) 0%, rgba(22, 163, 74, 0.45) 100%);
+  border-bottom-color: rgba(34, 197, 94, 0.5);
+}
+
+.project-kanban-column-head--done span,
+.project-kanban-column-head--done strong {
+  color: #bbf7d0;
 }
 
 .project-kanban-column-body {
@@ -1409,6 +1468,15 @@ body.mobile-menu-open {
   background: rgba(11, 16, 25, 0.85);
   display: grid;
   gap: 8px;
+}
+
+.project-kanban-task--clickable {
+  cursor: pointer;
+}
+
+.project-kanban-task--clickable:hover {
+  border-color: var(--line-strong);
+  background: rgba(14, 20, 32, 0.9);
 }
 
 .project-kanban-task h5 {
@@ -1599,6 +1667,12 @@ body.mobile-menu-open {
 @media (max-width: 1500px) {
   .project-kanban-board {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 1000px) {
+  .project-board-list {
+    grid-template-columns: minmax(0, 1fr);
   }
 }
 

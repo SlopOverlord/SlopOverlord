@@ -48,7 +48,9 @@ export function SidebarView({
             }}
             title={item.label.title}
           >
-            <span className="sidebar-icon">{item.label.icon}</span>
+            <span className="material-symbols-rounded sidebar-icon" aria-hidden="true">
+              {item.label.icon}
+            </span>
             {!isCompact && <span className="sidebar-label">{item.label.title}</span>}
           </button>
         ))}
