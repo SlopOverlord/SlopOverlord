@@ -145,33 +145,25 @@ export function App() {
       />
 
       <div className={`page ${activeItem.id === "config" ? "page-config" : ""}`}>
-        <header className="hero">
-          <div className="hero-mobile-row">
-            <button
-              type="button"
-              className="mobile-sidebar-toggle"
-              onClick={() =>
-                setMobileSidebarOpen((value) => {
-                  const next = !value;
-                  if (next) {
-                    setSidebarCompact(false);
-                  }
-                  return next;
-                })
+        <button
+          type="button"
+          className="mobile-page-menu-button"
+          onClick={() =>
+            setMobileSidebarOpen((value) => {
+              const next = !value;
+              if (next) {
+                setSidebarCompact(false);
               }
-              aria-label={mobileSidebarOpen ? "Close menu" : "Open menu"}
-              aria-expanded={mobileSidebarOpen}
-            >
-              <span className="material-symbols-rounded" aria-hidden="true">
-                menu
-              </span>
-            </button>
-            <div>
-              <h1>SlopOverlord Dashboard</h1>
-              <p>Section: {activeItem.label.title}</p>
-            </div>
-          </div>
-        </header>
+              return next;
+            })
+          }
+          aria-label={mobileSidebarOpen ? "Close menu" : "Open menu"}
+          aria-expanded={mobileSidebarOpen}
+        >
+          <span className="material-symbols-rounded" aria-hidden="true">
+            menu
+          </span>
+        </button>
         {activeItem.content}
       </div>
     </div>

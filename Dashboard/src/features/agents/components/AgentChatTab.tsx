@@ -41,6 +41,16 @@ function sortSessionsByUpdate(list) {
   });
 }
 
+function getSessionDisplayLabel(session) {
+  const title = String(session?.title || "").trim();
+  const preview = String(session?.lastMessagePreview || "").trim();
+  const isDefaultTitle = /^Session\s+session-/i.test(title);
+  if (isDefaultTitle && preview) {
+    return preview.length > 80 ? `${preview.slice(0, 80)}...` : preview;
+  }
+  return title || preview || "Session";
+}
+
 function extractEventKey(event, index) {
   return event?.id || `${event?.type || "event"}-${index}`;
 }
@@ -64,12 +74,30 @@ function sortByNewest(list) {
   });
 }
 
+function segmentsToPlainText(segments) {
+  return (segments || [])
+    .map((segment) => {
+      if (segment.kind === "text") {
+        return String(segment.text || "").trim();
+      }
+      if (segment.kind === "attachment" && segment.attachment?.name) {
+        return `[Attachment: ${segment.attachment.name}]`;
+      }
+      return "";
+    })
+    .filter(Boolean)
+    .join("\n")
+    .trim();
+}
+
 function AgentChatEvents({
   isLoadingSession,
   isSending,
   chatMessages,
   latestRunStatus,
-  onOpenThinkingPanel
+  onOpenThinkingPanel,
+  onReplyToMessage,
+  onCopyMessage
 }) {
   const scrollRef = useRef(null);
 
@@ -103,6 +131,7 @@ function AgentChatEvents({
               .map((segment, segmentIndex) => ({ ...segment, segmentIndex }))
               .filter((segment) => segment.kind === "thinking");
             const visibleSegments = segments.filter((segment) => segment.kind !== "thinking");
+            const messageText = segmentsToPlainText(visibleSegments);
 
             return (
               <article key={eventKey} className={`agent-chat-message ${role}`}>
@@ -140,34 +169,29 @@ function AgentChatEvents({
                 </div>
                 {role === "assistant" ? (
                   <div className="agent-chat-message-actions">
-                    <button type="button" className="agent-chat-action-button" title="Copy">
+                    <button
+                      type="button"
+                      className="agent-chat-action-button"
+                      title="Copy"
+                      onClick={() => onCopyMessage(messageText)}
+                    >
                       <span className="material-symbols-rounded" aria-hidden="true">
                         content_copy
                       </span>
                     </button>
-                    <button type="button" className="agent-chat-action-button" title="Like">
-                      <span className="material-symbols-rounded" aria-hidden="true">
-                        thumb_up
-                      </span>
-                    </button>
-                    <button type="button" className="agent-chat-action-button" title="Dislike">
-                      <span className="material-symbols-rounded" aria-hidden="true">
-                        thumb_down
-                      </span>
-                    </button>
-                    <button type="button" className="agent-chat-action-button" title="Reply">
+                    <button
+                      type="button"
+                      className="agent-chat-action-button"
+                      title="Reply"
+                      onClick={() =>
+                        onReplyToMessage({
+                          id: eventItem.id || eventKey,
+                          text: previewText(messageText, "Assistant message")
+                        })
+                      }
+                    >
                       <span className="material-symbols-rounded" aria-hidden="true">
                         reply
-                      </span>
-                    </button>
-                    <button type="button" className="agent-chat-action-button" title="Regenerate">
-                      <span className="material-symbols-rounded" aria-hidden="true">
-                        refresh
-                      </span>
-                    </button>
-                    <button type="button" className="agent-chat-action-button" title="More">
-                      <span className="material-symbols-rounded" aria-hidden="true">
-                        more_horiz
                       </span>
                     </button>
                   </div>
@@ -182,6 +206,7 @@ function AgentChatEvents({
 }
 
 function AgentChatComposer({
+  agentId,
   inputText,
   onInputTextChange,
   isSending,
@@ -190,7 +215,10 @@ function AgentChatComposer({
   pendingFiles,
   onRemovePendingFile,
   onAddFiles,
-  fileInputRef
+  fileInputRef,
+  textareaRef,
+  replyTarget,
+  onCancelReply
 }) {
   const canSend = String(inputText || "").trim().length > 0 || pendingFiles.length > 0;
 
@@ -207,6 +235,20 @@ function AgentChatComposer({
         }}
         disabled={isSending}
       />
+
+      {replyTarget ? (
+        <div className="agent-chat-reply-target">
+          <span className="material-symbols-rounded" aria-hidden="true">
+            reply
+          </span>
+          <p>{replyTarget.text}</p>
+          <button type="button" onClick={onCancelReply} aria-label="Cancel reply">
+            <span className="material-symbols-rounded" aria-hidden="true">
+              close
+            </span>
+          </button>
+        </div>
+      ) : null}
 
       {pendingFiles.length > 0 ? (
         <div className="agent-chat-pending-files">
@@ -235,6 +277,7 @@ function AgentChatComposer({
         </button>
 
         <textarea
+          ref={textareaRef}
           rows={1}
           className="agent-chat-compose-input"
           value={inputText}
@@ -249,7 +292,7 @@ function AgentChatComposer({
               onSend();
             }
           }}
-          placeholder="Чем я могу помочь вам сегодня?"
+          placeholder={agentId ? `Message ${agentId}...` : "Message..."}
         />
 
         <div className="agent-chat-compose-right">
@@ -381,9 +424,11 @@ export function AgentChatTab({ agentId }) {
   const [statusText, setStatusText] = useState("Loading sessions...");
   const [optimisticUserEvent, setOptimisticUserEvent] = useState(null);
   const [optimisticAssistantText, setOptimisticAssistantText] = useState("");
+  const [replyTarget, setReplyTarget] = useState(null);
   const [isInspectorOpen, setIsInspectorOpen] = useState(false);
   const [selectedInspectorRecordId, setSelectedInspectorRecordId] = useState(null);
   const fileInputRef = useRef(null);
+  const composeInputRef = useRef(null);
   const runStateRef = useRef({ watcherId: 0, sessionId: null, abortController: null });
 
   useEffect(() => {
@@ -404,6 +449,7 @@ export function AgentChatTab({ agentId }) {
       setInputText("");
       setOptimisticUserEvent(null);
       setOptimisticAssistantText("");
+      setReplyTarget(null);
       setIsInspectorOpen(false);
       setSelectedInspectorRecordId(null);
       setIsSending(false);
@@ -458,6 +504,7 @@ export function AgentChatTab({ agentId }) {
       return;
     }
     setIsLoadingSession(true);
+    setReplyTarget(null);
     const detail = await fetchAgentSession(agentId, sessionId);
     if (!isCancelled) {
       if (detail) {
@@ -573,7 +620,9 @@ export function AgentChatTab({ agentId }) {
     }
 
     const trimmed = String(inputText || "").trim();
-    if (!trimmed && pendingFiles.length === 0) {
+    const replyContext = replyTarget ? `Reply to assistant: "${replyTarget.text}"` : "";
+    const contentForSend = trimmed ? (replyContext ? `${replyContext}\n\n${trimmed}` : trimmed) : replyContext;
+    if (!contentForSend && pendingFiles.length === 0) {
       return;
     }
 
@@ -589,6 +638,8 @@ export function AgentChatTab({ agentId }) {
     const localMessageSegments = [];
     if (trimmed) {
       localMessageSegments.push({ kind: "text", text: trimmed });
+    } else if (replyTarget) {
+      localMessageSegments.push({ kind: "text", text: `↪ ${replyTarget.text}` });
     }
     localMessageSegments.push(
       ...pendingFiles.map((file) => ({
@@ -659,7 +710,7 @@ export function AgentChatTab({ agentId }) {
         sessionId,
         {
           userId: "dashboard",
-          content: trimmed,
+          content: contentForSend,
           attachments: uploads,
           spawnSubSession: false
         },
@@ -673,6 +724,7 @@ export function AgentChatTab({ agentId }) {
 
       setInputText("");
       setPendingFiles([]);
+      setReplyTarget(null);
       await refreshSessions(sessionId);
 
       if (oversizedCount > 0) {
@@ -742,6 +794,44 @@ export function AgentChatTab({ agentId }) {
     }
     await refreshSessions(null);
     setStatusText("Session deleted.");
+  }
+
+  async function handleCopyMessage(text) {
+    const value = String(text || "").trim();
+    if (!value) {
+      setStatusText("Nothing to copy.");
+      return;
+    }
+
+    try {
+      if (navigator?.clipboard?.writeText) {
+        await navigator.clipboard.writeText(value);
+      } else {
+        const fallbackInput = document.createElement("textarea");
+        fallbackInput.value = value;
+        fallbackInput.setAttribute("readonly", "");
+        fallbackInput.style.position = "absolute";
+        fallbackInput.style.left = "-9999px";
+        document.body.appendChild(fallbackInput);
+        fallbackInput.select();
+        document.execCommand("copy");
+        document.body.removeChild(fallbackInput);
+      }
+      setStatusText("Message copied to clipboard.");
+    } catch {
+      setStatusText("Failed to copy message.");
+    }
+  }
+
+  function handleReplyToMessage(target) {
+    if (!target?.id || !target?.text) {
+      return;
+    }
+    setReplyTarget({
+      id: target.id,
+      text: String(target.text)
+    });
+    composeInputRef.current?.focus();
   }
 
   const events = Array.isArray(activeSession?.events) ? activeSession.events : [];
@@ -922,7 +1012,7 @@ export function AgentChatTab({ agentId }) {
             ) : null}
             {sessions.map((session) => (
               <option key={session.id} value={session.id}>
-                {session.title}
+                {getSessionDisplayLabel(session)}
               </option>
             ))}
           </select>
@@ -941,7 +1031,7 @@ export function AgentChatTab({ agentId }) {
             title="Thinking"
           >
             <span className="material-symbols-rounded" aria-hidden="true">
-              more_horiz
+              psychology_alt
             </span>
           </button>
           <button
@@ -966,21 +1056,29 @@ export function AgentChatTab({ agentId }) {
             chatMessages={chatMessages}
             latestRunStatus={latestRunStatus}
             onOpenThinkingPanel={handleOpenThinkingPanel}
+            onReplyToMessage={handleReplyToMessage}
+            onCopyMessage={handleCopyMessage}
           />
 
-          <AgentChatComposer
-            inputText={inputText}
-            onInputTextChange={setInputText}
-            isSending={isSending}
-            onSend={handleSend}
-            onStop={handleStop}
-            pendingFiles={pendingFiles}
-            onRemovePendingFile={removePendingFile}
-            onAddFiles={addFiles}
-            fileInputRef={fileInputRef}
-          />
+          <div className="agent-chat-compose-sticky-wrap">
+            <AgentChatComposer
+              agentId={agentId}
+              inputText={inputText}
+              onInputTextChange={setInputText}
+              isSending={isSending}
+              onSend={handleSend}
+              onStop={handleStop}
+              pendingFiles={pendingFiles}
+              onRemovePendingFile={removePendingFile}
+              onAddFiles={addFiles}
+              fileInputRef={fileInputRef}
+              textareaRef={composeInputRef}
+              replyTarget={replyTarget}
+              onCancelReply={() => setReplyTarget(null)}
+            />
 
-          <p className="agent-chat-status-line placeholder-text">{statusText}</p>
+            <p className="agent-chat-status-line placeholder-text">{statusText}</p>
+          </div>
         </div>
 
         {isInspectorOpen ? (

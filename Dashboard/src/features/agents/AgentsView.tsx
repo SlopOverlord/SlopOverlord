@@ -389,17 +389,24 @@ export function AgentsView({ routeAgentId = null, routeTab = "overview", onRoute
     );
   }
 
+  const isChatLayout = activeTab === "chat";
+
   return (
-    <main className="agents-shell">
+    <main className={`agents-shell ${isChatLayout ? "chat-layout" : ""}`}>
       <section className="entry-editor-card agent-header-card">
         <div className="agent-header-top">
-          <button type="button" onClick={navigateToAgentList}>
-            All Agents
+          <button type="button" className="agent-back-link" onClick={navigateToAgentList}>
+            <span className="material-symbols-rounded" aria-hidden="true">
+              arrow_back
+            </span>
+            All agents
           </button>
-          <span className="placeholder-text">{activeAgent.id}</span>
+          <span className="agent-header-id">{activeAgent.id}</span>
         </div>
-        <h2>{activeAgent.displayName}</h2>
-        <p className="placeholder-text">{activeAgent.role}</p>
+        <div className="agent-header-main">
+          <h2>{activeAgent.displayName}</h2>
+          <p className="placeholder-text">{activeAgent.role}</p>
+        </div>
       </section>
 
       <section className="agent-tabs" aria-label="Agent sections">
