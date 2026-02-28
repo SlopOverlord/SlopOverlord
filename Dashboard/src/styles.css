@@ -302,7 +302,6 @@ body.mobile-menu-open {
 
 .grid {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 12px;
 }
 
@@ -1604,6 +1603,226 @@ body.agent-chat-no-page-scroll .page {
   padding-top: 10px;
 }
 
+.logs-panel {
+  display: grid;
+  gap: 10px;
+}
+
+.logs-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.logs-header h2 {
+  margin: 0;
+}
+
+.logs-header p {
+  margin: 4px 0 0;
+}
+
+.logs-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.logs-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 10px;
+}
+
+.logs-search {
+  min-width: min(420px, 100%);
+  display: grid;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 0.86rem;
+}
+
+.logs-search > span {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.logs-autofollow {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--muted);
+  font-size: 0.88rem;
+}
+
+.logs-autofollow input {
+  width: auto;
+}
+
+.logs-levels {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.logs-level-pill {
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 4px 10px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--muted);
+  font-size: 0.88rem;
+  text-transform: lowercase;
+  background: rgba(255, 255, 255, 0.01);
+}
+
+.logs-level-pill input {
+  width: auto;
+}
+
+.logs-level-pill.trace {
+  border-color: #455067;
+}
+
+.logs-level-pill.debug {
+  border-color: #4b5568;
+}
+
+.logs-level-pill.info {
+  border-color: #2563eb;
+  color: #70a7ff;
+}
+
+.logs-level-pill.warning {
+  border-color: #b57b16;
+  color: #ffbf54;
+}
+
+.logs-level-pill.error {
+  border-color: #b44747;
+  color: #ff6e6e;
+}
+
+.logs-level-pill.fatal {
+  border-color: #db2777;
+  color: #ff59a8;
+}
+
+.logs-file,
+.logs-status {
+  margin: 0;
+}
+
+.logs-feed {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  min-height: 240px;
+  max-height: 65vh;
+  overflow: auto;
+}
+
+.logs-empty {
+  padding: 16px;
+}
+
+.logs-row {
+  display: grid;
+  grid-template-columns: 110px 76px 220px minmax(0, 1fr);
+  gap: 10px;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--line);
+  align-items: flex-start;
+}
+
+.logs-row:last-child {
+  border-bottom: 0;
+}
+
+.logs-time {
+  color: var(--muted);
+  font-size: 0.82rem;
+  white-space: nowrap;
+  padding-top: 2px;
+}
+
+.logs-level-tag {
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  font-size: 0.76rem;
+  padding: 2px 8px;
+  text-transform: lowercase;
+  white-space: nowrap;
+  width: fit-content;
+}
+
+.logs-level-tag.trace {
+  border-color: #455067;
+  color: #9aa5be;
+}
+
+.logs-level-tag.debug {
+  border-color: #4b5568;
+  color: #aeb7cc;
+}
+
+.logs-level-tag.info {
+  border-color: #2563eb;
+  color: #70a7ff;
+}
+
+.logs-level-tag.warning {
+  border-color: #b57b16;
+  color: #ffbf54;
+}
+
+.logs-level-tag.error {
+  border-color: #b44747;
+  color: #ff6e6e;
+}
+
+.logs-level-tag.fatal {
+  border-color: #db2777;
+  color: #ff59a8;
+}
+
+.logs-source {
+  color: #cdd4e5;
+  font-size: 0.82rem;
+  word-break: break-word;
+  padding-top: 2px;
+}
+
+.logs-message {
+  margin: 0;
+  color: var(--text);
+  font-size: 0.84rem;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.logs-message-block {
+  display: grid;
+  gap: 8px;
+}
+
+.logs-metadata {
+  margin: 0;
+  max-height: 220px;
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: rgba(10, 13, 20, 0.8);
+  padding: 8px;
+  color: #c5cde0;
+  font-family: "JetBrains Mono", "SFMono-Regular", Menlo, Consolas, monospace;
+  font-size: 0.76rem;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
 .agent-modal-overlay {
   position: fixed;
   inset: 0;
@@ -2454,6 +2673,25 @@ pre {
 
   .agent-tools-status {
     white-space: normal;
+  }
+
+  .logs-header {
+    flex-direction: column;
+  }
+
+  .logs-actions {
+    width: 100%;
+    justify-content: flex-end;
+  }
+
+  .logs-search {
+    min-width: 0;
+    width: 100%;
+  }
+
+  .logs-row {
+    grid-template-columns: 1fr;
+    gap: 6px;
   }
 
   .provider-list-item {

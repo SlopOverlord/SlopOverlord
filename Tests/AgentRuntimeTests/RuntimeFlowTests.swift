@@ -111,6 +111,21 @@ private actor SequencedModelProvider: ModelProviderPlugin {
     }
 }
 
+private actor PromptCapturingModelProvider: ModelProviderPlugin {
+    let id: String = "prompt-capturing"
+    let models: [String] = ["mock-model"]
+    private(set) var prompts: [String] = []
+
+    func complete(model: String, prompt: String, maxTokens: Int) async throws -> String {
+        prompts.append(prompt)
+        return "Captured."
+    }
+
+    func lastPrompt() -> String? {
+        prompts.last
+    }
+}
+
 @Test
 func respondInlineAutoToolCallingLoop() async {
     let provider = SequencedModelProvider(
@@ -141,4 +156,30 @@ func respondInlineAutoToolCallingLoop() async {
     let finalMessage = snapshot?.messages.last(where: { $0.userId == "system" })?.content ?? ""
     #expect(finalMessage == "Final answer after tool execution.")
     #expect(await invocationCounter.value() == 1)
+}
+
+@Test
+func respondInlineIncludesBootstrapContextInPrompt() async {
+    let provider = PromptCapturingModelProvider()
+    let system = RuntimeSystem(modelProvider: provider, defaultModel: "mock-model")
+    let channelId = "session-bootstrap"
+
+    await system.appendSystemMessage(
+        channelId: channelId,
+        content: """
+        [agent_session_context_bootstrap_v1]
+        [Identity.md]
+        Тебя зовут Серега
+        """
+    )
+
+    _ = await system.postMessage(
+        channelId: channelId,
+        request: ChannelMessageRequest(userId: "dashboard", content: "привет, как тебя зовут?")
+    )
+
+    let prompt = await provider.lastPrompt() ?? ""
+    #expect(prompt.contains("[agent_session_context_bootstrap_v1]"))
+    #expect(prompt.contains("Тебя зовут Серега"))
+    #expect(prompt.contains("привет, как тебя зовут?"))
 }

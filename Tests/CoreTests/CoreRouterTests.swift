@@ -109,6 +109,44 @@ func getConfigEndpoint() async throws {
 }
 
 @Test
+func systemLogsEndpointReadsJSONLFile() async throws {
+    let workspaceName = "workspace-logs-\(UUID().uuidString)"
+    let sqlitePath = FileManager.default.temporaryDirectory
+        .appendingPathComponent("core-logs-\(UUID().uuidString).sqlite")
+        .path
+
+    var config = CoreConfig.default
+    config.workspace = .init(name: workspaceName, basePath: FileManager.default.temporaryDirectory.path)
+    config.sqlitePath = sqlitePath
+
+    let workspaceRoot = config.resolvedWorkspaceRootURL()
+    let logsDirectory = workspaceRoot.appendingPathComponent("logs", isDirectory: true)
+    try FileManager.default.createDirectory(at: logsDirectory, withIntermediateDirectories: true)
+    let logFileURL = logsDirectory.appendingPathComponent("core-test.log")
+    let logLine = """
+    {"label":"slopoverlord.core.main","level":"error","message":"Test failure","metadata":{"module":"tests"},"source":"CoreTests","timestamp":"2026-02-28T10:11:12.123Z"}
+    """
+    guard let logData = (logLine + "\n").data(using: .utf8) else {
+        throw NSError(domain: "CoreRouterTests", code: 1)
+    }
+    try logData.write(to: logFileURL, options: .atomic)
+
+    let service = CoreService(config: config)
+    let router = CoreRouter(service: service)
+
+    let response = await router.handle(method: "GET", path: "/v1/logs", body: nil)
+    #expect(response.status == 200)
+
+    let decoder = JSONDecoder()
+    decoder.dateDecodingStrategy = .iso8601
+    let payload = try decoder.decode(SystemLogsResponse.self, from: response.body)
+    #expect(payload.filePath.hasSuffix(".log"))
+    #expect(payload.entries.count >= 1)
+    #expect(payload.entries.last?.level == .error)
+    #expect(payload.entries.last?.message == "Test failure")
+}
+
+@Test
 func serviceSupportsInMemoryPersistenceBuilder() async throws {
     let sqlitePath = FileManager.default.temporaryDirectory
         .appendingPathComponent("core-inmemory-\(UUID().uuidString).sqlite")

@@ -1,5 +1,6 @@
 import Foundation
 import AgentRuntime
+import Logging
 import Protocols
 
 actor AgentSessionOrchestrator {
@@ -18,6 +19,7 @@ actor AgentSessionOrchestrator {
     private let runtime: RuntimeSystem
     private let sessionStore: AgentSessionFileStore
     private let agentCatalogStore: AgentCatalogFileStore
+    private let logger: Logger
     private var toolInvoker: ToolInvoker?
 
     private var activeSessionRunChannels: Set<String> = []
@@ -30,12 +32,14 @@ actor AgentSessionOrchestrator {
         runtime: RuntimeSystem,
         sessionStore: AgentSessionFileStore,
         agentCatalogStore: AgentCatalogFileStore,
-        toolInvoker: ToolInvoker? = nil
+        toolInvoker: ToolInvoker? = nil,
+        logger: Logger = Logger(label: "slopoverlord.core.sessions")
     ) {
         self.runtime = runtime
         self.sessionStore = sessionStore
         self.agentCatalogStore = agentCatalogStore
         self.toolInvoker = toolInvoker
+        self.logger = logger
     }
 
     func updateAgentsRootURL(_ url: URL) {
@@ -48,14 +52,40 @@ actor AgentSessionOrchestrator {
     }
 
     func createSession(agentID: String, request: AgentSessionCreateRequest) async throws -> AgentSessionSummary {
+        logger.info(
+            "Session creation requested",
+            metadata: [
+                "agent_id": .string(agentID),
+                "title": .string(optionalString(request.title)),
+                "parent_session_id": .string(optionalString(request.parentSessionId))
+            ]
+        )
+
         do {
             let summary = try sessionStore.createSession(agentID: agentID, request: request)
             do {
                 try await ensureSessionContextLoaded(agentID: agentID, sessionID: summary.id)
             } catch {
+                logger.error(
+                    "Session context bootstrap failed",
+                    metadata: [
+                        "agent_id": .string(agentID),
+                        "session_id": .string(summary.id)
+                    ]
+                )
                 try? sessionStore.deleteSession(agentID: agentID, sessionID: summary.id)
                 throw OrchestratorError.storageFailure
             }
+
+            logger.info(
+                "Session created",
+                metadata: [
+                    "agent_id": .string(summary.agentId),
+                    "session_id": .string(summary.id),
+                    "title": .string(summary.title),
+                    "parent_session_id": .string(optionalString(summary.parentSessionId))
+                ]
+            )
             return summary
         } catch {
             throw mapSessionStoreError(error)
@@ -77,6 +107,17 @@ actor AgentSessionOrchestrator {
         guard !content.isEmpty || !request.attachments.isEmpty else {
             throw OrchestratorError.invalidPayload
         }
+
+        logger.info(
+            "Session prompt accepted",
+            metadata: [
+                "agent_id": .string(agentID),
+                "session_id": .string(sessionID),
+                "user_id": .string(request.userId),
+                "attachment_count": .stringConvertible(request.attachments.count),
+                "prompt": .string(truncateForLog(content.isEmpty ? "[attachments_only_prompt]" : content))
+            ]
+        )
 
         let attachments: [AgentAttachment]
         do {
@@ -242,6 +283,16 @@ actor AgentSessionOrchestrator {
                 }
                 throw OrchestratorError.storageFailure
             }
+
+            logger.info(
+                "Sub-session created from parent session",
+                metadata: [
+                    "agent_id": .string(agentID),
+                    "parent_session_id": .string(sessionID),
+                    "child_session_id": .string(childSummary.id),
+                    "child_title": .string(childSummary.title)
+                ]
+            )
 
             finalEvents.append(
                 AgentSessionEvent(
@@ -504,6 +555,13 @@ actor AgentSessionOrchestrator {
            existingSnapshot.messages.contains(where: {
                $0.userId == "system" && $0.content.contains(Self.sessionContextBootstrapMarker)
            }) {
+            logger.debug(
+                "Session context already initialized",
+                metadata: [
+                    "agent_id": .string(agentID),
+                    "session_id": .string(sessionID)
+                ]
+            )
             return
         }
 
@@ -518,6 +576,20 @@ actor AgentSessionOrchestrator {
             sessionID: sessionID,
             documents: documents
         )
+
+        logger.info(
+            "Session bootstrap prompt prepared",
+            metadata: [
+                "agent_id": .string(agentID),
+                "session_id": .string(sessionID),
+                "agents_md_chars": .stringConvertible(documents.agentsMarkdown.count),
+                "user_md_chars": .stringConvertible(documents.userMarkdown.count),
+                "identity_md_chars": .stringConvertible(documents.identityMarkdown.count),
+                "soul_md_chars": .stringConvertible(documents.soulMarkdown.count),
+                "bootstrap_prompt": .string(truncateForLog(bootstrapMessage, limit: 24000))
+            ]
+        )
+
         await runtime.appendSystemMessage(channelId: channelID, content: bootstrapMessage)
     }
 
@@ -563,5 +635,18 @@ actor AgentSessionOrchestrator {
         case .invalidPayload:
             return .invalidPayload
         }
+    }
+
+    private func optionalString(_ value: String?) -> String {
+        let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return trimmed.isEmpty ? "(none)" : trimmed
+    }
+
+    private func truncateForLog(_ value: String, limit: Int = 12000) -> String {
+        guard value.count > limit else {
+            return value
+        }
+        let endIndex = value.index(value.startIndex, offsetBy: limit)
+        return "\(value[..<endIndex])… [truncated]"
     }
 }

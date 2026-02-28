@@ -29,9 +29,7 @@ struct CoreMain: AsyncParsableCommand {
     var oneshot: Bool = false
 
     mutating func run() async throws {
-        await LoggingBootstrapper.shared.bootstrapIfNeeded()
-        let logger = Logger(label: "slopoverlord.core.main")
-        await FatalSignalLogger.shared.installIfNeeded()
+        var runtimeLogger: Logger?
 
         do {
             var explicitConfigPath = normalizedConfigPath(configPath)
@@ -62,8 +60,14 @@ struct CoreMain: AsyncParsableCommand {
                 }
             }
 
-            let workspaceRoot = try prepareWorkspace(config: &config, logger: logger)
+            let workspaceRoot = try prepareWorkspace(config: &config)
+            let systemLogFileURL = defaultSystemLogFileURL(in: workspaceRoot)
+            await LoggingBootstrapper.shared.bootstrapIfNeeded(logFileURL: systemLogFileURL)
+            let logger = Logger(label: "slopoverlord.core.main")
+            runtimeLogger = logger
+            await FatalSignalLogger.shared.installIfNeeded()
             logger.info("Workspace prepared at \(workspaceRoot.path)")
+            logger.info("System logs are persisted at \(systemLogFileURL.path)")
 
             let resolvedConfigPath = explicitConfigPath ??
                 workspaceRoot.appendingPathComponent(CoreConfig.defaultConfigFileName).path
@@ -113,7 +117,11 @@ struct CoreMain: AsyncParsableCommand {
                 try server.waitUntilClosed()
             }
         } catch {
-            logger.critical("Core is exiting because of an unrecoverable error: \(String(describing: error))")
+            if let runtimeLogger {
+                runtimeLogger.critical("Core is exiting because of an unrecoverable error: \(String(describing: error))")
+            } else {
+                emitBootstrapWarning("Core is exiting because of an unrecoverable error: \(String(describing: error))")
+            }
             throw error
         }
     }
@@ -165,7 +173,7 @@ private func ensureConfigFileExists(path: String, config: CoreConfig, logger: Lo
     logger.info("Config initialized at \(configURL.path)")
 }
 
-private func prepareWorkspace(config: inout CoreConfig, logger: Logger) throws -> URL {
+private func prepareWorkspace(config: inout CoreConfig) throws -> URL {
     let workspaceRoot = config.resolvedWorkspaceRootURL()
 
     do {
@@ -177,7 +185,7 @@ private func prepareWorkspace(config: inout CoreConfig, logger: Logger) throws -
         let fallbackRoot = URL(fileURLWithPath: fallbackBasePath, isDirectory: true)
             .appendingPathComponent(config.workspace.name, isDirectory: true)
 
-        logger.warning(
+        emitBootstrapWarning(
             "Failed to create workspace at \(workspaceRoot.path), falling back to \(fallbackRoot.path): \(error)"
         )
 
@@ -212,17 +220,41 @@ private func resolveSQLitePath(sqlitePath: String, workspaceRoot: URL) -> String
     return workspaceRoot.appendingPathComponent(sqlitePath).path
 }
 
+private func defaultSystemLogFileURL(in workspaceRoot: URL, now: Date = Date()) -> URL {
+    let formatter = DateFormatter()
+    formatter.locale = Locale(identifier: "en_US_POSIX")
+    formatter.timeZone = TimeZone(secondsFromGMT: 0)
+    formatter.dateFormat = "yyyy-MM-dd"
+    let suffix = formatter.string(from: now)
+    return workspaceRoot
+        .appendingPathComponent("logs", isDirectory: true)
+        .appendingPathComponent("core-\(suffix).log")
+}
+
+private func emitBootstrapWarning(_ message: String) {
+    let payload = "[warning] \(message)\n"
+    payload.withCString { pointer in
+        _ = write(STDERR_FILENO, pointer, strlen(pointer))
+    }
+}
+
 private actor LoggingBootstrapper {
     static let shared = LoggingBootstrapper()
 
     private var isBootstrapped = false
 
-    func bootstrapIfNeeded() {
+    func bootstrapIfNeeded(logFileURL: URL) {
         guard !isBootstrapped else {
             return
         }
 
-        LoggingSystem.bootstrap(StreamLogHandler.standardError)
+        SystemJSONLLogHandler.configure(fileURL: logFileURL)
+        LoggingSystem.bootstrap { label in
+            MultiplexLogHandler([
+                StreamLogHandler.standardError(label: label),
+                SystemJSONLLogHandler(label: label)
+            ])
+        }
         isBootstrapped = true
     }
 }

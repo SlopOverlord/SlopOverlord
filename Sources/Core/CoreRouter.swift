@@ -126,6 +126,7 @@ private enum ErrorCode {
     static let agentToolsWriteFailed = "agent_tools_write_failed"
     static let toolForbidden = "tool_forbidden"
     static let toolInvokeFailed = "tool_invoke_failed"
+    static let systemLogsReadFailed = "system_logs_read_failed"
 }
 
 private struct AcceptResponse: Encodable {
@@ -300,6 +301,17 @@ public actor CoreRouter {
         add(.get, "/v1/config") { _ in
             let config = await service.getConfig()
             return Self.encodable(status: HTTPStatus.ok, payload: config)
+        }
+
+        add(.get, "/v1/logs") { _ in
+            do {
+                let response = try await service.getSystemLogs()
+                return Self.encodable(status: HTTPStatus.ok, payload: response)
+            } catch let error as CoreService.SystemLogsError {
+                return Self.systemLogsErrorResponse(error, fallback: ErrorCode.systemLogsReadFailed)
+            } catch {
+                return Self.json(status: HTTPStatus.internalServerError, payload: ["error": ErrorCode.systemLogsReadFailed])
+            }
         }
 
         add(.get, "/v1/agents") { _ in
@@ -690,6 +702,13 @@ public actor CoreRouter {
             return json(status: HTTPStatus.notFound, payload: ["error": ErrorCode.sessionNotFound])
         case .forbidden(_):
             return json(status: HTTPStatus.forbidden, payload: ["error": ErrorCode.toolForbidden])
+        case .storageFailure:
+            return json(status: HTTPStatus.internalServerError, payload: ["error": fallback])
+        }
+    }
+
+    private static func systemLogsErrorResponse(_ error: CoreService.SystemLogsError, fallback: String) -> CoreRouterResponse {
+        switch error {
         case .storageFailure:
             return json(status: HTTPStatus.internalServerError, payload: ["error": fallback])
         }

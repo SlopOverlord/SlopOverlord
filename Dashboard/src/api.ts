@@ -9,6 +9,7 @@ export const fetchWorkers = coreApi.fetchWorkers;
 export const fetchArtifact = coreApi.fetchArtifact;
 export const fetchRuntimeConfig = coreApi.fetchRuntimeConfig;
 export const updateRuntimeConfig = coreApi.updateRuntimeConfig;
+export const fetchSystemLogs = coreApi.fetchSystemLogs;
 export const fetchOpenAIModels = coreApi.fetchOpenAIModels;
 export const fetchOpenAIProviderStatus = coreApi.fetchOpenAIProviderStatus;
 export const fetchAgents = coreApi.fetchAgents;

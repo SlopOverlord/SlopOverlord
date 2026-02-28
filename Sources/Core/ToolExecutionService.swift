@@ -1,5 +1,6 @@
 import Foundation
 import AgentRuntime
+import Logging
 import Protocols
 
 final class ToolExecutionService: @unchecked Sendable {
@@ -7,6 +8,7 @@ final class ToolExecutionService: @unchecked Sendable {
     private let sessionStore: AgentSessionFileStore
     private let agentCatalogStore: AgentCatalogFileStore
     private let processRegistry: SessionProcessRegistry
+    private let logger: Logger
     private var workspaceRootURL: URL
 
     init(
@@ -14,13 +16,15 @@ final class ToolExecutionService: @unchecked Sendable {
         runtime: RuntimeSystem,
         sessionStore: AgentSessionFileStore,
         agentCatalogStore: AgentCatalogFileStore,
-        processRegistry: SessionProcessRegistry
+        processRegistry: SessionProcessRegistry,
+        logger: Logger = Logger(label: "slopoverlord.core.tools")
     ) {
         self.workspaceRootURL = workspaceRootURL
         self.runtime = runtime
         self.sessionStore = sessionStore
         self.agentCatalogStore = agentCatalogStore
         self.processRegistry = processRegistry
+        self.logger = logger
     }
 
     func updateWorkspaceRootURL(_ url: URL) {
@@ -314,6 +318,15 @@ final class ToolExecutionService: @unchecked Sendable {
     private func executeSessionsSpawn(agentID: String, request: ToolInvocationRequest) async -> ToolInvocationResult {
         let title = request.arguments["title"]?.asString
         let parent = request.arguments["parentSessionId"]?.asString
+        logger.info(
+            "Tool requested session spawn",
+            metadata: [
+                "agent_id": .string(agentID),
+                "title": .string(optionalString(title)),
+                "parent_session_id": .string(optionalString(parent))
+            ]
+        )
+
         do {
             let summary = try sessionStore.createSession(
                 agentID: agentID,
@@ -322,8 +335,25 @@ final class ToolExecutionService: @unchecked Sendable {
                     parentSessionId: parent
                 )
             )
+            logger.info(
+                "Session spawned via tool",
+                metadata: [
+                    "agent_id": .string(summary.agentId),
+                    "session_id": .string(summary.id),
+                    "title": .string(summary.title),
+                    "parent_session_id": .string(optionalString(summary.parentSessionId))
+                ]
+            )
             return success(tool: request.tool, data: encodeJSONValue(summary))
         } catch {
+            logger.error(
+                "Session spawn via tool failed",
+                metadata: [
+                    "agent_id": .string(agentID),
+                    "title": .string(optionalString(title)),
+                    "parent_session_id": .string(optionalString(parent))
+                ]
+            )
             return failed(tool: request.tool, code: "session_spawn_failed", message: "Failed to create session.", retryable: true)
         }
     }
@@ -625,5 +655,10 @@ final class ToolExecutionService: @unchecked Sendable {
 
     private func sessionChannelID(agentID: String, sessionID: String) -> String {
         "agent:\(agentID):session:\(sessionID)"
+    }
+
+    private func optionalString(_ value: String?) -> String {
+        let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return trimmed.isEmpty ? "(none)" : trimmed
     }
 }

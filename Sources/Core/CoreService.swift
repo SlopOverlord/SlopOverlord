@@ -78,6 +78,10 @@ public actor CoreService {
         case storageFailure
     }
 
+    public enum SystemLogsError: Error {
+        case storageFailure
+    }
+
     private let runtime: RuntimeSystem
     private let store: any PersistenceStore
     private let openAIProviderCatalog: OpenAIProviderCatalogService
@@ -86,6 +90,7 @@ public actor CoreService {
     private let sessionOrchestrator: AgentSessionOrchestrator
     private let toolsAuthorization: ToolAuthorizationService
     private let toolExecution: ToolExecutionService
+    private let systemLogStore: SystemLogFileStore
     private let configPath: String
     private var workspaceRootURL: URL
     private var agentsRootURL: URL
@@ -111,6 +116,7 @@ public actor CoreService {
         self.agentsRootURL = workspaceRootURL.appendingPathComponent("agents", isDirectory: true)
         self.agentCatalogStore = AgentCatalogFileStore(agentsRootURL: self.agentsRootURL)
         self.sessionStore = AgentSessionFileStore(agentsRootURL: self.agentsRootURL)
+        self.systemLogStore = SystemLogFileStore(workspaceRootURL: self.workspaceRootURL)
         let orchestratorCatalogStore = AgentCatalogFileStore(agentsRootURL: self.agentsRootURL)
         let orchestratorSessionStore = AgentSessionFileStore(agentsRootURL: self.agentsRootURL)
         self.sessionOrchestrator = AgentSessionOrchestrator(
@@ -541,6 +547,15 @@ public actor CoreService {
         openAIProviderCatalog.status(config: currentConfig)
     }
 
+    /// Returns latest persisted system logs from `/workspace/logs/*.log`.
+    public func getSystemLogs(limit: Int = 1500) throws -> SystemLogsResponse {
+        do {
+            return try systemLogStore.readRecentEntries(limit: limit)
+        } catch {
+            throw SystemLogsError.storageFailure
+        }
+    }
+
     /// Executes one tool call in session context and persists tool_call/tool_result events.
     public func invokeTool(
         agentID: String,
@@ -706,6 +721,7 @@ public actor CoreService {
         await sessionOrchestrator.updateAgentsRootURL(agentsRootURL)
         await toolsAuthorization.updateAgentsRootURL(agentsRootURL)
         toolExecution.updateWorkspaceRootURL(workspaceRootURL)
+        systemLogStore.updateWorkspaceRootURL(workspaceRootURL)
         let resolvedModels = CoreModelProviderFactory.resolveModelIdentifiers(config: config)
         let modelProvider = CoreModelProviderFactory.buildModelProvider(config: config, resolvedModels: resolvedModels)
         let defaultModel = modelProvider?.models.first ?? resolvedModels.first

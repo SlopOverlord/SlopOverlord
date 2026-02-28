@@ -20,6 +20,7 @@ export interface CoreApi {
   fetchArtifact: (id: string) => Promise<AnyRecord | null>;
   fetchRuntimeConfig: () => Promise<AnyRecord | null>;
   updateRuntimeConfig: (config: AnyRecord) => Promise<AnyRecord | null>;
+  fetchSystemLogs: () => Promise<AnyRecord | null>;
   fetchOpenAIModels: (payload: AnyRecord) => Promise<AnyRecord | null>;
   fetchOpenAIProviderStatus: () => Promise<AnyRecord | null>;
   fetchAgents: () => Promise<AnyRecord[] | null>;
@@ -125,6 +126,16 @@ export function createCoreApi(): CoreApi {
         path: "/v1/config",
         method: "PUT",
         body: config
+      });
+      if (!response.ok) {
+        return null;
+      }
+      return response.data;
+    },
+
+    fetchSystemLogs: async () => {
+      const response = await requestJson<AnyRecord>({
+        path: "/v1/logs"
       });
       if (!response.ok) {
         return null;

@@ -9,6 +9,7 @@ import { ConfigView } from "./views/ConfigView";
 import { PlaceholderView } from "./views/PlaceholderView";
 import { ProjectsView } from "./views/ProjectsView";
 import { RuntimeOverviewView } from "./views/RuntimeOverviewView";
+import { LogsView } from "./views/LogsView";
 
 interface SidebarItem {
   id: string;
@@ -120,7 +121,7 @@ export function App() {
     {
       id: "logs",
       label: { icon: "LG", title: "Logs" },
-      content: <PlaceholderView title="Logs" />
+      content: <LogsView coreApi={dependencies.coreApi} />
     }
   ];
 

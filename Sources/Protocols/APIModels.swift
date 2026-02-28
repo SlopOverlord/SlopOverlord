@@ -36,6 +36,50 @@ public struct ArtifactContentResponse: Codable, Sendable {
     }
 }
 
+public enum SystemLogLevel: String, Codable, Sendable, Equatable, CaseIterable {
+    case trace
+    case debug
+    case info
+    case warning
+    case error
+    case fatal
+}
+
+public struct SystemLogEntry: Codable, Sendable, Equatable {
+    public var timestamp: Date
+    public var level: SystemLogLevel
+    public var label: String
+    public var message: String
+    public var source: String
+    public var metadata: [String: String]
+
+    public init(
+        timestamp: Date,
+        level: SystemLogLevel,
+        label: String,
+        message: String,
+        source: String = "",
+        metadata: [String: String] = [:]
+    ) {
+        self.timestamp = timestamp
+        self.level = level
+        self.label = label
+        self.message = message
+        self.source = source
+        self.metadata = metadata
+    }
+}
+
+public struct SystemLogsResponse: Codable, Sendable, Equatable {
+    public var filePath: String
+    public var entries: [SystemLogEntry]
+
+    public init(filePath: String, entries: [SystemLogEntry]) {
+        self.filePath = filePath
+        self.entries = entries
+    }
+}
+
 public struct AgentCreateRequest: Codable, Sendable {
     public var id: String
     public var displayName: String

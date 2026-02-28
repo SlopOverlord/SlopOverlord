@@ -129,8 +129,14 @@ public actor RuntimeSystem {
         }
 
         do {
+            let contextualPrompt = await buildContextualPrompt(
+                channelId: channelId,
+                fallbackUserMessage: userMessage
+            )
+
             if let toolInvoker {
-                var currentPrompt = userMessage
+                let basePrompt = contextualPrompt
+                var currentPrompt = basePrompt
                 let maxToolSteps = 8
 
                 for _ in 0..<maxToolSteps {
@@ -146,9 +152,9 @@ public actor RuntimeSystem {
                         let resultJSON = encodedToolResult(result)
                         currentPrompt =
                             """
-                            User request:
-                            \(userMessage)
+                            \(basePrompt)
 
+                            [tool_loop_v1]
                             Previous tool call:
                             \(trimmed)
 
@@ -178,7 +184,7 @@ public actor RuntimeSystem {
             }
 
             var latest = ""
-            let stream = modelProvider.stream(model: defaultModel, prompt: userMessage, maxTokens: 1024)
+            let stream = modelProvider.stream(model: defaultModel, prompt: contextualPrompt, maxTokens: 1024)
             for try await partial in stream {
                 latest = partial
                 if let onResponseChunk {
@@ -195,7 +201,7 @@ public actor RuntimeSystem {
             if latest.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 latest = try await modelProvider.complete(
                     model: defaultModel,
-                    prompt: userMessage,
+                    prompt: contextualPrompt,
                     maxTokens: 1024
                 )
                 if let onResponseChunk {
@@ -214,6 +220,35 @@ public actor RuntimeSystem {
                 content: text
             )
         }
+    }
+
+    private func buildContextualPrompt(channelId: String, fallbackUserMessage: String) async -> String {
+        guard let snapshot = await channels.snapshot(channelId: channelId), !snapshot.messages.isEmpty else {
+            return fallbackUserMessage
+        }
+
+        var lines: [String] = [
+            "[channel_context_v1]",
+            "Use the conversation context below to answer the latest user request.",
+            ""
+        ]
+
+        for message in snapshot.messages.suffix(80) {
+            let role: String
+            if message.userId == "system" {
+                role = "system"
+            } else if message.userId == "agent" || message.userId == "assistant" {
+                role = "assistant"
+            } else {
+                role = "user"
+            }
+
+            lines.append("[\(role)]")
+            lines.append(message.content)
+            lines.append("")
+        }
+
+        return lines.joined(separator: "\n")
     }
 
     private func parseToolCall(from raw: String) -> ToolInvocationRequest? {
