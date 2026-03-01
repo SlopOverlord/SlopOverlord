@@ -224,19 +224,7 @@ function AgentChatComposer({
   const canSend = String(inputText || "").trim().length > 0 || pendingFiles.length > 0;
 
   return (
-    <form className="agent-chat-compose" onSubmit={onSend}>
-      <input
-        ref={fileInputRef}
-        type="file"
-        multiple
-        className="agent-chat-file-input"
-        onChange={(event) => {
-          onAddFiles(event.target.files);
-          event.target.value = "";
-        }}
-        disabled={isSending}
-      />
-
+    <>
       {replyTarget ? (
         <div className="agent-chat-reply-target">
           <span className="material-symbols-rounded" aria-hidden="true">
@@ -251,7 +239,20 @@ function AgentChatComposer({
         </div>
       ) : null}
 
-      {pendingFiles.length > 0 ? (
+      <form className="agent-chat-compose" onSubmit={onSend}>
+        <input
+          ref={fileInputRef}
+          type="file"
+          multiple
+          className="agent-chat-file-input"
+          onChange={(event) => {
+            onAddFiles(event.target.files);
+            event.target.value = "";
+          }}
+          disabled={isSending}
+        />
+
+        {pendingFiles.length > 0 ? (
         <div className="agent-chat-pending-files">
           {pendingFiles.map((file, index) => (
             <button key={`${file.name}-${index}`} type="button" onClick={() => onRemovePendingFile(index)}>
@@ -336,6 +337,7 @@ function AgentChatComposer({
         </div>
       </div>
     </form>
+    </>
   );
 }
 

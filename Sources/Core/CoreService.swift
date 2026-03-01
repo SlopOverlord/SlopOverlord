@@ -385,19 +385,23 @@ public actor CoreService {
         }
 
         let now = Date()
+        let normalizedStatus = try normalizeTaskStatus(request.status)
         project.tasks.append(
             ProjectTask(
                 id: UUID().uuidString,
                 title: try normalizeTaskTitle(request.title),
                 description: normalizeTaskDescription(request.description),
                 priority: try normalizeTaskPriority(request.priority),
-                status: try normalizeTaskStatus(request.status),
+                status: normalizedStatus,
                 createdAt: now,
                 updatedAt: now
             )
         )
         project.updatedAt = now
         await store.saveProject(project)
+        if normalizedStatus == "ready" {
+            _ = await triggerVisorBulletin()
+        }
         return project
     }
 
@@ -420,6 +424,7 @@ public actor CoreService {
             throw ProjectError.notFound
         }
 
+        let previousStatus = project.tasks[taskIndex].status
         var task = project.tasks[taskIndex]
         if let title = request.title {
             task.title = try normalizeTaskTitle(title)
@@ -437,6 +442,9 @@ public actor CoreService {
         project.tasks[taskIndex] = task
         project.updatedAt = Date()
         await store.saveProject(project)
+        if previousStatus != "ready", task.status == "ready" {
+            _ = await triggerVisorBulletin()
+        }
         return project
     }
 

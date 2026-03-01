@@ -941,12 +941,9 @@ body.mobile-menu-open {
   padding-bottom: 10px;
 }
 
-.projects-head:has(button:only-child) {
-  justify-content: flex-end;
-}
-
 .projects-head h2 {
   margin: 0;
+  font-size: 1.08rem;
 }
 
 .project-new-action {

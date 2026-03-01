@@ -14,6 +14,7 @@ public actor SQLiteStore: PersistenceStore {
     private var db: OpaquePointer?
 #endif
     private let isoFormatter = ISO8601DateFormatter()
+    private let fallbackProjectsFileURL: URL
 
     private var fallbackEvents: [EventEnvelope] = []
     private var fallbackBulletins: [MemoryBulletin] = []
@@ -21,7 +22,12 @@ public actor SQLiteStore: PersistenceStore {
     private var fallbackProjects: [String: ProjectRecord] = [:]
 
     /// Creates a persistence store and applies schema when SQLite is available.
-    public init(path: String, schemaSQL: String) {
+    public init(path: String, schemaSQL: String, fallbackProjectsPath: String? = nil) {
+        fallbackProjectsFileURL = Self.resolveFallbackProjectsFileURL(
+            sqlitePath: path,
+            explicitPath: fallbackProjectsPath
+        )
+        fallbackProjects = Self.loadFallbackProjects(from: fallbackProjectsFileURL)
 #if canImport(SQLite3)
         let directory = URL(fileURLWithPath: path).deletingLastPathComponent().path
         try? FileManager.default.createDirectory(
@@ -338,9 +344,6 @@ public actor SQLiteStore: PersistenceStore {
             )
         }
 
-        if result.isEmpty {
-            return fallbackProjects.values.sorted { $0.createdAt < $1.createdAt }
-        }
         return result
 #else
         return fallbackProjects.values.sorted { $0.createdAt < $1.createdAt }
@@ -384,6 +387,7 @@ public actor SQLiteStore: PersistenceStore {
                     updatedAt: updatedAt
                 )
             }
+            return nil
         }
 #endif
         return fallbackProjects[id]
@@ -391,6 +395,7 @@ public actor SQLiteStore: PersistenceStore {
 
     public func saveProject(_ project: ProjectRecord) async {
         fallbackProjects[project.id] = project
+        persistFallbackProjectsToDisk()
 #if canImport(SQLite3)
         guard let db else {
             return
@@ -484,6 +489,7 @@ public actor SQLiteStore: PersistenceStore {
 
     public func deleteProject(id: String) async {
         fallbackProjects[id] = nil
+        persistFallbackProjectsToDisk()
 #if canImport(SQLite3)
         guard let db else {
             return
@@ -504,6 +510,75 @@ public actor SQLiteStore: PersistenceStore {
         bindText(id, at: 1, statement: statement)
         _ = sqlite3_step(statement)
 #endif
+    }
+
+    private func persistFallbackProjectsToDisk() {
+        let projects = fallbackProjects.values.sorted { left, right in
+            left.createdAt < right.createdAt
+        }
+
+        let parentDirectory = fallbackProjectsFileURL.deletingLastPathComponent()
+        try? FileManager.default.createDirectory(
+            at: parentDirectory,
+            withIntermediateDirectories: true
+        )
+
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        encoder.outputFormatting = [.sortedKeys]
+        guard let payload = try? encoder.encode(projects) else {
+            return
+        }
+
+        try? payload.write(to: fallbackProjectsFileURL, options: .atomic)
+    }
+
+    private static func resolveFallbackProjectsFileURL(
+        sqlitePath: String,
+        explicitPath: String?
+    ) -> URL {
+        if let explicitPath {
+            let trimmed = explicitPath.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !trimmed.isEmpty {
+                return URL(fileURLWithPath: trimmed)
+            }
+        }
+
+        let fileManager = FileManager.default
+        let sqliteDirectory = URL(fileURLWithPath: sqlitePath).deletingLastPathComponent().path
+        let sqliteFileName = URL(fileURLWithPath: sqlitePath).lastPathComponent
+        let fallbackFileName: String
+        if sqliteFileName.isEmpty {
+            fallbackFileName = "dashboard-projects-fallback.json"
+        } else {
+            fallbackFileName = "\(sqliteFileName).dashboard-projects-fallback.json"
+        }
+        if fileManager.isWritableFile(atPath: sqliteDirectory) {
+            return URL(fileURLWithPath: sqliteDirectory, isDirectory: true)
+                .appendingPathComponent(fallbackFileName)
+        }
+
+        let dataDirectory = URL(fileURLWithPath: fileManager.currentDirectoryPath, isDirectory: true)
+            .appendingPathComponent(".data", isDirectory: true)
+        return dataDirectory.appendingPathComponent(fallbackFileName)
+    }
+
+    private static func loadFallbackProjects(from fileURL: URL) -> [String: ProjectRecord] {
+        guard let payload = try? Data(contentsOf: fileURL) else {
+            return [:]
+        }
+
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        guard let decoded = try? decoder.decode([ProjectRecord].self, from: payload) else {
+            return [:]
+        }
+
+        var map: [String: ProjectRecord] = [:]
+        for project in decoded {
+            map[project.id] = project
+        }
+        return map
     }
 
 #if canImport(SQLite3)

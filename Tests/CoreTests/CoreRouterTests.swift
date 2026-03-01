@@ -163,6 +163,64 @@ func projectCrudEndpoints() async throws {
 }
 
 @Test
+func projectTaskReadyStatusTriggersVisorBulletin() async throws {
+    let sqlitePath = FileManager.default.temporaryDirectory
+        .appendingPathComponent("core-project-ready-bulletin-\(UUID().uuidString).sqlite")
+        .path
+
+    var config = CoreConfig.default
+    config.sqlitePath = sqlitePath
+
+    let service = CoreService(config: config)
+    let router = CoreRouter(service: service)
+
+    let projectID = "ready-bulletin-\(UUID().uuidString)"
+    let createProjectBody = try JSONEncoder().encode(
+        ProjectCreateRequest(
+            id: projectID,
+            name: "Ready Bulletin Project",
+            description: "Triggers visor when task becomes ready",
+            channels: [.init(title: "General", channelId: "general")]
+        )
+    )
+    let createProjectResponse = await router.handle(method: "POST", path: "/v1/projects", body: createProjectBody)
+    #expect(createProjectResponse.status == 201)
+
+    let createTaskBody = try JSONEncoder().encode(
+        ProjectTaskCreateRequest(
+            title: "Prepare execution",
+            description: "Move task into ready queue.",
+            priority: "medium",
+            status: "backlog"
+        )
+    )
+    let createTaskResponse = await router.handle(
+        method: "POST",
+        path: "/v1/projects/\(projectID)/tasks",
+        body: createTaskBody
+    )
+    #expect(createTaskResponse.status == 200)
+
+    let decoder = JSONDecoder()
+    decoder.dateDecodingStrategy = .iso8601
+    let projectWithTask = try decoder.decode(ProjectRecord.self, from: createTaskResponse.body)
+    let taskID = try #require(projectWithTask.tasks.first?.id)
+
+    let updateTaskBody = try JSONEncoder().encode(ProjectTaskUpdateRequest(status: "ready"))
+    let updateTaskResponse = await router.handle(
+        method: "PATCH",
+        path: "/v1/projects/\(projectID)/tasks/\(taskID)",
+        body: updateTaskBody
+    )
+    #expect(updateTaskResponse.status == 200)
+
+    let bulletinsResponse = await router.handle(method: "GET", path: "/v1/bulletins", body: nil)
+    #expect(bulletinsResponse.status == 200)
+    let bulletins = try decoder.decode([MemoryBulletin].self, from: bulletinsResponse.body)
+    #expect(!bulletins.isEmpty)
+}
+
+@Test
 func openAIModelsEndpoint() async throws {
     let service = CoreService(config: .default)
     let router = CoreRouter(service: service)
@@ -275,6 +333,53 @@ func serviceSupportsInMemoryPersistenceBuilder() async throws {
     let response = await router.handle(method: "POST", path: "/v1/channels/general/messages", body: body)
     #expect(response.status == 200)
     #expect(!FileManager.default.fileExists(atPath: sqlitePath))
+}
+
+@Test
+func sqliteStoreFallbackProjectsPersistAcrossRestartWhenSQLiteUnavailable() async throws {
+    let fixtureDirectory = FileManager.default.temporaryDirectory
+        .appendingPathComponent("core-sqlite-fallback-\(UUID().uuidString)", isDirectory: true)
+    try FileManager.default.createDirectory(at: fixtureDirectory, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: fixtureDirectory) }
+
+    let fallbackProjectsPath = fixtureDirectory.appendingPathComponent("projects-fallback.json").path
+    let unavailableSQLitePath = fixtureDirectory.path
+
+    let createdAt = Date()
+    let project = ProjectRecord(
+        id: "persisted-fallback-project",
+        name: "Fallback Project",
+        description: "Should survive store restart when SQLite is unavailable.",
+        channels: [
+            .init(
+                id: "main-channel",
+                title: "Main",
+                channelId: "fallback-main",
+                createdAt: createdAt
+            )
+        ],
+        tasks: [],
+        createdAt: createdAt,
+        updatedAt: createdAt
+    )
+
+    let firstStore = SQLiteStore(
+        path: unavailableSQLitePath,
+        schemaSQL: "",
+        fallbackProjectsPath: fallbackProjectsPath
+    )
+    await firstStore.saveProject(project)
+
+    let restartedStore = SQLiteStore(
+        path: unavailableSQLitePath,
+        schemaSQL: "",
+        fallbackProjectsPath: fallbackProjectsPath
+    )
+    let projects = await restartedStore.listProjects()
+
+    #expect(projects.count == 1)
+    #expect(projects.first?.id == project.id)
+    #expect(projects.first?.name == "Fallback Project")
 }
 
 @Test

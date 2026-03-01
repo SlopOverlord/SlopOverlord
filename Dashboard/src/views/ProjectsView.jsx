@@ -1703,6 +1703,7 @@ export function ProjectsView({
     <main className="projects-shell">
       {projects.length > 0 && (
         <div className="projects-head">
+          <h2>Projects</h2>
           <button type="button" className="project-new-action" onClick={openCreateProjectModal}>
             New Project
           </button>
