@@ -9,7 +9,8 @@ import Testing
 
 private struct SSEMalformedResponseError: Error {}
 
-private final class SSEDataCollector: NSObject, URLSessionDataDelegate {
+private final class SSEDataCollector: NSObject, @unchecked Sendable, URLSessionDataDelegate {
+    private let lock = NSLock()
     private var receivedData = Data()
     private var httpResponse: HTTPURLResponse?
     private var continuation: CheckedContinuation<(HTTPURLResponse, Data), Error>?
@@ -17,40 +18,61 @@ private final class SSEDataCollector: NSObject, URLSessionDataDelegate {
 
     func start(request: URLRequest) async throws -> (HTTPURLResponse, Data) {
         try await withCheckedThrowingContinuation { continuation in
+            lock.lock()
             self.continuation = continuation
+            lock.unlock()
             let session = URLSession(configuration: .default, delegate: self, delegateQueue: nil)
+            lock.lock()
             self.task = session.dataTask(with: request)
+            lock.unlock()
             self.task?.resume()
             session.finishTasksAndInvalidate()
         }
     }
 
     func urlSession(_ session: URLSession, dataTask: URLSessionDataTask, didReceive data: Data) {
+        lock.lock()
         receivedData.append(data)
-        if let response = httpResponse, receivedData.count > 0 {
-            let text = String(data: receivedData, encoding: .utf8) ?? ""
-            if text.contains("data: "), let continuation = continuation {
-                self.continuation = nil
-                dataTask.cancel()
-                continuation.resume(returning: (response, receivedData))
+        let response = httpResponse
+        let count = receivedData.count
+        let dataCopy = receivedData
+        lock.unlock()
+        if let response = response, count > 0 {
+            let text = String(data: dataCopy, encoding: .utf8) ?? ""
+            if text.contains("data: ") {
+                lock.lock()
+                let cont = continuation
+                continuation = nil
+                lock.unlock()
+                if let cont = cont {
+                    dataTask.cancel()
+                    cont.resume(returning: (response, dataCopy))
+                }
             }
         }
     }
 
     func urlSession(_ session: URLSession, dataTask: URLSessionDataTask, didReceive response: URLResponse, completionHandler: @escaping (URLSession.ResponseDisposition) -> Void) {
+        lock.lock()
         httpResponse = response as? HTTPURLResponse
+        lock.unlock()
         completionHandler(.allow)
     }
 
     func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
-        guard let continuation = continuation else { return }
-        self.continuation = nil
+        lock.lock()
+        let cont = continuation
+        continuation = nil
+        let response = httpResponse
+        let data = receivedData
+        lock.unlock()
+        guard let cont = cont else { return }
         if let error = error {
-            continuation.resume(throwing: error)
-        } else if let response = httpResponse {
-            continuation.resume(returning: (response, receivedData))
+            cont.resume(throwing: error)
+        } else if let response = response {
+            cont.resume(returning: (response, data))
         } else {
-            continuation.resume(throwing: SSEMalformedResponseError())
+            cont.resume(throwing: SSEMalformedResponseError())
         }
     }
 }
