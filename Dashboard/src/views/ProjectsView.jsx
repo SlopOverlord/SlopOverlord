@@ -1089,13 +1089,14 @@ export function ProjectsView({
   }
 
   function openEditTaskModal(task) {
+    const resolvedActorId = task.claimedActorId || task.actorId || "";
     setEditingTask(task);
     setEditDraft({
       title: task.title,
       description: task.description || "",
       priority: task.priority,
       status: task.status,
-      actorId: task.actorId || "",
+      actorId: resolvedActorId,
       teamId: task.teamId || ""
     });
   }

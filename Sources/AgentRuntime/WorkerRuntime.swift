@@ -107,8 +107,13 @@ public actor WorkerRuntime {
 
         switch state.spec.mode {
         case .fireAndForget:
-            let summary = "Completed objective: \(state.spec.objective)"
-            _ = await completeNow(workerId: workerId, summary: summary)
+            let executionResult = executeFireAndForgetObjective(spec: state.spec)
+            switch executionResult {
+            case .success(let summary):
+                _ = await completeNow(workerId: workerId, summary: summary)
+            case .failure(let error):
+                await fail(workerId: workerId, error: "Fire-and-forget execution failed: \(error.localizedDescription)")
+            }
         case .interactive:
             state.status = .waitingInput
             state.latestReport = "waiting_for_route"
@@ -254,5 +259,105 @@ public actor WorkerRuntime {
             payload: .object(payload)
         )
         await eventBus.publish(envelope)
+    }
+
+    private func executeFireAndForgetObjective(spec: WorkerTaskSpec) -> Result<String, Error> {
+        if let summary = executeCreateFileObjective(spec: spec) {
+            return .success(summary)
+        }
+        return .success("Completed objective: \(spec.objective)")
+    }
+
+    private func executeCreateFileObjective(spec: WorkerTaskSpec) -> String? {
+        let objective = spec.objective
+        guard let text = extractFileText(from: objective),
+              let artifactsDirectory = extractArtifactsDirectory(from: objective)
+        else {
+            return nil
+        }
+
+        let filename = extractRequestedFilename(from: objective) ?? "artifact-\(UUID().uuidString.prefix(8)).txt"
+        let sanitizedFilename = sanitizeFilename(String(filename))
+        let directoryURL = URL(fileURLWithPath: artifactsDirectory, isDirectory: true)
+        let fileURL = directoryURL.appendingPathComponent(sanitizedFilename)
+
+        do {
+            try FileManager.default.createDirectory(at: directoryURL, withIntermediateDirectories: true)
+            try text.write(to: fileURL, atomically: true, encoding: .utf8)
+            return "Created file at \(fileURL.path)\nContent preview: \(String(text.prefix(200)))"
+        } catch {
+            return "Completed objective: \(objective)\nFile write failed at \(fileURL.path): \(error.localizedDescription)"
+        }
+    }
+
+    private func extractArtifactsDirectory(from objective: String) -> String? {
+        if let value = captureGroup(
+            source: objective,
+            pattern: #"(?im)^-\s*Store all created files and artifacts under:\s*(.+?)\s*$"#
+        ) {
+            return value.trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        if let fallback = captureGroup(source: objective, pattern: #"(/[^ \n\t]+/artifacts)\b"#) {
+            return fallback.trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        return nil
+    }
+
+    private func extractFileText(from objective: String) -> String? {
+        let patterns = [
+            #"(?is)create\s+file(?:\s+named\s+[A-Za-z0-9._-]+)?\s+with\s+text\s*["“](.+?)["”]"#,
+            #"(?is)create\s+file\s*["“](.+?)["”]"#,
+            #"(?is)создай(?:те)?\s+файл(?:\s+с\s+именем\s+[A-Za-z0-9._-]+)?\s+с\s+текстом\s*["«](.+?)["»]"#
+        ]
+        for pattern in patterns {
+            if let value = captureGroup(source: objective, pattern: pattern) {
+                return value
+            }
+        }
+        return nil
+    }
+
+    private func extractRequestedFilename(from objective: String) -> String? {
+        let patterns = [
+            #"(?is)create\s+file\s+named\s+([A-Za-z0-9._-]+)"#,
+            #"(?is)создай(?:те)?\s+файл\s+с\s+именем\s+([A-Za-z0-9._-]+)"#
+        ]
+        for pattern in patterns {
+            if let value = captureGroup(source: objective, pattern: pattern) {
+                return value
+            }
+        }
+        return nil
+    }
+
+    private func sanitizeFilename(_ value: String) -> String {
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        let allowed = CharacterSet(charactersIn: "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_.")
+        let sanitizedScalars = trimmed.unicodeScalars.map { scalar -> Character in
+            allowed.contains(scalar) ? Character(scalar) : "-"
+        }
+        let sanitized = String(sanitizedScalars).trimmingCharacters(in: CharacterSet(charactersIn: "-."))
+        if sanitized.isEmpty {
+            return "artifact-\(UUID().uuidString.prefix(8)).txt"
+        }
+        return sanitized
+    }
+
+    private func captureGroup(source: String, pattern: String) -> String? {
+        guard let regex = try? NSRegularExpression(pattern: pattern) else {
+            return nil
+        }
+        let nsSource = source as NSString
+        let range = NSRange(location: 0, length: nsSource.length)
+        guard let match = regex.firstMatch(in: source, options: [], range: range),
+              match.numberOfRanges > 1
+        else {
+            return nil
+        }
+        let groupRange = match.range(at: 1)
+        guard groupRange.location != NSNotFound else {
+            return nil
+        }
+        return nsSource.substring(with: groupRange)
     }
 }

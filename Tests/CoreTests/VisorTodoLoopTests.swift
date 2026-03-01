@@ -165,6 +165,241 @@ func naturalLanguagePickUpCommandApprovesByIndex() async throws {
 }
 
 @Test
+func readyTaskClaimsAssignedActorAndPersistsProjectArtifactsAndLogs() async throws {
+    let workspaceName = "workspace-visor-artifacts-\(UUID().uuidString)"
+    let sqlitePath = FileManager.default.temporaryDirectory
+        .appendingPathComponent("core-visor-artifacts-\(UUID().uuidString).sqlite")
+        .path
+    var config = CoreConfig.default
+    config.workspace = .init(name: workspaceName, basePath: FileManager.default.temporaryDirectory.path)
+    config.sqlitePath = sqlitePath
+
+    let service = CoreService(config: config)
+    let router = CoreRouter(service: service)
+    let projectID = "visor-artifacts-\(UUID().uuidString)"
+
+    try await createAgent(router: router, id: "builder")
+    try await updateActorBoard(
+        router: router,
+        nodes: [
+            ActorNode(
+                id: "human:dispatcher",
+                displayName: "Dispatcher",
+                kind: .human,
+                channelId: "general"
+            ),
+            ActorNode(
+                id: "agent:builder",
+                displayName: "Builder",
+                kind: .agent,
+                linkedAgentId: "builder",
+                channelId: "agent:builder"
+            )
+        ],
+        links: [
+            ActorLink(
+                id: "dispatch-builder-task",
+                sourceActorId: "human:dispatcher",
+                targetActorId: "agent:builder",
+                direction: .oneWay,
+                communicationType: .task
+            )
+        ],
+        teams: []
+    )
+
+    try await createProject(router: router, projectID: projectID, channelId: "general")
+    let taskID = try await createTask(
+        router: router,
+        projectID: projectID,
+        title: "Build artifact",
+        status: "backlog",
+        actorId: "agent:builder"
+    )
+
+    let updateBody = try JSONEncoder().encode(ProjectTaskUpdateRequest(status: "ready"))
+    let updateResponse = await router.handle(
+        method: "PATCH",
+        path: "/v1/projects/\(projectID)/tasks/\(taskID)",
+        body: updateBody
+    )
+    #expect(updateResponse.status == 200)
+
+    let doneProject = try await waitForProject(router: router, projectID: projectID, timeoutSeconds: 3) { project in
+        project.tasks.first(where: { $0.id == taskID })?.status == "done"
+    }
+    let doneTask = doneProject?.tasks.first(where: { $0.id == taskID })
+    #expect(doneTask?.claimedActorId == "agent:builder")
+    #expect(doneTask?.claimedAgentId == "builder")
+
+    let projectWorkspace = config
+        .resolvedWorkspaceRootURL()
+        .appendingPathComponent("projects", isDirectory: true)
+        .appendingPathComponent(projectID, isDirectory: true)
+    let artifactsDirectory = projectWorkspace.appendingPathComponent("artifacts", isDirectory: true)
+    let logsDirectory = projectWorkspace.appendingPathComponent("logs", isDirectory: true)
+
+    let artifactFiles = try FileManager.default.contentsOfDirectory(atPath: artifactsDirectory.path)
+    #expect(artifactFiles.contains(where: { $0.hasPrefix("task-\(taskID)-") }))
+
+    let logPath = logsDirectory.appendingPathComponent("task-\(taskID).log").path
+    #expect(FileManager.default.fileExists(atPath: logPath))
+    let logContent = try String(contentsOfFile: logPath, encoding: .utf8)
+    #expect(logContent.contains("stage=worker_spawned"))
+    #expect(logContent.contains("stage=status_synced"))
+}
+
+@Test
+func createFileObjectiveProducesRequestedFileContent() async throws {
+    let workspaceName = "workspace-visor-create-file-\(UUID().uuidString)"
+    let sqlitePath = FileManager.default.temporaryDirectory
+        .appendingPathComponent("core-visor-create-file-\(UUID().uuidString).sqlite")
+        .path
+    var config = CoreConfig.default
+    config.workspace = .init(name: workspaceName, basePath: FileManager.default.temporaryDirectory.path)
+    config.sqlitePath = sqlitePath
+
+    let service = CoreService(config: config)
+    let router = CoreRouter(service: service)
+    let projectID = "visor-create-file-\(UUID().uuidString)"
+
+    try await createAgent(router: router, id: "builder")
+    try await updateActorBoard(
+        router: router,
+        nodes: [
+            ActorNode(
+                id: "human:dispatcher",
+                displayName: "Dispatcher",
+                kind: .human,
+                channelId: "general"
+            ),
+            ActorNode(
+                id: "agent:builder",
+                displayName: "Builder",
+                kind: .agent,
+                linkedAgentId: "builder",
+                channelId: "agent:builder"
+            )
+        ],
+        links: [
+            ActorLink(
+                id: "dispatch-builder-task",
+                sourceActorId: "human:dispatcher",
+                targetActorId: "agent:builder",
+                direction: .oneWay,
+                communicationType: .task
+            )
+        ],
+        teams: []
+    )
+    try await createProject(router: router, projectID: projectID, channelId: "general")
+    let taskID = try await createTask(
+        router: router,
+        projectID: projectID,
+        title: "Create file with text \"Hello world\"",
+        status: "backlog",
+        actorId: "agent:builder"
+    )
+
+    let updateBody = try JSONEncoder().encode(ProjectTaskUpdateRequest(status: "ready"))
+    let updateResponse = await router.handle(
+        method: "PATCH",
+        path: "/v1/projects/\(projectID)/tasks/\(taskID)",
+        body: updateBody
+    )
+    #expect(updateResponse.status == 200)
+
+    let doneProject = try await waitForProject(router: router, projectID: projectID, timeoutSeconds: 3) { project in
+        project.tasks.first(where: { $0.id == taskID })?.status == "done"
+    }
+    let doneTask = doneProject?.tasks.first(where: { $0.id == taskID })
+    let artifactLine = doneTask?.description
+        .components(separatedBy: .newlines)
+        .first(where: { $0.hasPrefix("Artifact: ") })
+    let artifactRelativePath = artifactLine?.replacingOccurrences(of: "Artifact: ", with: "")
+    let artifactAbsolutePath = config.resolvedWorkspaceRootURL().appendingPathComponent(artifactRelativePath ?? "").path
+    #expect(FileManager.default.fileExists(atPath: artifactAbsolutePath))
+    let fileContent = try String(contentsOfFile: artifactAbsolutePath, encoding: .utf8)
+    #expect(fileContent == "Hello world")
+}
+
+@Test
+func taskDelegationRespectsActorBoardTaskLinks() async throws {
+    let router = try makeRouter()
+    let projectID = "visor-route-links-\(UUID().uuidString)"
+    let builderAgentID = "builder-\(UUID().uuidString)"
+    let reviewerAgentID = "reviewer-\(UUID().uuidString)"
+    let builderActorID = "agent:\(builderAgentID)"
+    let reviewerActorID = "agent:\(reviewerAgentID)"
+
+    try await createAgent(router: router, id: builderAgentID)
+    try await createAgent(router: router, id: reviewerAgentID)
+    try await updateActorBoard(
+        router: router,
+        nodes: [
+            ActorNode(
+                id: "human:dispatcher",
+                displayName: "Dispatcher",
+                kind: .human,
+                channelId: "general"
+            ),
+            ActorNode(
+                id: builderActorID,
+                displayName: "Builder",
+                kind: .agent,
+                linkedAgentId: builderAgentID,
+                channelId: builderActorID
+            ),
+            ActorNode(
+                id: reviewerActorID,
+                displayName: "Reviewer",
+                kind: .agent,
+                linkedAgentId: reviewerAgentID,
+                channelId: reviewerActorID
+            )
+        ],
+        links: [
+            ActorLink(
+                id: "dispatch-reviewer-task",
+                sourceActorId: "human:dispatcher",
+                targetActorId: reviewerActorID,
+                direction: .oneWay,
+                communicationType: .task
+            )
+        ],
+        teams: []
+    )
+    try await createProject(router: router, projectID: projectID, channelId: "general")
+
+    let taskID = try await createTask(
+        router: router,
+        projectID: projectID,
+        title: "Route constrained task",
+        status: "backlog",
+        actorId: builderActorID
+    )
+
+    let updateBody = try JSONEncoder().encode(ProjectTaskUpdateRequest(status: "ready"))
+    let updateResponse = await router.handle(
+        method: "PATCH",
+        path: "/v1/projects/\(projectID)/tasks/\(taskID)",
+        body: updateBody
+    )
+    #expect(updateResponse.status == 200)
+
+    let project = try await waitForProject(router: router, projectID: projectID, timeoutSeconds: 2) { project in
+        guard let task = project.tasks.first(where: { $0.id == taskID }) else {
+            return false
+        }
+        return task.status == "ready"
+    }
+    let task = project?.tasks.first(where: { $0.id == taskID })
+    #expect(task?.status == "ready")
+    #expect(task?.claimedActorId == nil)
+    #expect(task?.claimedAgentId == nil)
+}
+
+@Test
 func visorSkipsWhenProjectNotFoundForChannel() async throws {
     let router = try makeRouter()
 
@@ -214,14 +449,18 @@ private func createTask(
     router: CoreRouter,
     projectID: String,
     title: String,
-    status: String
+    status: String,
+    actorId: String? = nil,
+    teamId: String? = nil
 ) async throws -> String {
     let body = try JSONEncoder().encode(
         ProjectTaskCreateRequest(
             title: title,
             description: "Integration test task",
             priority: "medium",
-            status: status
+            status: status,
+            actorId: actorId,
+            teamId: teamId
         )
     )
 
@@ -230,6 +469,37 @@ private func createTask(
 
     let project = try decodeProject(response.body)
     return try #require(project.tasks.last?.id)
+}
+
+private func createAgent(router: CoreRouter, id: String) async throws {
+    let body = try JSONEncoder().encode(
+        AgentCreateRequest(
+            id: id,
+            displayName: id.capitalized,
+            role: "Execution"
+        )
+    )
+    let response = await router.handle(method: "POST", path: "/v1/agents", body: body)
+    #expect(response.status == 201)
+}
+
+private func updateActorBoard(
+    router: CoreRouter,
+    nodes: [ActorNode],
+    links: [ActorLink],
+    teams: [ActorTeam]
+) async throws {
+    let encoder = JSONEncoder()
+    encoder.dateEncodingStrategy = .iso8601
+    let body = try encoder.encode(
+        ActorBoardUpdateRequest(
+            nodes: nodes,
+            links: links,
+            teams: teams
+        )
+    )
+    let response = await router.handle(method: "PUT", path: "/v1/actors/board", body: body)
+    #expect(response.status == 200)
 }
 
 private func decodeProject(_ data: Data) throws -> ProjectRecord {

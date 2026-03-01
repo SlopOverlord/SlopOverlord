@@ -1398,21 +1398,45 @@ public actor CoreService {
             (snapshot.status == .queued || snapshot.status == .running || snapshot.status == .waitingInput)
         }
         guard !hasActiveWorker else {
+            appendTaskLifecycleLog(
+                projectID: project.id,
+                taskID: task.id,
+                stage: "already_running",
+                channelID: resolveExecutionChannelID(project: project, task: task),
+                workerID: workers.first(where: { $0.taskId == task.id })?.workerId,
+                message: "Skipped auto-delegation because task already has an active worker."
+            )
             return
         }
 
         guard let delegation = await resolveTaskDelegation(project: project, task: task) else {
+            let blockedMessage = "Task \(task.id) is ready but no eligible actor route was resolved."
+            if let channelID = resolveExecutionChannelID(project: project, task: task) {
+                await runtime.appendSystemMessage(channelId: channelID, content: blockedMessage)
+            }
+            appendTaskLifecycleLog(
+                projectID: project.id,
+                taskID: task.id,
+                stage: "route_blocked",
+                channelID: resolveExecutionChannelID(project: project, task: task),
+                workerID: nil,
+                message: blockedMessage
+            )
             return
         }
 
         task.claimedActorId = delegation.actorID
         task.claimedAgentId = delegation.agentID
+        if let actorID = delegation.actorID {
+            task.actorId = actorID
+        }
+        let workerObjective = buildWorkerObjective(task: task, projectID: project.id)
         let workerId = await runtime.createWorker(
             spec: WorkerTaskSpec(
                 taskId: task.id,
                 channelId: delegation.channelID,
                 title: task.title,
-                objective: task.description,
+                objective: workerObjective,
                 tools: ["shell", "file", "exec", "browser"],
                 mode: .fireAndForget
             )
@@ -1423,6 +1447,16 @@ public actor CoreService {
         project.tasks[taskIndex] = task
         project.updatedAt = Date()
         await store.saveProject(project)
+        appendTaskLifecycleLog(
+            projectID: project.id,
+            taskID: task.id,
+            stage: "worker_spawned",
+            channelID: delegation.channelID,
+            workerID: workerId,
+            message: "Task delegated.",
+            actorID: delegation.actorID,
+            agentID: delegation.agentID
+        )
 
         logger.info(
             "visor.task.worker_spawned",
@@ -1442,7 +1476,11 @@ public actor CoreService {
         } else {
             delegateMessage = "Task \(task.id) started in channel \(delegation.channelID)."
         }
-        await runtime.appendSystemMessage(channelId: delegation.channelID, content: delegateMessage)
+        let logsPath = projectTaskLogFileURL(projectID: project.id, taskID: task.id).path
+        await runtime.appendSystemMessage(
+            channelId: delegation.channelID,
+            content: "\(delegateMessage) Logs: \(logsPath)"
+        )
     }
 
     private func resolveExecutionChannelID(project: ProjectRecord, task: ProjectTask) -> String? {
@@ -1462,9 +1500,13 @@ public actor CoreService {
     private func resolveTaskDelegation(project: ProjectRecord, task: ProjectTask) async -> TaskDelegation? {
         let board = try? getActorBoard()
         let nodesByID = Dictionary(uniqueKeysWithValues: (board?.nodes ?? []).map { ($0.id, $0) })
+        let routeAllowedActorIDs = routableActorIDs(project: project, task: task, board: board)
 
         let preferredActors = preferredActorIDs(for: task, board: board)
         for actorID in preferredActors {
+            if let routeAllowedActorIDs, !routeAllowedActorIDs.contains(actorID) {
+                continue
+            }
             guard let node = nodesByID[actorID] else {
                 continue
             }
@@ -1488,8 +1530,47 @@ public actor CoreService {
             )
         }
 
+        if !preferredActors.isEmpty {
+            return nil
+        }
+
+        if preferredActors.isEmpty,
+           let routeAllowedActorIDs,
+           !routeAllowedActorIDs.isEmpty {
+            for actorID in routeAllowedActorIDs.sorted() {
+                guard let node = nodesByID[actorID] else {
+                    continue
+                }
+                let channelID = normalizeWhitespace(node.channelId ?? "")
+                let resolvedChannelID: String?
+                if !channelID.isEmpty {
+                    resolvedChannelID = channelID
+                } else {
+                    resolvedChannelID = resolveExecutionChannelID(project: project, task: task)
+                }
+
+                guard let channel = resolvedChannelID else {
+                    continue
+                }
+
+                return TaskDelegation(
+                    actorID: actorID,
+                    agentID: node.linkedAgentId,
+                    channelID: channel
+                )
+            }
+        }
+
         if let fallbackChannelID = resolveExecutionChannelID(project: project, task: task) {
-            return TaskDelegation(actorID: nil, agentID: nil, channelID: fallbackChannelID)
+            let fallbackChannelActor = nodesByID.values
+                .filter { normalizeWhitespace($0.channelId ?? "") == fallbackChannelID }
+                .sorted(by: { $0.createdAt < $1.createdAt })
+                .first
+            return TaskDelegation(
+                actorID: fallbackChannelActor?.id,
+                agentID: fallbackChannelActor?.linkedAgentId,
+                channelID: fallbackChannelID
+            )
         }
         return nil
     }
@@ -1525,12 +1606,80 @@ public actor CoreService {
         return actorIDs
     }
 
+    private func routableActorIDs(
+        project: ProjectRecord,
+        task: ProjectTask,
+        board: ActorBoardSnapshot?
+    ) -> Set<String>? {
+        guard let board else {
+            return nil
+        }
+
+        guard let sourceChannelID = resolveExecutionChannelID(project: project, task: task) else {
+            return nil
+        }
+
+        let sourceActorIDs = board.nodes.compactMap { node -> String? in
+            let nodeChannelID = normalizeWhitespace(node.channelId ?? "")
+            guard nodeChannelID == sourceChannelID else {
+                return nil
+            }
+            return node.id
+        }
+        guard !sourceActorIDs.isEmpty else {
+            return nil
+        }
+
+        var hasTaskRoutes = false
+        var allowed = Set(sourceActorIDs)
+        for sourceActorID in sourceActorIDs {
+            let recipients = routeRecipients(
+                fromActorID: sourceActorID,
+                links: board.links,
+                communicationType: .task
+            )
+            if !recipients.isEmpty {
+                hasTaskRoutes = true
+            }
+            allowed.formUnion(recipients)
+        }
+
+        guard hasTaskRoutes else {
+            return nil
+        }
+        return allowed
+    }
+
+    private func routeRecipients(
+        fromActorID: String,
+        links: [ActorLink],
+        communicationType: ActorCommunicationType
+    ) -> Set<String> {
+        var recipients: Set<String> = []
+
+        for link in links {
+            guard link.communicationType == communicationType else {
+                continue
+            }
+            if link.sourceActorId == fromActorID {
+                recipients.insert(link.targetActorId)
+                continue
+            }
+            if link.direction == .twoWay, link.targetActorId == fromActorID {
+                recipients.insert(link.sourceActorId)
+            }
+        }
+
+        recipients.remove(fromActorID)
+        return recipients
+    }
+
     private struct TeamRetryDelegate {
         let actorID: String
         let agentID: String?
     }
 
-    private func nextTeamRetryDelegate(for task: ProjectTask) async -> TeamRetryDelegate? {
+    private func nextTeamRetryDelegate(project: ProjectRecord, task: ProjectTask) async -> TeamRetryDelegate? {
         guard let teamID = task.teamId else {
             return nil
         }
@@ -1548,8 +1697,12 @@ public actor CoreService {
         }
 
         let nodesByID = Dictionary(uniqueKeysWithValues: (board?.nodes ?? []).map { ($0.id, $0) })
+        let routeAllowedActorIDs = routableActorIDs(project: project, task: task, board: board)
         for nextIndex in (currentIndex + 1)..<team.memberActorIds.count {
             let nextActorID = team.memberActorIds[nextIndex]
+            if let routeAllowedActorIDs, !routeAllowedActorIDs.contains(nextActorID) {
+                continue
+            }
             guard let node = nodesByID[nextActorID] else {
                 continue
             }
@@ -1582,6 +1735,8 @@ public actor CoreService {
         switch event.messageType {
         case .branchSpawned:
             await handleBranchSpawned(event)
+        case .workerProgress:
+            await syncTaskProgressFromWorkerEvent(event: event)
         case .workerCompleted:
             await syncTaskStatusFromWorkerEvent(event: event, nextStatus: "done", failureNote: nil)
         case .workerFailed:
@@ -1706,11 +1861,22 @@ public actor CoreService {
             }
 
             var task = project.tasks[taskIndex]
+            appendTaskLifecycleLog(
+                projectID: project.id,
+                taskID: task.id,
+                stage: event.messageType.rawValue,
+                channelID: event.channelId,
+                workerID: event.workerId,
+                message: failureNote ?? "Worker event received.",
+                actorID: task.claimedActorId,
+                agentID: task.claimedAgentId
+            )
             if event.messageType == .workerFailed,
-               let retryDelegate = await nextTeamRetryDelegate(for: task) {
+               let retryDelegate = await nextTeamRetryDelegate(project: project, task: task) {
                 task.status = "ready"
                 task.claimedActorId = retryDelegate.actorID
                 task.claimedAgentId = retryDelegate.agentID
+                task.actorId = retryDelegate.actorID
                 task.updatedAt = Date()
                 if let failureNote {
                     let timestamp = ISO8601DateFormatter().string(from: event.ts)
@@ -1725,6 +1891,16 @@ public actor CoreService {
                 project.tasks[taskIndex] = task
                 project.updatedAt = Date()
                 await store.saveProject(project)
+                appendTaskLifecycleLog(
+                    projectID: project.id,
+                    taskID: task.id,
+                    stage: "retry_ready",
+                    channelID: event.channelId,
+                    workerID: event.workerId,
+                    message: "Retry scheduled with next team member.",
+                    actorID: retryDelegate.actorID,
+                    agentID: retryDelegate.agentID
+                )
 
                 let retryActor = retryDelegate.agentID ?? retryDelegate.actorID
                 await runtime.appendSystemMessage(
@@ -1735,7 +1911,38 @@ public actor CoreService {
                 return
             }
 
-            task.status = nextStatus
+            var resolvedStatus = nextStatus
+            var completionArtifactPath: String?
+            if event.messageType == .workerCompleted {
+                if let claimedActorID = task.claimedActorId {
+                    task.actorId = claimedActorID
+                }
+                completionArtifactPath = await persistWorkerArtifactForProjectTask(
+                    projectID: project.id,
+                    taskID: task.id,
+                    event: event
+                )
+                if completionArtifactPath == nil {
+                    resolvedStatus = "backlog"
+                    let missingArtifactNote = "Worker completed but no artifact was persisted; task moved back to backlog for manual review."
+                    if task.description.isEmpty {
+                        task.description = missingArtifactNote
+                    } else {
+                        task.description += "\n\n\(missingArtifactNote)"
+                    }
+                } else if let completionArtifactPath {
+                    let completionLine = "Artifact: \(completionArtifactPath)"
+                    if !task.description.contains(completionLine) {
+                        if task.description.isEmpty {
+                            task.description = completionLine
+                        } else {
+                            task.description += "\n\n\(completionLine)"
+                        }
+                    }
+                }
+            }
+
+            task.status = resolvedStatus
             task.updatedAt = Date()
             if let failureNote {
                 let timestamp = ISO8601DateFormatter().string(from: event.ts)
@@ -1749,12 +1956,29 @@ public actor CoreService {
             project.tasks[taskIndex] = task
             project.updatedAt = Date()
             await store.saveProject(project)
+            appendTaskLifecycleLog(
+                projectID: project.id,
+                taskID: task.id,
+                stage: "status_synced",
+                channelID: event.channelId,
+                workerID: event.workerId,
+                message: "Task status set to \(resolvedStatus).",
+                actorID: task.claimedActorId,
+                agentID: task.claimedAgentId,
+                artifactPath: completionArtifactPath
+            )
 
             if event.messageType == .workerCompleted {
                 let completionActor = task.claimedAgentId ?? task.claimedActorId ?? "worker"
+                let completionSuffix: String
+                if let completionArtifactPath {
+                    completionSuffix = " Artifact: \(completionArtifactPath)"
+                } else {
+                    completionSuffix = " Artifact missing; task returned to backlog."
+                }
                 await runtime.appendSystemMessage(
                     channelId: event.channelId,
-                    content: "\(completionActor) completed task \(task.id)."
+                    content: "\(completionActor) completed task \(task.id).\(completionSuffix)"
                 )
             } else if event.messageType == .workerFailed {
                 let failedActor = task.claimedAgentId ?? task.claimedActorId ?? "worker"
@@ -1770,7 +1994,39 @@ public actor CoreService {
                     "project_id": .string(project.id),
                     "task_id": .string(task.id),
                     "event_type": .string(event.messageType.rawValue),
-                    "status": .string(nextStatus)
+                    "status": .string(resolvedStatus)
+                ]
+            )
+            return
+        }
+    }
+
+    private func syncTaskProgressFromWorkerEvent(event: EventEnvelope) async {
+        guard let taskID = event.taskId else {
+            return
+        }
+        let progress = event.payload.objectValue["progress"]?.stringValue ?? "progress"
+
+        let projects = await store.listProjects()
+        for project in projects {
+            guard project.tasks.contains(where: { $0.id == taskID }) else {
+                continue
+            }
+
+            appendTaskLifecycleLog(
+                projectID: project.id,
+                taskID: taskID,
+                stage: "worker_progress",
+                channelID: event.channelId,
+                workerID: event.workerId,
+                message: progress
+            )
+            logger.info(
+                "visor.task.progress",
+                metadata: [
+                    "project_id": .string(project.id),
+                    "task_id": .string(taskID),
+                    "progress": .string(progress)
                 ]
             )
             return
@@ -2054,17 +2310,244 @@ public actor CoreService {
         return separated.trimmingCharacters(in: CharacterSet(charactersIn: "-"))
     }
 
-    private func ensureProjectWorkspaceDirectory(projectID: String) {
-        let projectsRoot = workspaceRootURL.appendingPathComponent("projects", isDirectory: true)
-        let projectDirectory = projectsRoot.appendingPathComponent(projectID, isDirectory: true)
+    private func projectDirectoryURL(projectID: String) -> URL {
+        workspaceRootURL
+            .appendingPathComponent("projects", isDirectory: true)
+            .appendingPathComponent(projectID, isDirectory: true)
+    }
+
+    private func projectArtifactsDirectoryURL(projectID: String) -> URL {
+        projectDirectoryURL(projectID: projectID).appendingPathComponent("artifacts", isDirectory: true)
+    }
+
+    private func projectLogsDirectoryURL(projectID: String) -> URL {
+        projectDirectoryURL(projectID: projectID).appendingPathComponent("logs", isDirectory: true)
+    }
+
+    private func projectTaskLogFileURL(projectID: String, taskID: String) -> URL {
+        projectLogsDirectoryURL(projectID: projectID).appendingPathComponent("task-\(taskID).log")
+    }
+
+    private func relativePathFromWorkspace(_ url: URL) -> String {
+        let workspacePath = workspaceRootURL.path
+        let targetPath = url.path
+        if targetPath.hasPrefix(workspacePath) {
+            let suffix = targetPath.dropFirst(workspacePath.count)
+            return suffix.hasPrefix("/") ? String(suffix.dropFirst()) : String(suffix)
+        }
+        return targetPath
+    }
+
+    private func buildWorkerObjective(task: ProjectTask, projectID: String) -> String {
+        var bodyLines: [String] = [
+            "Task title: \(task.title)"
+        ]
+        if !task.description.isEmpty {
+            bodyLines.append("")
+            bodyLines.append("Task details:")
+            bodyLines.append(task.description)
+        }
+        let artifactDirectory = projectArtifactsDirectoryURL(projectID: projectID).path
+        let objective = [
+            bodyLines.joined(separator: "\n"),
+            "",
+            "Execution policy:",
+            "- Store all created files and artifacts under: \(artifactDirectory)",
+            "- Keep completion output concise and reference produced artifact paths."
+        ].joined(separator: "\n")
+        return normalizeTaskDescription(objective)
+    }
+
+    private func appendTaskLifecycleLog(
+        projectID: String,
+        taskID: String,
+        stage: String,
+        channelID: String?,
+        workerID: String?,
+        message: String,
+        actorID: String? = nil,
+        agentID: String? = nil,
+        artifactPath: String? = nil
+    ) {
+        ensureProjectWorkspaceDirectory(projectID: projectID)
+        let logURL = projectTaskLogFileURL(projectID: projectID, taskID: taskID)
+        let timestamp = ISO8601DateFormatter().string(from: Date())
+        let safeStage = normalizeWhitespace(stage)
+        let safeMessage = normalizeWhitespace(message)
+
+        var line = "[\(timestamp)] stage=\(safeStage)"
+        line += " task=\(taskID)"
+        if let channelID, !channelID.isEmpty {
+            line += " channel=\(channelID)"
+        }
+        if let workerID, !workerID.isEmpty {
+            line += " worker=\(workerID)"
+        }
+        if let actorID, !actorID.isEmpty {
+            line += " actor=\(actorID)"
+        }
+        if let agentID, !agentID.isEmpty {
+            line += " agent=\(agentID)"
+        }
+        if let artifactPath, !artifactPath.isEmpty {
+            line += " artifact=\(artifactPath)"
+        }
+        line += " message=\(safeMessage)\n"
+
+        let payload = Data(line.utf8)
+        if FileManager.default.fileExists(atPath: logURL.path) {
+            do {
+                let handle = try FileHandle(forWritingTo: logURL)
+                try handle.seekToEnd()
+                try handle.write(contentsOf: payload)
+                try handle.close()
+                return
+            } catch {
+                logger.warning(
+                    "visor.task.log_append_failed",
+                    metadata: [
+                        "project_id": .string(projectID),
+                        "task_id": .string(taskID),
+                        "path": .string(logURL.path)
+                    ]
+                )
+            }
+        }
+
         do {
-            try FileManager.default.createDirectory(at: projectDirectory, withIntermediateDirectories: true)
+            try payload.write(to: logURL, options: .atomic)
+        } catch {
+            logger.warning(
+                "visor.task.log_write_failed",
+                metadata: [
+                    "project_id": .string(projectID),
+                    "task_id": .string(taskID),
+                    "path": .string(logURL.path)
+                ]
+            )
+        }
+    }
+
+    private func persistWorkerArtifactForProjectTask(
+        projectID: String,
+        taskID: String,
+        event: EventEnvelope
+    ) async -> String? {
+        guard let artifactID = event.payload.objectValue["artifactId"]?.stringValue,
+              !artifactID.isEmpty
+        else {
+            appendTaskLifecycleLog(
+                projectID: projectID,
+                taskID: taskID,
+                stage: "artifact_missing_id",
+                channelID: event.channelId,
+                workerID: event.workerId,
+                message: "Worker completed without artifactId."
+            )
+            return nil
+        }
+
+        let artifactContent: String?
+        if let runtimeArtifact = await runtime.artifactContent(id: artifactID) {
+            artifactContent = runtimeArtifact
+            await store.persistArtifact(id: artifactID, content: runtimeArtifact)
+        } else {
+            artifactContent = await store.artifactContent(id: artifactID)
+        }
+
+        guard let artifactContent, !artifactContent.isEmpty else {
+            appendTaskLifecycleLog(
+                projectID: projectID,
+                taskID: taskID,
+                stage: "artifact_missing_content",
+                channelID: event.channelId,
+                workerID: event.workerId,
+                message: "Artifact payload not found for id \(artifactID)."
+            )
+            return nil
+        }
+
+        if let referencedPath = extractCreatedFilePath(from: artifactContent) {
+            let referencedURL = URL(fileURLWithPath: referencedPath)
+            if FileManager.default.fileExists(atPath: referencedURL.path) {
+                let relativePath = relativePathFromWorkspace(referencedURL)
+                appendTaskLifecycleLog(
+                    projectID: projectID,
+                    taskID: taskID,
+                    stage: "artifact_referenced",
+                    channelID: event.channelId,
+                    workerID: event.workerId,
+                    message: "Worker reported created file \(referencedPath).",
+                    artifactPath: relativePath
+                )
+                return relativePath
+            }
+        }
+
+        ensureProjectWorkspaceDirectory(projectID: projectID)
+        let artifactURL = projectArtifactsDirectoryURL(projectID: projectID)
+            .appendingPathComponent("task-\(taskID)-\(artifactID).txt")
+        do {
+            try artifactContent.write(to: artifactURL, atomically: true, encoding: .utf8)
+            let relativePath = relativePathFromWorkspace(artifactURL)
+            appendTaskLifecycleLog(
+                projectID: projectID,
+                taskID: taskID,
+                stage: "artifact_persisted",
+                channelID: event.channelId,
+                workerID: event.workerId,
+                message: "Persisted worker artifact \(artifactID).",
+                artifactPath: relativePath
+            )
+            return relativePath
+        } catch {
+            logger.warning(
+                "visor.task.artifact_write_failed",
+                metadata: [
+                    "project_id": .string(projectID),
+                    "task_id": .string(taskID),
+                    "artifact_id": .string(artifactID),
+                    "path": .string(artifactURL.path)
+                ]
+            )
+            appendTaskLifecycleLog(
+                projectID: projectID,
+                taskID: taskID,
+                stage: "artifact_write_failed",
+                channelID: event.channelId,
+                workerID: event.workerId,
+                message: "Failed to persist artifact \(artifactID)."
+            )
+            return nil
+        }
+    }
+
+    private func extractCreatedFilePath(from content: String) -> String? {
+        if let value = captureGroup(
+            content,
+            pattern: #"(?im)^Created file at\s+(.+?)\s*$"#
+        ) {
+            return value.trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        return nil
+    }
+
+    private func ensureProjectWorkspaceDirectory(projectID: String) {
+        let directories = [
+            projectDirectoryURL(projectID: projectID),
+            projectArtifactsDirectoryURL(projectID: projectID),
+            projectLogsDirectoryURL(projectID: projectID)
+        ]
+        do {
+            for directory in directories {
+                try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+            }
         } catch {
             logger.warning(
                 "visor.project.directory_create_failed",
                 metadata: [
                     "project_id": .string(projectID),
-                    "path": .string(projectDirectory.path)
+                    "path": .string(projectDirectoryURL(projectID: projectID).path)
                 ]
             )
         }
