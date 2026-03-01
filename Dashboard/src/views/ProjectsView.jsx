@@ -792,12 +792,12 @@ export function ProjectsView({
   workers,
   bulletins = [],
   routeProjectId = null,
+  routeProjectTab = "overview",
   onRouteProjectChange = () => {}
 }) {
   const [projects, setProjects] = useState([]);
   const [isLoadingProjects, setIsLoadingProjects] = useState(true);
   const [statusText, setStatusText] = useState("Loading projects...");
-  const [selectedTab, setSelectedTab] = useState("overview");
   const [chatSnapshots, setChatSnapshots] = useState({});
   const [isCreateProjectModalOpen, setIsCreateProjectModalOpen] = useState(false);
   const [projectDraft, setProjectDraft] = useState(() => emptyProjectDraft(1));
@@ -813,6 +813,13 @@ export function ProjectsView({
     () => projects.find((project) => project.id === routeProjectId) || null,
     [projects, routeProjectId]
   );
+  const selectedTab = useMemo(() => {
+    if (!selectedProject) {
+      return "overview";
+    }
+    const candidate = String(routeProjectTab || "").trim().toLowerCase();
+    return PROJECT_TAB_SET.has(candidate) ? candidate : "overview";
+  }, [selectedProject, routeProjectTab]);
 
   useEffect(() => {
     loadProjects().catch(() => {
@@ -855,22 +862,18 @@ export function ProjectsView({
   useEffect(() => {
     if (!selectedProject) {
       setProjectNameDraft("");
-      setSelectedTab("overview");
       return;
     }
 
     setProjectNameDraft(selectedProject.name);
-    if (!PROJECT_TAB_SET.has(selectedTab)) {
-      setSelectedTab("overview");
-    }
-  }, [selectedProject?.id, selectedProject?.name, selectedTab]);
+  }, [selectedProject?.id, selectedProject?.name]);
 
   useEffect(() => {
     if (isLoadingProjects || !routeProjectId) {
       return;
     }
     if (!selectedProject) {
-      onRouteProjectChange(null);
+      onRouteProjectChange(null, null);
       setStatusText("Project not found.");
     }
   }, [isLoadingProjects, routeProjectId, selectedProject, onRouteProjectChange]);
@@ -933,7 +936,7 @@ export function ProjectsView({
     setStatusText(normalized.length > 0 ? `Loaded ${normalized.length} projects from Core` : "No projects yet.");
     setIsLoadingProjects(false);
     if (routeProjectId && !normalized.some((project) => project.id === routeProjectId)) {
-      onRouteProjectChange(null);
+      onRouteProjectChange(null, null);
     }
   }
 
@@ -951,14 +954,12 @@ export function ProjectsView({
     });
   }
 
-  function openProject(projectId) {
-    onRouteProjectChange(projectId);
-    setSelectedTab("overview");
+  function openProject(projectId, projectTab = "overview") {
+    onRouteProjectChange(projectId, projectTab);
   }
 
   function closeProject() {
-    onRouteProjectChange(null);
-    setSelectedTab("overview");
+    onRouteProjectChange(null, null);
   }
 
   function openCreateProjectModal() {
@@ -1015,7 +1016,7 @@ export function ProjectsView({
     }
 
     replaceProjectInState(created);
-    onRouteProjectChange(String(created.id || ""));
+    onRouteProjectChange(String(created.id || ""), "overview");
     closeCreateProjectModal();
     setStatusText(`Project ${displayName} created.`);
   }
@@ -1065,7 +1066,7 @@ export function ProjectsView({
 
     setProjects((previous) => previous.filter((candidate) => candidate.id !== projectId));
     if (routeProjectId === projectId) {
-      onRouteProjectChange(null);
+      onRouteProjectChange(null, null);
     }
     setStatusText(`Project ${project.name} deleted.`);
   }
@@ -1774,7 +1775,7 @@ export function ProjectsView({
               key={tab.id}
               type="button"
               className={`agent-tab ${selectedTab === tab.id ? "active" : ""}`}
-              onClick={() => setSelectedTab(tab.id)}
+              onClick={() => openProject(project.id, tab.id)}
             >
               {tab.title}
             </button>

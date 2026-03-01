@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { createDependencies } from "./app/di/createDependencies";
-import { DEFAULT_AGENT_TAB } from "./app/routing/dashboardRouteAdapter";
+import { DEFAULT_AGENT_TAB, DEFAULT_PROJECT_TAB } from "./app/routing/dashboardRouteAdapter";
 import { useDashboardRoute } from "./app/routing/useDashboardRoute";
 import { SidebarView } from "./components/SidebarView";
 import { useRuntimeOverview } from "./features/runtime-overview/model/useRuntimeOverview";
@@ -62,6 +62,10 @@ export function App() {
     setAgentRoute(agentId, agentTab);
   }
 
+  function onProjectRouteChange(projectId: string | null, projectTab: string | null = DEFAULT_PROJECT_TAB) {
+    setProjectRoute(projectId, projectTab);
+  }
+
   const runtimeContent = (
     <RuntimeOverviewView
       title={route.section === "chats" ? "Chats" : "Overview"}
@@ -93,7 +97,8 @@ export function App() {
           workers={runtime.workers}
           bulletins={runtime.bulletins}
           routeProjectId={route.projectId}
-          onRouteProjectChange={setProjectRoute}
+          routeProjectTab={route.projectTab}
+          onRouteProjectChange={onProjectRouteChange}
         />
       )
     },

@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   DEFAULT_AGENT_TAB,
+  DEFAULT_PROJECT_TAB,
   normalizeAgentTab,
+  normalizeProjectTab,
   normalizeTopLevelSection,
   parseRouteFromPath,
   pushRouteToHistory,
@@ -13,7 +15,7 @@ interface DashboardRouteController {
   route: DashboardRoute;
   setSection: (section: string) => void;
   setConfigSection: (sectionId: string | null) => void;
-  setProjectRoute: (projectId: string | null) => void;
+  setProjectRoute: (projectId: string | null, projectTab?: string | null) => void;
   setAgentRoute: (agentId: string | null, agentTab?: string | null) => void;
 }
 
@@ -29,7 +31,7 @@ export function useDashboardRoute(): DashboardRouteController {
 
   useEffect(() => {
     pushRouteToHistory(route);
-  }, [route.agentId, route.agentTab, route.configSection, route.projectId, route.section]);
+  }, [route.agentId, route.agentTab, route.configSection, route.projectId, route.projectTab, route.section]);
 
   const setSection = useCallback((section: string) => {
     const nextSection = normalizeTopLevelSection(String(section || "").trim());
@@ -46,11 +48,17 @@ export function useDashboardRoute(): DashboardRouteController {
     }));
   }, []);
 
-  const setProjectRoute = useCallback((projectId: string | null) => {
+  const setProjectRoute = useCallback((projectId: string | null, projectTab: string | null = DEFAULT_PROJECT_TAB) => {
+    const normalizedProjectID = typeof projectId === "string" && projectId.trim().length > 0 ? projectId : null;
+    const normalizedProjectTab = normalizedProjectID
+      ? normalizeProjectTab(String(projectTab || DEFAULT_PROJECT_TAB).toLowerCase())
+      : null;
+
     setRoute((current) => ({
       ...current,
       section: "projects",
-      projectId: typeof projectId === "string" && projectId.trim().length > 0 ? projectId : null
+      projectId: normalizedProjectID,
+      projectTab: normalizedProjectTab
     }));
   }, []);
 
