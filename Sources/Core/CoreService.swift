@@ -121,6 +121,7 @@ public actor CoreService {
     private let toolExecution: ToolExecutionService
     private let systemLogStore: SystemLogFileStore
     private let channelDelivery: ChannelDeliveryService
+    private let channelSessionStore: ChannelSessionFileStore
     private let logger: Logger
     private let configPath: String
     private var workspaceRootURL: URL
@@ -153,6 +154,7 @@ public actor CoreService {
         self.systemLogStore = SystemLogFileStore(workspaceRootURL: self.workspaceRootURL)
         self.channelDelivery = ChannelDeliveryService(store: self.store)
         self.actorBoardStore = ActorBoardFileStore(workspaceRootURL: self.workspaceRootURL)
+        self.channelSessionStore = ChannelSessionFileStore(workspaceRootURL: self.workspaceRootURL)
         let orchestratorCatalogStore = AgentCatalogFileStore(agentsRootURL: self.agentsRootURL)
         let orchestratorSessionStore = AgentSessionFileStore(agentsRootURL: self.agentsRootURL)
         self.sessionOrchestrator = AgentSessionOrchestrator(
@@ -168,7 +170,8 @@ public actor CoreService {
             runtime: self.runtime,
             sessionStore: self.sessionStore,
             agentCatalogStore: self.agentCatalogStore,
-            processRegistry: processRegistry
+            processRegistry: processRegistry,
+            channelSessionStore: self.channelSessionStore
         )
         self.logger = Logger(label: "slopoverlord.core.visor")
         self.currentConfig = config
@@ -3441,8 +3444,20 @@ private actor ResponseCollector {
 
 extension CoreService: InboundMessageReceiver {
     /// Called by in-process channel plugins when a message arrives from an external platform.
-    /// Routes through the runtime, collects the response, and delivers it back to the channel plugin.
+    /// Routes through the runtime, collects the response, persists to channel session,
+    /// and delivers it back to the channel plugin.
     public func postMessage(channelId: String, userId: String, content: String) async -> Bool {
+        // Persist user message to channel session
+        do {
+            try await channelSessionStore.recordUserMessage(
+                channelId: channelId,
+                userId: userId,
+                content: content
+            )
+        } catch {
+            logger.warning("Failed to persist user message to channel session: \(error)")
+        }
+
         let request = ChannelMessageRequest(userId: userId, content: content)
         let collector = ResponseCollector()
 
@@ -3459,6 +3474,15 @@ extension CoreService: InboundMessageReceiver {
 
         let reply = await collector.get().trimmingCharacters(in: .whitespacesAndNewlines)
         if !reply.isEmpty {
+            // Persist assistant response to channel session
+            do {
+                try await channelSessionStore.recordAssistantMessage(
+                    channelId: channelId,
+                    content: reply
+                )
+            } catch {
+                logger.warning("Failed to persist assistant message to channel session: \(error)")
+            }
             await channelDelivery.deliver(channelId: channelId, userId: "assistant", content: reply)
         }
         return true

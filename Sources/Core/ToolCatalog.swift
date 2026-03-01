@@ -156,6 +156,13 @@ enum ToolCatalog {
             title: "Conclude discussion",
             status: "fully_functional",
             description: "End an ongoing LLM-to-LLM discussion with another actor, summarizing the outcome."
+        ),
+        .init(
+            id: "channel.history",
+            domain: "channel",
+            title: "Channel history",
+            status: "fully_functional",
+            description: "Read message history for a channel. Parameters: channel_id (string, required), limit (number, optional, default 50)."
         )
     ]
 

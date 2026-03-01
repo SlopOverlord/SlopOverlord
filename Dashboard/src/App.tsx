@@ -25,7 +25,7 @@ export function App() {
   const dependencies = useMemo(() => createDependencies(), []);
   const runtime = useRuntimeOverview(dependencies.coreApi);
   const { route, setSection, setConfigSection, setProjectRoute, setAgentRoute } = useDashboardRoute();
-  const [sidebarCompact, setSidebarCompact] = useState(false);
+  const [sidebarCompact, setSidebarCompact] = useState(true);
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
 
   useEffect(() => {
@@ -103,11 +103,6 @@ export function App() {
       )
     },
     {
-      id: "sessions",
-      label: { icon: "chat", title: "Sessions" },
-      content: <PlaceholderView title="Sessions" />
-    },
-    {
       id: "actors",
       label: { icon: "smart_toy", title: "Actors" },
       content: <ActorsView />
@@ -116,6 +111,11 @@ export function App() {
       id: "agents",
       label: { icon: "support_agent", title: "Agents" },
       content: <AgentsView routeAgentId={route.agentId} routeTab={route.agentTab} onRouteChange={onAgentRouteChange} />
+    },
+    {
+      id: "sessions",
+      label: { icon: "chat", title: "Sessions" },
+      content: <PlaceholderView title="Sessions" />
     },
     {
       id: "nodes",

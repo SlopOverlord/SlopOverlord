@@ -88,6 +88,16 @@ actor TelegramBotAPI {
         return updates
     }
 
+    // MARK: - sendChatAction
+
+    func sendChatAction(chatId: Int64, action: String) async throws {
+        let params: [String: Any] = [
+            "chat_id": chatId,
+            "action": action
+        ]
+        _ = try await post(method: "sendChatAction", params: params)
+    }
+
     // MARK: - sendMessage
 
     struct SendMessageResponse: Decodable {
@@ -96,6 +106,10 @@ actor TelegramBotAPI {
 
     func sendMessage(chatId: Int64, text: String, parseMode: String? = nil) async throws {
         logger.debug("sendMessage: chatId=\(chatId), length=\(text.count)")
+
+        // Show typing indicator so user knows bot is responding
+        try? await sendChatAction(chatId: chatId, action: "typing")
+
         var params: [String: Any] = [
             "chat_id": chatId,
             "text": text

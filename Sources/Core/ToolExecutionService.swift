@@ -8,6 +8,7 @@ final class ToolExecutionService: @unchecked Sendable {
     private let sessionStore: AgentSessionFileStore
     private let agentCatalogStore: AgentCatalogFileStore
     private let processRegistry: SessionProcessRegistry
+    private let channelSessionStore: ChannelSessionFileStore
     private let logger: Logger
     private var workspaceRootURL: URL
 
@@ -17,6 +18,7 @@ final class ToolExecutionService: @unchecked Sendable {
         sessionStore: AgentSessionFileStore,
         agentCatalogStore: AgentCatalogFileStore,
         processRegistry: SessionProcessRegistry,
+        channelSessionStore: ChannelSessionFileStore,
         logger: Logger = Logger(label: "slopoverlord.core.tools")
     ) {
         self.workspaceRootURL = workspaceRootURL
@@ -24,6 +26,7 @@ final class ToolExecutionService: @unchecked Sendable {
         self.sessionStore = sessionStore
         self.agentCatalogStore = agentCatalogStore
         self.processRegistry = processRegistry
+        self.channelSessionStore = channelSessionStore
         self.logger = logger
     }
 
@@ -76,6 +79,8 @@ final class ToolExecutionService: @unchecked Sendable {
             result = await executeSessionsSend(agentID: agentID, defaultSessionID: sessionID, request: request)
         case "agents.list":
             result = executeAgentsList()
+        case "channel.history":
+            result = await executeChannelHistory(request: request)
         case "web.search", "web.fetch", "memory.get", "memory.search", "cron":
             result = unsupportedAdapterResult(tool: toolID)
         default:
@@ -478,6 +483,58 @@ final class ToolExecutionService: @unchecked Sendable {
             return success(tool: "agents.list", data: encodeJSONValue(list))
         } catch {
             return failed(tool: "agents.list", code: "agents_list_failed", message: "Failed to list agents.", retryable: true)
+        }
+    }
+
+    private func executeChannelHistory(request: ToolInvocationRequest) async -> ToolInvocationResult {
+        let args = request.arguments
+        guard case .string(let channelId) = args["channel_id"] else {
+            return failed(
+                tool: "channel.history",
+                code: "missing_channel_id",
+                message: "Missing required parameter 'channel_id'.",
+                retryable: false
+            )
+        }
+
+        let limit: Int
+        if case .number(let n) = args["limit"] {
+            limit = Int(n)
+        } else if case .string(let s) = args["limit"] {
+            limit = Int(s) ?? 50
+        } else {
+            limit = 50
+        }
+
+        do {
+            let history = try await channelSessionStore.getMessageHistory(
+                channelId: channelId,
+                limit: limit
+            )
+
+            let messages: [[String: JSONValue]] = history.map { entry in
+                [
+                    "id": .string(entry.id),
+                    "user_id": .string(entry.userId),
+                    "content": .string(entry.content),
+                    "created_at": .string(ISO8601DateFormatter().string(from: entry.createdAt))
+                ]
+            }
+
+            let result: [String: JSONValue] = [
+                "channel_id": .string(channelId),
+                "messages": .array(messages.map { .object($0) }),
+                "count": .number(Double(history.count))
+            ]
+
+            return success(tool: "channel.history", data: .object(result))
+        } catch {
+            return failed(
+                tool: "channel.history",
+                code: "history_load_failed",
+                message: "Failed to load channel history: \(error.localizedDescription)",
+                retryable: true
+            )
         }
     }
 
