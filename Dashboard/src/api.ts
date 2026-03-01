@@ -24,6 +24,7 @@ export const updateProjectTask = coreApi.updateProjectTask;
 export const deleteProjectTask = coreApi.deleteProjectTask;
 export const fetchAgents = coreApi.fetchAgents;
 export const fetchAgent = coreApi.fetchAgent;
+export const fetchAgentTasks = coreApi.fetchAgentTasks;
 export const createAgent = coreApi.createAgent;
 export const fetchActorsBoard = coreApi.fetchActorsBoard;
 export const updateActorsBoard = coreApi.updateActorsBoard;

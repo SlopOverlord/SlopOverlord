@@ -385,6 +385,20 @@ public actor CoreRouter {
             }
         }
 
+        add(.get, "/v1/agents/:agentId/tasks") { request in
+            let agentId = request.pathParam("agentId") ?? ""
+            do {
+                let tasks = try await service.listAgentTasks(agentID: agentId)
+                return Self.encodable(status: HTTPStatus.ok, payload: tasks)
+            } catch CoreService.AgentStorageError.invalidID {
+                return Self.json(status: HTTPStatus.badRequest, payload: ["error": ErrorCode.invalidAgentId])
+            } catch CoreService.AgentStorageError.notFound {
+                return Self.json(status: HTTPStatus.notFound, payload: ["error": ErrorCode.agentNotFound])
+            } catch {
+                return Self.json(status: HTTPStatus.internalServerError, payload: ["error": ErrorCode.agentNotFound])
+            }
+        }
+
         add(.get, "/v1/agents/:agentId/sessions") { request in
             let agentId = request.pathParam("agentId") ?? ""
             do {

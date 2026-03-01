@@ -59,7 +59,9 @@ function emptyTaskDraft(initialStatus = "backlog") {
     title: "",
     description: "",
     priority: "medium",
-    status: TASK_STATUS_SET.has(initialStatus) ? initialStatus : "backlog"
+    status: TASK_STATUS_SET.has(initialStatus) ? initialStatus : "backlog",
+    actorId: "",
+    teamId: ""
   };
 }
 
@@ -82,6 +84,10 @@ function normalizeTask(task, index = 0) {
     description: String(task?.description || "").trim(),
     status: TASK_STATUS_SET.has(status) ? status : "backlog",
     priority: TASK_PRIORITY_SET.has(priority) ? priority : "medium",
+    actorId: String(task?.actorId || "").trim(),
+    teamId: String(task?.teamId || "").trim(),
+    claimedActorId: String(task?.claimedActorId || "").trim(),
+    claimedAgentId: String(task?.claimedAgentId || "").trim(),
     createdAt: String(task?.createdAt || new Date().toISOString()),
     updatedAt: String(task?.updatedAt || task?.createdAt || new Date().toISOString())
   };
@@ -553,7 +559,7 @@ function ProjectCreateModal({ isOpen, draft, onChange, onClose, onCreate, actors
   );
 }
 
-function ProjectTaskCreateModal({ isOpen, draft, onChange, onClose, onCreate }) {
+function ProjectTaskCreateModal({ isOpen, draft, onChange, onClose, onCreate, actors = [], teams = [] }) {
   if (!isOpen) {
     return null;
   }
@@ -613,6 +619,32 @@ function ProjectTaskCreateModal({ isOpen, draft, onChange, onClose, onCreate }) 
             </label>
           </div>
 
+          <div className="project-task-form-grid">
+            <label>
+              Assign Actor
+              <select value={draft.actorId || ""} onChange={(event) => onChange("actorId", event.target.value)}>
+                <option value="">Unassigned</option>
+                {actors.map((actor) => (
+                  <option key={actor.id} value={actor.id}>
+                    {actor.displayName} ({actor.id})
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <label>
+              Assign Team
+              <select value={draft.teamId || ""} onChange={(event) => onChange("teamId", event.target.value)}>
+                <option value="">Unassigned</option>
+                {teams.map((team) => (
+                  <option key={team.id} value={team.id}>
+                    {team.name} ({team.id})
+                  </option>
+                ))}
+              </select>
+            </label>
+          </div>
+
           <div className="project-modal-actions">
             <button type="button" onClick={onClose}>
               Cancel
@@ -627,7 +659,17 @@ function ProjectTaskCreateModal({ isOpen, draft, onChange, onClose, onCreate }) 
   );
 }
 
-function ProjectTaskEditModal({ isOpen, task, draft, onChange, onClose, onSave, onDelete }) {
+function ProjectTaskEditModal({
+  isOpen,
+  task,
+  draft,
+  onChange,
+  onClose,
+  onSave,
+  onDelete,
+  actors = [],
+  teams = []
+}) {
   if (!isOpen || !task) {
     return null;
   }
@@ -687,6 +729,32 @@ function ProjectTaskEditModal({ isOpen, task, draft, onChange, onClose, onSave, 
                 {TASK_STATUSES.map((status) => (
                   <option key={status.id} value={status.id}>
                     {status.title}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </div>
+
+          <div className="project-task-form-grid">
+            <label>
+              Assign Actor
+              <select value={draft.actorId || ""} onChange={(event) => onChange("actorId", event.target.value)}>
+                <option value="">Unassigned</option>
+                {actors.map((actor) => (
+                  <option key={actor.id} value={actor.id}>
+                    {actor.displayName} ({actor.id})
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <label>
+              Assign Team
+              <select value={draft.teamId || ""} onChange={(event) => onChange("teamId", event.target.value)}>
+                <option value="">Unassigned</option>
+                {teams.map((team) => (
+                  <option key={team.id} value={team.id}>
+                    {team.name} ({team.id})
                   </option>
                 ))}
               </select>
@@ -754,7 +822,8 @@ export function ProjectsView({
   }, []);
 
   useEffect(() => {
-    if (!isCreateProjectModalOpen) {
+    const shouldLoadAssignments = isCreateProjectModalOpen || isCreateTaskModalOpen || Boolean(editingTask);
+    if (!shouldLoadAssignments) {
       return;
     }
     let isCancelled = false;
@@ -781,7 +850,7 @@ export function ProjectsView({
     return () => {
       isCancelled = true;
     };
-  }, [isCreateProjectModalOpen]);
+  }, [isCreateProjectModalOpen, isCreateTaskModalOpen, editingTask]);
 
   useEffect(() => {
     if (!selectedProject) {
@@ -1024,7 +1093,9 @@ export function ProjectsView({
       title: task.title,
       description: task.description || "",
       priority: task.priority,
-      status: task.status
+      status: task.status,
+      actorId: task.actorId || "",
+      teamId: task.teamId || ""
     });
   }
 
@@ -1049,7 +1120,9 @@ export function ProjectsView({
       title,
       description: String(editDraft.description || "").trim(),
       priority: editDraft.priority,
-      status: editDraft.status
+      status: editDraft.status,
+      actorId: String(editDraft.actorId || "").trim() || null,
+      teamId: String(editDraft.teamId || "").trim() || null
     });
     if (!updated) {
       setStatusText("Failed to update task in Core.");
@@ -1097,7 +1170,9 @@ export function ProjectsView({
       title,
       description: String(taskDraft.description || "").trim(),
       priority: taskDraft.priority,
-      status: taskDraft.status
+      status: taskDraft.status,
+      actorId: String(taskDraft.actorId || "").trim() || null,
+      teamId: String(taskDraft.teamId || "").trim() || null
     });
 
     if (!updated) {
@@ -1430,6 +1505,18 @@ export function ProjectsView({
                             <span className={`project-priority-badge ${task.priority}`}>
                               {TASK_PRIORITY_LABELS[task.priority] || "Medium"}
                             </span>
+                            {task.claimedAgentId ? (
+                              <span className="project-task-claim-badge">Agent: {task.claimedAgentId}</span>
+                            ) : null}
+                            {!task.claimedAgentId && task.claimedActorId ? (
+                              <span className="project-task-claim-badge">Actor: {task.claimedActorId}</span>
+                            ) : null}
+                            {!task.claimedAgentId && !task.claimedActorId && task.actorId ? (
+                              <span className="project-task-assignee-badge">Assigned actor: {task.actorId}</span>
+                            ) : null}
+                            {!task.claimedAgentId && !task.claimedActorId && !task.actorId && task.teamId ? (
+                              <span className="project-task-assignee-badge">Assigned team: {task.teamId}</span>
+                            ) : null}
                             <span className="project-task-age">{formatRelativeTime(task.createdAt)}</span>
                           </div>
 
@@ -1732,6 +1819,8 @@ export function ProjectsView({
         onChange={updateTaskDraft}
         onClose={closeCreateTaskModal}
         onCreate={createTask}
+        actors={createModalActors}
+        teams={createModalTeams}
       />
 
       <ProjectTaskEditModal
@@ -1742,6 +1831,8 @@ export function ProjectsView({
         onClose={closeEditTaskModal}
         onSave={saveTaskEdit}
         onDelete={deleteTaskFromModal}
+        actors={createModalActors}
+        teams={createModalTeams}
       />
     </main>
   );

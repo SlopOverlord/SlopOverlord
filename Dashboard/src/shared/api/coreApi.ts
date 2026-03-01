@@ -35,6 +35,7 @@ export interface CoreApi {
   deleteProjectTask: (projectId: string, taskId: string) => Promise<AnyRecord | null>;
   fetchAgents: () => Promise<AnyRecord[] | null>;
   fetchAgent: (agentId: string) => Promise<AnyRecord | null>;
+  fetchAgentTasks: (agentId: string) => Promise<AnyRecord[] | null>;
   createAgent: (payload: AnyRecord) => Promise<AnyRecord | null>;
   fetchActorsBoard: () => Promise<AnyRecord | null>;
   updateActorsBoard: (payload: AnyRecord) => Promise<AnyRecord | null>;
@@ -312,6 +313,16 @@ export function createCoreApi(): CoreApi {
         path: `/v1/agents/${encodeURIComponent(agentId)}`
       });
       if (!response.ok) {
+        return null;
+      }
+      return response.data;
+    },
+
+    fetchAgentTasks: async (agentId) => {
+      const response = await requestJson<AnyRecord[]>({
+        path: `/v1/agents/${encodeURIComponent(agentId)}/tasks`
+      });
+      if (!response.ok || !Array.isArray(response.data)) {
         return null;
       }
       return response.data;

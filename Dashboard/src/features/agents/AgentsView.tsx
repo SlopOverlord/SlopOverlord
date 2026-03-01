@@ -1,5 +1,10 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { createAgent as createAgentRequest, fetchAgent, fetchAgents } from "../../api";
+import {
+  createAgent as createAgentRequest,
+  fetchAgent,
+  fetchAgents,
+  fetchAgentTasks
+} from "../../api";
 import { AgentChatTab } from "./components/AgentChatTab";
 import { AgentConfigTab } from "./components/AgentConfigTab";
 import { AgentToolsTab } from "./components/AgentToolsTab";
@@ -63,6 +68,69 @@ function AgentPlaceholderTab({ title, description }) {
     <section className="entry-editor-card agent-content-card">
       <h3>{title}</h3>
       <p className="placeholder-text">{description}</p>
+    </section>
+  );
+}
+
+function AgentTasksTab({ agentId }) {
+  const [items, setItems] = useState([]);
+  const [statusText, setStatusText] = useState("Loading tasks...");
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadTasks() {
+      const response = await fetchAgentTasks(agentId);
+      if (cancelled) {
+        return;
+      }
+
+      if (!Array.isArray(response)) {
+        setItems([]);
+        setStatusText("Failed to load tasks for this agent.");
+        return;
+      }
+
+      setItems(response);
+      setStatusText(response.length === 0 ? "No tasks claimed by this agent." : `Loaded ${response.length} task(s).`);
+    }
+
+    loadTasks().catch(() => {
+      if (!cancelled) {
+        setItems([]);
+        setStatusText("Failed to load tasks for this agent.");
+      }
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [agentId]);
+
+  return (
+    <section className="entry-editor-card agent-content-card">
+      <h3>Tasks</h3>
+      {items.length === 0 ? (
+        <p className="placeholder-text">{statusText}</p>
+      ) : (
+        <div className="project-workers-list">
+          {items.map((item, index) => {
+            const projectId = String(item?.projectId || "");
+            const projectName = String(item?.projectName || projectId || "Project");
+            const task = item?.task || {};
+            return (
+              <article key={String(task.id || `${projectId}-${index}`)} className="project-worker-item">
+                <strong>{String(task.title || "Task")}</strong>
+                <p>Project: {projectName}</p>
+                <p>Status: {String(task.status || "unknown")}</p>
+                {task?.claimedAgentId ? <p>Taken by: {String(task.claimedAgentId)}</p> : null}
+                {task?.description ? <p>{String(task.description)}</p> : null}
+              </article>
+            );
+          })}
+        </div>
+      )}
+      {items.length > 0 ? <p className="placeholder-text">{statusText}</p> : null}
     </section>
   );
 }
@@ -317,12 +385,7 @@ export function AgentsView({ routeAgentId = null, routeTab = "overview", onRoute
     }
 
     if (tab === "tasks") {
-      return (
-        <AgentPlaceholderTab
-          title="Tasks"
-          description="Task queue and execution state will appear here."
-        />
-      );
+      return <AgentTasksTab agentId={agent.id} />;
     }
 
     if (tab === "skills") {

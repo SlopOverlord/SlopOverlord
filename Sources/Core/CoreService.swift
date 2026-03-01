@@ -290,6 +290,7 @@ public actor CoreService {
             updatedAt: now
         )
         await store.saveProject(project)
+        ensureProjectWorkspaceDirectory(projectID: normalizedID)
         return project
     }
 
@@ -398,6 +399,8 @@ public actor CoreService {
             description: normalizeTaskDescription(request.description),
             priority: try normalizeTaskPriority(request.priority),
             status: normalizedStatus,
+            actorId: try normalizeOptionalTaskActorID(request.actorId),
+            teamId: try normalizeOptionalTaskTeamID(request.teamId),
             createdAt: now,
             updatedAt: now
         )
@@ -443,8 +446,22 @@ public actor CoreService {
         if let priority = request.priority {
             task.priority = try normalizeTaskPriority(priority)
         }
+        if request.actorId != nil {
+            task.actorId = try normalizeOptionalTaskActorID(request.actorId)
+            task.claimedActorId = nil
+            task.claimedAgentId = nil
+        }
+        if request.teamId != nil {
+            task.teamId = try normalizeOptionalTaskTeamID(request.teamId)
+            task.claimedActorId = nil
+            task.claimedAgentId = nil
+        }
         if let status = request.status {
             task.status = try normalizeTaskStatus(status)
+            if task.status == "backlog" {
+                task.claimedActorId = nil
+                task.claimedAgentId = nil
+            }
         }
         task.updatedAt = Date()
         project.tasks[taskIndex] = task
@@ -500,6 +517,37 @@ public actor CoreService {
             return try agentCatalogStore.getAgent(id: id)
         } catch {
             throw mapAgentStorageError(error)
+        }
+    }
+
+    /// Lists project tasks currently claimed by a specific agent.
+    public func listAgentTasks(agentID: String) async throws -> [AgentTaskRecord] {
+        guard let normalizedID = normalizedAgentID(agentID) else {
+            throw AgentStorageError.invalidID
+        }
+        _ = try getAgent(id: normalizedID)
+
+        let projects = await store.listProjects()
+        var records: [AgentTaskRecord] = []
+        for project in projects {
+            for task in project.tasks {
+                guard let claimedAgentID = task.claimedAgentId else {
+                    continue
+                }
+                if claimedAgentID.caseInsensitiveCompare(normalizedID) == .orderedSame {
+                    records.append(
+                        AgentTaskRecord(
+                            projectId: project.id,
+                            projectName: project.name,
+                            task: task
+                        )
+                    )
+                }
+            }
+        }
+
+        return records.sorted { left, right in
+            left.task.updatedAt > right.task.updatedAt
         }
     }
 
@@ -1353,18 +1401,20 @@ public actor CoreService {
             return
         }
 
-        guard let executionChannelID = resolveExecutionChannelID(project: project, task: task) else {
+        guard let delegation = await resolveTaskDelegation(project: project, task: task) else {
             return
         }
 
+        task.claimedActorId = delegation.actorID
+        task.claimedAgentId = delegation.agentID
         let workerId = await runtime.createWorker(
             spec: WorkerTaskSpec(
                 taskId: task.id,
-                channelId: executionChannelID,
+                channelId: delegation.channelID,
                 title: task.title,
                 objective: task.description,
                 tools: ["shell", "file", "exec", "browser"],
-                mode: .interactive
+                mode: .fireAndForget
             )
         )
 
@@ -1380,9 +1430,19 @@ public actor CoreService {
                 "project_id": .string(project.id),
                 "task_id": .string(task.id),
                 "worker_id": .string(workerId),
-                "channel_id": .string(executionChannelID)
+                "channel_id": .string(delegation.channelID),
+                "agent_id": .string(delegation.agentID ?? "none")
             ]
         )
+        let delegateMessage: String
+        if let agentID = delegation.agentID {
+            delegateMessage = "Task \(task.id) delegated to agent \(agentID)."
+        } else if let actorID = delegation.actorID {
+            delegateMessage = "Task \(task.id) delegated to actor \(actorID)."
+        } else {
+            delegateMessage = "Task \(task.id) started in channel \(delegation.channelID)."
+        }
+        await runtime.appendSystemMessage(channelId: delegation.channelID, content: delegateMessage)
     }
 
     private func resolveExecutionChannelID(project: ProjectRecord, task: ProjectTask) -> String? {
@@ -1391,6 +1451,112 @@ public actor CoreService {
             return markedChannelID
         }
         return project.channels.sorted(by: { $0.createdAt < $1.createdAt }).first?.channelId
+    }
+
+    private struct TaskDelegation {
+        let actorID: String?
+        let agentID: String?
+        let channelID: String
+    }
+
+    private func resolveTaskDelegation(project: ProjectRecord, task: ProjectTask) async -> TaskDelegation? {
+        let board = try? getActorBoard()
+        let nodesByID = Dictionary(uniqueKeysWithValues: (board?.nodes ?? []).map { ($0.id, $0) })
+
+        let preferredActors = preferredActorIDs(for: task, board: board)
+        for actorID in preferredActors {
+            guard let node = nodesByID[actorID] else {
+                continue
+            }
+
+            let channelID = normalizeWhitespace(node.channelId ?? "")
+            let resolvedChannelID: String?
+            if !channelID.isEmpty {
+                resolvedChannelID = channelID
+            } else {
+                resolvedChannelID = resolveExecutionChannelID(project: project, task: task)
+            }
+
+            guard let channel = resolvedChannelID else {
+                continue
+            }
+
+            return TaskDelegation(
+                actorID: actorID,
+                agentID: node.linkedAgentId,
+                channelID: channel
+            )
+        }
+
+        if let fallbackChannelID = resolveExecutionChannelID(project: project, task: task) {
+            return TaskDelegation(actorID: nil, agentID: nil, channelID: fallbackChannelID)
+        }
+        return nil
+    }
+
+    private func preferredActorIDs(for task: ProjectTask, board: ActorBoardSnapshot?) -> [String] {
+        var actorIDs: [String] = []
+        var seen: Set<String> = []
+
+        func add(_ actorID: String?) {
+            guard let actorID = actorID else {
+                return
+            }
+            let normalized = normalizeWhitespace(actorID)
+            guard !normalized.isEmpty else {
+                return
+            }
+            if seen.insert(normalized).inserted {
+                actorIDs.append(normalized)
+            }
+        }
+
+        add(task.actorId)
+
+        if let teamID = task.teamId,
+           let team = board?.teams.first(where: { $0.id == teamID }) {
+            add(task.claimedActorId)
+            for memberActorID in team.memberActorIds {
+                add(memberActorID)
+            }
+        }
+
+        add(task.claimedActorId)
+        return actorIDs
+    }
+
+    private struct TeamRetryDelegate {
+        let actorID: String
+        let agentID: String?
+    }
+
+    private func nextTeamRetryDelegate(for task: ProjectTask) async -> TeamRetryDelegate? {
+        guard let teamID = task.teamId else {
+            return nil
+        }
+        let board = try? getActorBoard()
+        guard let team = board?.teams.first(where: { $0.id == teamID }),
+              !team.memberActorIds.isEmpty
+        else {
+            return nil
+        }
+
+        guard let currentActorID = task.claimedActorId,
+              let currentIndex = team.memberActorIds.firstIndex(of: currentActorID)
+        else {
+            return nil
+        }
+
+        let nodesByID = Dictionary(uniqueKeysWithValues: (board?.nodes ?? []).map { ($0.id, $0) })
+        for nextIndex in (currentIndex + 1)..<team.memberActorIds.count {
+            let nextActorID = team.memberActorIds[nextIndex]
+            guard let node = nodesByID[nextActorID] else {
+                continue
+            }
+            return TeamRetryDelegate(actorID: nextActorID, agentID: node.linkedAgentId)
+        }
+
+        return nil
     }
 
     private func extractOriginChannelID(from description: String) -> String? {
@@ -1540,6 +1706,35 @@ public actor CoreService {
             }
 
             var task = project.tasks[taskIndex]
+            if event.messageType == .workerFailed,
+               let retryDelegate = await nextTeamRetryDelegate(for: task) {
+                task.status = "ready"
+                task.claimedActorId = retryDelegate.actorID
+                task.claimedAgentId = retryDelegate.agentID
+                task.updatedAt = Date()
+                if let failureNote {
+                    let timestamp = ISO8601DateFormatter().string(from: event.ts)
+                    let note = "Worker failed at \(timestamp): \(failureNote)"
+                    if task.description.isEmpty {
+                        task.description = note
+                    } else {
+                        task.description += "\n\n\(note)"
+                    }
+                }
+
+                project.tasks[taskIndex] = task
+                project.updatedAt = Date()
+                await store.saveProject(project)
+
+                let retryActor = retryDelegate.agentID ?? retryDelegate.actorID
+                await runtime.appendSystemMessage(
+                    channelId: event.channelId,
+                    content: "Retrying task \(task.id) with \(retryActor)."
+                )
+                await handleTaskBecameReady(projectID: project.id, taskID: task.id)
+                return
+            }
+
             task.status = nextStatus
             task.updatedAt = Date()
             if let failureNote {
@@ -1554,6 +1749,20 @@ public actor CoreService {
             project.tasks[taskIndex] = task
             project.updatedAt = Date()
             await store.saveProject(project)
+
+            if event.messageType == .workerCompleted {
+                let completionActor = task.claimedAgentId ?? task.claimedActorId ?? "worker"
+                await runtime.appendSystemMessage(
+                    channelId: event.channelId,
+                    content: "\(completionActor) completed task \(task.id)."
+                )
+            } else if event.messageType == .workerFailed {
+                let failedActor = task.claimedAgentId ?? task.claimedActorId ?? "worker"
+                await runtime.appendSystemMessage(
+                    channelId: event.channelId,
+                    content: "\(failedActor) failed task \(task.id); moved back to backlog."
+                )
+            }
 
             logger.info(
                 "visor.task.synced_from_worker_event",
@@ -1776,6 +1985,34 @@ public actor CoreService {
         return value
     }
 
+    private func normalizeOptionalTaskActorID(_ raw: String?) throws -> String? {
+        guard let raw else {
+            return nil
+        }
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            return nil
+        }
+        guard let normalized = normalizedActorEntityID(trimmed) else {
+            throw ProjectError.invalidPayload
+        }
+        return normalized
+    }
+
+    private func normalizeOptionalTaskTeamID(_ raw: String?) throws -> String? {
+        guard let raw else {
+            return nil
+        }
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            return nil
+        }
+        guard let normalized = normalizedActorEntityID(trimmed) else {
+            throw ProjectError.invalidPayload
+        }
+        return normalized
+    }
+
     private func normalizeChannelTitle(_ raw: String) -> String {
         let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else {
@@ -1815,6 +2052,22 @@ public actor CoreService {
         let lower = raw.lowercased()
         let separated = lower.replacingOccurrences(of: "[^a-z0-9]+", with: "-", options: .regularExpression)
         return separated.trimmingCharacters(in: CharacterSet(charactersIn: "-"))
+    }
+
+    private func ensureProjectWorkspaceDirectory(projectID: String) {
+        let projectsRoot = workspaceRootURL.appendingPathComponent("projects", isDirectory: true)
+        let projectDirectory = projectsRoot.appendingPathComponent(projectID, isDirectory: true)
+        do {
+            try FileManager.default.createDirectory(at: projectDirectory, withIntermediateDirectories: true)
+        } catch {
+            logger.warning(
+                "visor.project.directory_create_failed",
+                metadata: [
+                    "project_id": .string(projectID),
+                    "path": .string(projectDirectory.path)
+                ]
+            )
+        }
     }
 
     private func availableAgentModels() -> [ProviderModelOption] {

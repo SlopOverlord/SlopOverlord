@@ -163,6 +163,39 @@ func projectCrudEndpoints() async throws {
 }
 
 @Test
+func projectCreateCreatesWorkspaceDirectory() async throws {
+    let workspaceName = "workspace-project-dirs-\(UUID().uuidString)"
+    let sqlitePath = FileManager.default.temporaryDirectory
+        .appendingPathComponent("core-project-dirs-\(UUID().uuidString).sqlite")
+        .path
+
+    var config = CoreConfig.default
+    config.workspace = .init(name: workspaceName, basePath: FileManager.default.temporaryDirectory.path)
+    config.sqlitePath = sqlitePath
+
+    let service = CoreService(config: config)
+    let router = CoreRouter(service: service)
+    let projectID = "proj-dir-\(UUID().uuidString)"
+
+    let createBody = try JSONEncoder().encode(
+        ProjectCreateRequest(
+            id: projectID,
+            name: "Directory Project",
+            description: "Checks workspace/projects/<id> provisioning",
+            channels: [.init(title: "General", channelId: "general")]
+        )
+    )
+    let createResponse = await router.handle(method: "POST", path: "/v1/projects", body: createBody)
+    #expect(createResponse.status == 201)
+
+    let projectDirectory = config
+        .resolvedWorkspaceRootURL()
+        .appendingPathComponent("projects", isDirectory: true)
+        .appendingPathComponent(projectID, isDirectory: true)
+    #expect(FileManager.default.fileExists(atPath: projectDirectory.path))
+}
+
+@Test
 func projectTaskReadyStatusTriggersVisorBulletin() async throws {
     let sqlitePath = FileManager.default.temporaryDirectory
         .appendingPathComponent("core-project-ready-bulletin-\(UUID().uuidString).sqlite")
@@ -511,6 +544,81 @@ func createListAndGetAgentsEndpoints() async throws {
         let fileURL = workspaceAgentsURL.appendingPathComponent(file)
         #expect(FileManager.default.fileExists(atPath: fileURL.path))
     }
+}
+
+@Test
+func agentTasksEndpointReturnsClaimedProjectTasks() async throws {
+    let workspaceName = "workspace-agent-tasks-\(UUID().uuidString)"
+    let sqlitePath = FileManager.default.temporaryDirectory
+        .appendingPathComponent("core-agent-tasks-\(UUID().uuidString).sqlite")
+        .path
+
+    var config = CoreConfig.default
+    config.workspace = .init(name: workspaceName, basePath: FileManager.default.temporaryDirectory.path)
+    config.sqlitePath = sqlitePath
+
+    let service = CoreService(config: config)
+    let router = CoreRouter(service: service)
+
+    let agentCreateBody = try JSONEncoder().encode(
+        AgentCreateRequest(
+            id: "agent-claim",
+            displayName: "Claim Agent",
+            role: "Takes delegated tasks"
+        )
+    )
+    let agentCreateResponse = await router.handle(method: "POST", path: "/v1/agents", body: agentCreateBody)
+    #expect(agentCreateResponse.status == 201)
+
+    let projectID = "agent-task-project-\(UUID().uuidString)"
+    let projectCreateBody = try JSONEncoder().encode(
+        ProjectCreateRequest(
+            id: projectID,
+            name: "Agent Tasks Project",
+            description: "Tracks claimed tasks by agent",
+            channels: [.init(title: "General", channelId: "general")]
+        )
+    )
+    let projectCreateResponse = await router.handle(method: "POST", path: "/v1/projects", body: projectCreateBody)
+    #expect(projectCreateResponse.status == 201)
+
+    let createTaskBody = try JSONEncoder().encode(
+        ProjectTaskCreateRequest(
+            title: "Delegated to actor",
+            description: "Auto assignment test",
+            priority: "medium",
+            status: "ready",
+            actorId: "agent:agent-claim"
+        )
+    )
+    let createTaskResponse = await router.handle(
+        method: "POST",
+        path: "/v1/projects/\(projectID)/tasks",
+        body: createTaskBody
+    )
+    #expect(createTaskResponse.status == 200)
+
+    let decoder = JSONDecoder()
+    decoder.dateDecodingStrategy = .iso8601
+    var createdProject = try decoder.decode(ProjectRecord.self, from: createTaskResponse.body)
+    let taskID = try #require(createdProject.tasks.first?.id)
+
+    let deadline = Date().addingTimeInterval(2)
+    while Date() < deadline {
+        let fetchProjectResponse = await router.handle(method: "GET", path: "/v1/projects/\(projectID)", body: nil)
+        #expect(fetchProjectResponse.status == 200)
+        createdProject = try decoder.decode(ProjectRecord.self, from: fetchProjectResponse.body)
+        if createdProject.tasks.first(where: { $0.id == taskID })?.claimedAgentId == "agent-claim" {
+            break
+        }
+        try? await Task.sleep(nanoseconds: 50_000_000)
+    }
+
+    let tasksResponse = await router.handle(method: "GET", path: "/v1/agents/agent-claim/tasks", body: nil)
+    #expect(tasksResponse.status == 200)
+    let records = try decoder.decode([AgentTaskRecord].self, from: tasksResponse.body)
+    #expect(records.contains(where: { $0.task.id == taskID }))
+    #expect(records.contains(where: { $0.task.claimedAgentId == "agent-claim" }))
 }
 
 @Test

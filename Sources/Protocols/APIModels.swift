@@ -100,6 +100,10 @@ public struct ProjectTask: Codable, Sendable, Equatable {
     public var description: String
     public var priority: String
     public var status: String
+    public var actorId: String?
+    public var teamId: String?
+    public var claimedActorId: String?
+    public var claimedAgentId: String?
     public var createdAt: Date
     public var updatedAt: Date
 
@@ -109,6 +113,10 @@ public struct ProjectTask: Codable, Sendable, Equatable {
         description: String,
         priority: String,
         status: String,
+        actorId: String? = nil,
+        teamId: String? = nil,
+        claimedActorId: String? = nil,
+        claimedAgentId: String? = nil,
         createdAt: Date = Date(),
         updatedAt: Date = Date()
     ) {
@@ -117,6 +125,10 @@ public struct ProjectTask: Codable, Sendable, Equatable {
         self.description = description
         self.priority = priority
         self.status = status
+        self.actorId = actorId
+        self.teamId = teamId
+        self.claimedActorId = claimedActorId
+        self.claimedAgentId = claimedAgentId
         self.createdAt = createdAt
         self.updatedAt = updatedAt
     }
@@ -189,12 +201,23 @@ public struct ProjectTaskCreateRequest: Codable, Sendable {
     public var description: String?
     public var priority: String
     public var status: String
+    public var actorId: String?
+    public var teamId: String?
 
-    public init(title: String, description: String? = nil, priority: String, status: String) {
+    public init(
+        title: String,
+        description: String? = nil,
+        priority: String,
+        status: String,
+        actorId: String? = nil,
+        teamId: String? = nil
+    ) {
         self.title = title
         self.description = description
         self.priority = priority
         self.status = status
+        self.actorId = actorId
+        self.teamId = teamId
     }
 }
 
@@ -203,12 +226,23 @@ public struct ProjectTaskUpdateRequest: Codable, Sendable {
     public var description: String?
     public var priority: String?
     public var status: String?
+    public var actorId: String?
+    public var teamId: String?
 
-    public init(title: String? = nil, description: String? = nil, priority: String? = nil, status: String? = nil) {
+    public init(
+        title: String? = nil,
+        description: String? = nil,
+        priority: String? = nil,
+        status: String? = nil,
+        actorId: String? = nil,
+        teamId: String? = nil
+    ) {
         self.title = title
         self.description = description
         self.priority = priority
         self.status = status
+        self.actorId = actorId
+        self.teamId = teamId
     }
 }
 
@@ -235,6 +269,18 @@ public struct AgentSummary: Codable, Sendable, Equatable {
         self.displayName = displayName
         self.role = role
         self.createdAt = createdAt
+    }
+}
+
+public struct AgentTaskRecord: Codable, Sendable, Equatable {
+    public var projectId: String
+    public var projectName: String
+    public var task: ProjectTask
+
+    public init(projectId: String, projectName: String, task: ProjectTask) {
+        self.projectId = projectId
+        self.projectName = projectName
+        self.task = task
     }
 }
 

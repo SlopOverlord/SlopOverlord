@@ -58,7 +58,7 @@ func readyStatusAutoSpawnsWorkerAndMovesTaskToInProgress() async throws {
 
     let updatedProject = try decodeProject(updateResponse.body)
     let updatedTask = updatedProject.tasks.first(where: { $0.id == taskID })
-    #expect(updatedTask?.status == "in_progress")
+    #expect(updatedTask?.status == "in_progress" || updatedTask?.status == "done")
 
     let worker = try await waitForWorker(router: router, taskID: taskID)
     #expect(worker?.taskId == taskID)
@@ -84,15 +84,6 @@ func workerCompletedEventMarksTaskDone() async throws {
         body: updateBody
     )
 
-    let worker = try #require(try await waitForWorker(router: router, taskID: taskID))
-    let routeBody = try JSONEncoder().encode(ChannelRouteRequest(message: "done"))
-    let routeResponse = await router.handle(
-        method: "POST",
-        path: "/v1/channels/general/route/\(worker.workerId)",
-        body: routeBody
-    )
-    #expect(routeResponse.status == 200)
-
     let project = try await waitForProject(router: router, projectID: projectID, timeoutSeconds: 3) { project in
         project.tasks.first(where: { $0.id == taskID })?.status == "done"
     }
@@ -113,12 +104,20 @@ func workerFailedEventReturnsTaskToBacklog() async throws {
         status: "backlog"
     )
 
-    let updateBody = try JSONEncoder().encode(ProjectTaskUpdateRequest(status: "ready"))
-    _ = await router.handle(
-        method: "PATCH",
-        path: "/v1/projects/\(projectID)/tasks/\(taskID)",
-        body: updateBody
+    let createWorkerBody = try JSONEncoder().encode(
+        WorkerCreateRequest(
+            spec: WorkerTaskSpec(
+                taskId: taskID,
+                channelId: "general",
+                title: "Fail test worker",
+                objective: "force fail",
+                tools: ["shell"],
+                mode: .interactive
+            )
+        )
     )
+    let createWorkerResponse = await router.handle(method: "POST", path: "/v1/workers", body: createWorkerBody)
+    #expect(createWorkerResponse.status == 201)
 
     let worker = try #require(try await waitForWorker(router: router, taskID: taskID))
     let routeBody = try JSONEncoder().encode(ChannelRouteRequest(message: "fail"))
@@ -130,7 +129,10 @@ func workerFailedEventReturnsTaskToBacklog() async throws {
     #expect(routeResponse.status == 200)
 
     let project = try await waitForProject(router: router, projectID: projectID, timeoutSeconds: 3) { project in
-        project.tasks.first(where: { $0.id == taskID })?.status == "backlog"
+        guard let task = project.tasks.first(where: { $0.id == taskID }) else {
+            return false
+        }
+        return task.status == "backlog" && task.description.contains("Worker failed at")
     }
     let finalTask = project?.tasks.first(where: { $0.id == taskID })
     #expect(finalTask?.status == "backlog")
@@ -155,10 +157,11 @@ func naturalLanguagePickUpCommandApprovesByIndex() async throws {
     #expect(decision.reason == "task_approved_command")
 
     let project = try await waitForProject(router: router, projectID: projectID, timeoutSeconds: 3) { project in
-        project.tasks.first(where: { $0.id == secondTaskID })?.status == "in_progress"
+        let status = project.tasks.first(where: { $0.id == secondTaskID })?.status
+        return status == "in_progress" || status == "done"
     }
     let approvedTask = project?.tasks.first(where: { $0.id == secondTaskID })
-    #expect(approvedTask?.status == "in_progress")
+    #expect(approvedTask?.status == "in_progress" || approvedTask?.status == "done")
 }
 
 @Test

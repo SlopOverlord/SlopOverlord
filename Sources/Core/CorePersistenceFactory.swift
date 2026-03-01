@@ -182,6 +182,10 @@ enum CorePersistenceFactory {
             description TEXT NOT NULL,
             priority TEXT NOT NULL,
             status TEXT NOT NULL,
+            actor_id TEXT,
+            team_id TEXT,
+            claimed_actor_id TEXT,
+            claimed_agent_id TEXT,
             created_at TEXT NOT NULL,
             updated_at TEXT NOT NULL
         );

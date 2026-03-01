@@ -37,6 +37,7 @@ public actor SQLiteStore: PersistenceStore {
 
         if sqlite3_open(path, &db) == SQLITE_OK {
             _ = sqlite3_exec(db, schemaSQL, nil, nil, nil)
+            Self.applyProjectTaskMigrations(db: db)
         } else {
             db = nil
         }
@@ -463,9 +464,13 @@ public actor SQLiteStore: PersistenceStore {
                 description,
                 priority,
                 status,
+                actor_id,
+                team_id,
+                claimed_actor_id,
+                claimed_agent_id,
                 created_at,
                 updated_at
-            ) VALUES(?, ?, ?, ?, ?, ?, ?, ?);
+            ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
             """
 
         for task in project.tasks {
@@ -480,8 +485,12 @@ public actor SQLiteStore: PersistenceStore {
             bindText(task.description, at: 4, statement: taskStatement)
             bindText(task.priority, at: 5, statement: taskStatement)
             bindText(task.status, at: 6, statement: taskStatement)
-            bindText(isoFormatter.string(from: task.createdAt), at: 7, statement: taskStatement)
-            bindText(isoFormatter.string(from: task.updatedAt), at: 8, statement: taskStatement)
+            bindOptionalText(task.actorId, at: 7, statement: taskStatement)
+            bindOptionalText(task.teamId, at: 8, statement: taskStatement)
+            bindOptionalText(task.claimedActorId, at: 9, statement: taskStatement)
+            bindOptionalText(task.claimedAgentId, at: 10, statement: taskStatement)
+            bindText(isoFormatter.string(from: task.createdAt), at: 11, statement: taskStatement)
+            bindText(isoFormatter.string(from: task.updatedAt), at: 12, statement: taskStatement)
             _ = sqlite3_step(taskStatement)
         }
 #endif
@@ -650,7 +659,18 @@ public actor SQLiteStore: PersistenceStore {
     private func loadProjectTasks(db: OpaquePointer, projectID: String) -> [ProjectTask] {
         let sql =
             """
-            SELECT id, title, description, priority, status, created_at, updated_at
+            SELECT
+                id,
+                title,
+                description,
+                priority,
+                status,
+                actor_id,
+                team_id,
+                claimed_actor_id,
+                claimed_agent_id,
+                created_at,
+                updated_at
             FROM dashboard_project_tasks
             WHERE project_id = ?
             ORDER BY created_at ASC;
@@ -671,8 +691,8 @@ public actor SQLiteStore: PersistenceStore {
                 let descriptionPtr = sqlite3_column_text(statement, 2),
                 let priorityPtr = sqlite3_column_text(statement, 3),
                 let statusPtr = sqlite3_column_text(statement, 4),
-                let createdAtPtr = sqlite3_column_text(statement, 5),
-                let updatedAtPtr = sqlite3_column_text(statement, 6)
+                let createdAtPtr = sqlite3_column_text(statement, 9),
+                let updatedAtPtr = sqlite3_column_text(statement, 10)
             else {
                 continue
             }
@@ -685,6 +705,10 @@ public actor SQLiteStore: PersistenceStore {
                     description: String(cString: descriptionPtr),
                     priority: String(cString: priorityPtr),
                     status: String(cString: statusPtr),
+                    actorId: optionalText(statement: statement, index: 5),
+                    teamId: optionalText(statement: statement, index: 6),
+                    claimedActorId: optionalText(statement: statement, index: 7),
+                    claimedAgentId: optionalText(statement: statement, index: 8),
                     createdAt: createdAt,
                     updatedAt: updatedAt
                 )
@@ -703,6 +727,30 @@ public actor SQLiteStore: PersistenceStore {
             bindText(value, at: index, statement: statement)
         } else {
             sqlite3_bind_null(statement, index)
+        }
+    }
+
+    private func optionalText(statement: OpaquePointer?, index: Int32) -> String? {
+        guard let text = sqlite3_column_text(statement, index) else {
+            return nil
+        }
+        return String(cString: text)
+    }
+
+    private static func applyProjectTaskMigrations(db: OpaquePointer?) {
+        guard let db else {
+            return
+        }
+
+        let statements = [
+            "ALTER TABLE dashboard_project_tasks ADD COLUMN actor_id TEXT;",
+            "ALTER TABLE dashboard_project_tasks ADD COLUMN team_id TEXT;",
+            "ALTER TABLE dashboard_project_tasks ADD COLUMN claimed_actor_id TEXT;",
+            "ALTER TABLE dashboard_project_tasks ADD COLUMN claimed_agent_id TEXT;"
+        ]
+
+        for statement in statements {
+            _ = sqlite3_exec(db, statement, nil, nil, nil)
         }
     }
 #endif
