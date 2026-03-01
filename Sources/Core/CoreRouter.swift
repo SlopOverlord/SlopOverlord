@@ -1012,6 +1012,23 @@ public actor CoreRouter {
             }
         }
 
+        add(.post, "/v1/projects/:projectId/tasks/:taskId/approve") { request in
+            let projectId = request.pathParam("projectId") ?? ""
+            let taskId = request.pathParam("taskId") ?? ""
+            do {
+                let project = try await service.updateProjectTask(
+                    projectID: projectId,
+                    taskID: taskId,
+                    request: ProjectTaskUpdateRequest(status: "ready")
+                )
+                return Self.encodable(status: HTTPStatus.ok, payload: project)
+            } catch let error as CoreService.ProjectError {
+                return Self.projectErrorResponse(error, fallback: ErrorCode.projectUpdateFailed)
+            } catch {
+                return Self.json(status: HTTPStatus.internalServerError, payload: ["error": ErrorCode.projectUpdateFailed])
+            }
+        }
+
         // MARK: - Channel Plugins
 
         add(.get, "/v1/plugins") { _ in

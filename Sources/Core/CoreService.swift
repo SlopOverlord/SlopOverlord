@@ -251,9 +251,27 @@ public actor CoreService {
 
     /// Forces immediate visor bulletin generation and stores it.
     public func triggerVisorBulletin() async -> MemoryBulletin {
-        let bulletin = await runtime.generateVisorBulletin()
+        let taskSummary = await buildProjectTaskSummary()
+        let bulletin = await runtime.generateVisorBulletin(taskSummary: taskSummary)
         await store.persistBulletin(bulletin)
         return bulletin
+    }
+
+    private func buildProjectTaskSummary() async -> String? {
+        let projects = await store.listProjects()
+        let activeStatuses = Set(["pending_approval", "backlog", "ready", "in_progress"])
+        var lines: [String] = []
+        for project in projects {
+            let active = project.tasks.filter { activeStatuses.contains($0.status) }
+            guard !active.isEmpty else { continue }
+            let taskEntries = active.prefix(20).map { task in
+                let actor = task.claimedActorId ?? task.actorId ?? ""
+                let actorSuffix = actor.isEmpty ? "" : " @\(actor)"
+                return "[\(task.id)] \(task.title) (\(task.status))\(actorSuffix)"
+            }
+            lines.append("Project \(project.name): \(taskEntries.joined(separator: ", "))")
+        }
+        return lines.isEmpty ? nil : "Active tasks: " + lines.joined(separator: "; ")
     }
 
     /// Exposes worker snapshots for observability endpoints.
@@ -1353,7 +1371,13 @@ public actor CoreService {
         }
 
         let result: ToolInvocationResult
-        if authorization.allowed {
+        if authorization.allowed, let projectResult = await handleProjectTool(
+            agentID: normalizedAgentID,
+            sessionID: normalizedSessionID,
+            request: request
+        ) {
+            result = projectResult
+        } else if authorization.allowed {
             result = await toolExecution.invoke(
                 agentID: normalizedAgentID,
                 sessionID: normalizedSessionID,
@@ -1841,6 +1865,36 @@ public actor CoreService {
         return nil
     }
 
+    private func nextTeamHandoffDelegate(project: ProjectRecord, task: ProjectTask) async -> TeamRetryDelegate? {
+        guard let teamID = task.teamId else {
+            return nil
+        }
+        let board = try? getActorBoard()
+        guard let team = board?.teams.first(where: { $0.id == teamID }),
+              !team.memberActorIds.isEmpty
+        else {
+            return nil
+        }
+
+        guard let currentActorID = task.claimedActorId,
+              let currentIndex = team.memberActorIds.firstIndex(of: currentActorID)
+        else {
+            return nil
+        }
+
+        let nextIndex = currentIndex + 1
+        guard nextIndex < team.memberActorIds.count else {
+            return nil
+        }
+
+        let nodesByID = Dictionary(uniqueKeysWithValues: (board?.nodes ?? []).map { ($0.id, $0) })
+        let nextActorID = team.memberActorIds[nextIndex]
+        guard let node = nodesByID[nextActorID] else {
+            return nil
+        }
+        return TeamRetryDelegate(actorID: nextActorID, agentID: node.linkedAgentId)
+    }
+
     private func extractOriginChannelID(from description: String) -> String? {
         let pattern = #"(?im)^Origin channel:\s*(\S+)\s*$"#
         guard let regex = try? NSRegularExpression(pattern: pattern) else {
@@ -1906,7 +1960,7 @@ public actor CoreService {
             return
         }
 
-        let activeStatuses = Set(["backlog", "ready", "in_progress"])
+        let activeStatuses = Set(["pending_approval", "backlog", "ready", "in_progress"])
         var existingTitleKeys = Set(
             project.tasks
                 .filter { activeStatuses.contains($0.status) }
@@ -1933,7 +1987,7 @@ public actor CoreService {
                     title: title,
                     description: visorTaskDescription(todo: todo, channelId: event.channelId),
                     priority: "medium",
-                    status: "backlog",
+                    status: "pending_approval",
                     createdAt: now,
                     updatedAt: now
                 )
@@ -1958,7 +2012,7 @@ public actor CoreService {
         project.updatedAt = Date()
         await store.saveProject(project)
         _ = await triggerVisorBulletin()
-        let visorMessage = "Visor created \(createdCount) backlog tasks for approval."
+        let visorMessage = "Visor created \(createdCount) tasks pending approval."
         await runtime.appendSystemMessage(channelId: event.channelId, content: visorMessage)
         await deliverToChannelPlugin(channelId: event.channelId, content: visorMessage)
 
@@ -2068,6 +2122,45 @@ public actor CoreService {
                         }
                     }
                 }
+
+                if resolvedStatus == "done",
+                   let handoffDelegate = await nextTeamHandoffDelegate(project: project, task: task) {
+                    let handoffActor = task.claimedAgentId ?? task.claimedActorId ?? "worker"
+                    let handoffNote = "Handoff from \(handoffActor)"
+                        + (completionArtifactPath.map { ". Artifact: \($0)" } ?? "")
+                    if task.description.isEmpty {
+                        task.description = handoffNote
+                    } else {
+                        task.description += "\n\n\(handoffNote)"
+                    }
+
+                    task.status = "ready"
+                    task.claimedActorId = handoffDelegate.actorID
+                    task.claimedAgentId = handoffDelegate.agentID
+                    task.actorId = handoffDelegate.actorID
+                    task.updatedAt = Date()
+                    project.tasks[taskIndex] = task
+                    project.updatedAt = Date()
+                    await store.saveProject(project)
+                    appendTaskLifecycleLog(
+                        projectID: project.id,
+                        taskID: task.id,
+                        stage: "handoff_ready",
+                        channelID: event.channelId,
+                        workerID: event.workerId,
+                        message: "Handoff to next team member.",
+                        actorID: handoffDelegate.actorID,
+                        agentID: handoffDelegate.agentID,
+                        artifactPath: completionArtifactPath
+                    )
+
+                    let nextActor = handoffDelegate.agentID ?? handoffDelegate.actorID
+                    let handoffMessage = "Task \(task.id) handed off to \(nextActor)."
+                    await runtime.appendSystemMessage(channelId: event.channelId, content: handoffMessage)
+                    await deliverToChannelPlugin(channelId: event.channelId, content: handoffMessage)
+                    await handleTaskBecameReady(projectID: project.id, taskID: task.id)
+                    return
+                }
             }
 
             task.status = resolvedStatus
@@ -2172,8 +2265,290 @@ public actor CoreService {
         }
     }
 
-    private func projectForChannel(channelId: String) async -> ProjectRecord? {
+    // MARK: - Project Tools
+
+    private func handleProjectTool(
+        agentID: String,
+        sessionID: String,
+        request: ToolInvocationRequest
+    ) async -> ToolInvocationResult? {
+        let toolID = request.tool.trimmingCharacters(in: .whitespacesAndNewlines)
+        switch toolID {
+        case "project.task_list":
+            return await executeTaskList(request: request, sessionID: sessionID)
+        case "project.task_create":
+            return await executeTaskCreate(request: request, sessionID: sessionID)
+        case "project.escalate_to_user":
+            return await executeEscalateToUser(request: request, sessionID: sessionID)
+        case "actor.discuss_with_actor":
+            return await executeDiscussWithActor(request: request)
+        case "actor.conclude_discussion":
+            return executeConcludeDiscussion(request: request)
+        default:
+            return nil
+        }
+    }
+
+    private func executeTaskList(request: ToolInvocationRequest, sessionID: String) async -> ToolInvocationResult {
+        let channelId = request.arguments["channelId"]?.asString ?? sessionID
+        let statusFilter = request.arguments["status"]?.asString?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        let topicId = request.arguments["topicId"]?.asString
+
+        guard let project = await projectForChannel(channelId: channelId, topicId: topicId) else {
+            return .init(
+                tool: request.tool, ok: false,
+                error: .init(code: "project_not_found", message: "No project found for this channel.", retryable: false)
+            )
+        }
+
+        var tasks = project.tasks
+        if let statusFilter, !statusFilter.isEmpty {
+            tasks = tasks.filter { $0.status == statusFilter }
+        }
+
+        let items: [JSONValue] = tasks.map { task in
+            .object([
+                "id": .string(task.id),
+                "title": .string(task.title),
+                "status": .string(task.status),
+                "priority": .string(task.priority),
+                "actorId": task.actorId.map { .string($0) } ?? .null,
+                "teamId": task.teamId.map { .string($0) } ?? .null,
+                "claimedActorId": task.claimedActorId.map { .string($0) } ?? .null
+            ])
+        }
+
+        return .init(tool: request.tool, ok: true, data: .object([
+            "projectId": .string(project.id),
+            "projectName": .string(project.name),
+            "tasks": .array(items)
+        ]))
+    }
+
+    private func executeTaskCreate(request: ToolInvocationRequest, sessionID: String) async -> ToolInvocationResult {
+        let channelId = request.arguments["channelId"]?.asString ?? sessionID
+        let topicId = request.arguments["topicId"]?.asString
+        let title = request.arguments["title"]?.asString?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let description = request.arguments["description"]?.asString
+        let priority = request.arguments["priority"]?.asString ?? "medium"
+        let status = request.arguments["status"]?.asString ?? "pending_approval"
+        let actorId = request.arguments["actorId"]?.asString
+        let teamId = request.arguments["teamId"]?.asString
+
+        guard !title.isEmpty else {
+            return .init(
+                tool: request.tool, ok: false,
+                error: .init(code: "invalid_arguments", message: "`title` is required.", retryable: false)
+            )
+        }
+
+        guard let project = await projectForChannel(channelId: channelId, topicId: topicId) else {
+            return .init(
+                tool: request.tool, ok: false,
+                error: .init(code: "project_not_found", message: "No project found for this channel.", retryable: false)
+            )
+        }
+
+        do {
+            let updated = try await createProjectTask(
+                projectID: project.id,
+                request: ProjectTaskCreateRequest(
+                    title: title,
+                    description: description,
+                    priority: priority,
+                    status: status,
+                    actorId: actorId,
+                    teamId: teamId
+                )
+            )
+            let created = updated.tasks.last
+            return .init(tool: request.tool, ok: true, data: .object([
+                "projectId": .string(updated.id),
+                "taskId": .string(created?.id ?? ""),
+                "title": .string(created?.title ?? title),
+                "status": .string(created?.status ?? status)
+            ]))
+        } catch {
+            return .init(
+                tool: request.tool, ok: false,
+                error: .init(code: "create_failed", message: "Failed to create task.", retryable: true)
+            )
+        }
+    }
+
+    private func executeEscalateToUser(request: ToolInvocationRequest, sessionID: String) async -> ToolInvocationResult {
+        let channelId = request.arguments["channelId"]?.asString ?? sessionID
+        let reason = request.arguments["reason"]?.asString?.trimmingCharacters(in: .whitespacesAndNewlines) ?? "Escalation requested"
+        let taskId = request.arguments["taskId"]?.asString
+
+        let message = "Escalation: \(reason)"
+        await runtime.appendSystemMessage(channelId: channelId, content: message)
+        await deliverToChannelPlugin(channelId: channelId, content: message)
+
+        if let taskId {
+            let topicId = request.arguments["topicId"]?.asString
+            if let project = await projectForChannel(channelId: channelId, topicId: topicId) {
+                _ = try? await updateProjectTask(
+                    projectID: project.id,
+                    taskID: taskId,
+                    request: ProjectTaskUpdateRequest(status: "blocked")
+                )
+            }
+        }
+
+        logger.info(
+            "tool.escalate_to_user",
+            metadata: [
+                "channel_id": .string(channelId),
+                "reason": .string(reason),
+                "task_id": .string(taskId ?? "")
+            ]
+        )
+
+        return .init(tool: request.tool, ok: true, data: .object([
+            "escalated": .bool(true),
+            "channelId": .string(channelId),
+            "reason": .string(reason)
+        ]))
+    }
+
+    // MARK: - LLM-to-LLM Discussion Tools
+
+    private func executeDiscussWithActor(request: ToolInvocationRequest) async -> ToolInvocationResult {
+        let targetActorId = request.arguments["actorId"]?.asString?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let topic = request.arguments["topic"]?.asString?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let message = request.arguments["message"]?.asString ?? ""
+        let taskId = request.arguments["taskId"]?.asString
+
+        guard !targetActorId.isEmpty else {
+            return .init(
+                tool: request.tool, ok: false,
+                error: .init(code: "invalid_arguments", message: "`actorId` is required.", retryable: false)
+            )
+        }
+        guard !message.isEmpty else {
+            return .init(
+                tool: request.tool, ok: false,
+                error: .init(code: "invalid_arguments", message: "`message` is required.", retryable: false)
+            )
+        }
+
+        let board = try? getActorBoard()
+        guard let targetNode = board?.nodes.first(where: { $0.id == targetActorId }) else {
+            return .init(
+                tool: request.tool, ok: false,
+                error: .init(code: "actor_not_found", message: "Target actor '\(targetActorId)' not found on board.", retryable: false)
+            )
+        }
+
+        let hasDiscussionLink = board?.links.contains(where: { link in
+            link.communicationType == .discussion &&
+            (link.sourceActorId == targetActorId || link.targetActorId == targetActorId ||
+             (link.direction == .twoWay && (link.sourceActorId == targetActorId || link.targetActorId == targetActorId)))
+        }) ?? false
+
+        let hasChatLink = board?.links.contains(where: { link in
+            (link.communicationType == .discussion || link.communicationType == .chat) &&
+            (link.sourceActorId == targetActorId || link.targetActorId == targetActorId)
+        }) ?? false
+
+        guard hasDiscussionLink || hasChatLink else {
+            return .init(
+                tool: request.tool, ok: false,
+                error: .init(code: "no_discussion_link", message: "No discussion or chat link to actor '\(targetActorId)'.", retryable: false)
+            )
+        }
+
+        let discussionChannelId = "discussion:\(UUID().uuidString.prefix(8))"
+        let prompt = """
+            [actor_discussion_v1]
+            You are \(targetNode.displayName) (role: \(targetNode.role ?? "unspecified")).
+            Another actor wants to discuss: \(topic.isEmpty ? "(no topic)" : topic)
+            \(taskId.map { "Related task: \($0)" } ?? "")
+
+            Their message:
+            \(message)
+
+            Respond concisely. Focus on your area of expertise.
+            """
+
+        let decision = await runtime.postMessage(
+            channelId: discussionChannelId,
+            request: ChannelMessageRequest(userId: "actor", content: prompt)
+        )
+
+        let snapshot = await runtime.channelState(channelId: discussionChannelId)
+        let response = snapshot?.messages.last(where: { $0.userId == "system" })?.content
+            ?? "Discussion initiated with \(targetNode.displayName)."
+
+        await runtime.eventBus.publish(
+            EventEnvelope(
+                messageType: .actorDiscussionStarted,
+                channelId: discussionChannelId,
+                payload: .object([
+                    "targetActorId": .string(targetActorId),
+                    "topic": .string(topic),
+                    "message": .string(message)
+                ])
+            )
+        )
+
+        logger.info(
+            "actor.discussion.started",
+            metadata: [
+                "target_actor_id": .string(targetActorId),
+                "discussion_channel": .string(discussionChannelId),
+                "topic": .string(topic),
+                "route_action": .string(decision.action.rawValue)
+            ]
+        )
+
+        return .init(tool: request.tool, ok: true, data: .object([
+            "discussionChannelId": .string(discussionChannelId),
+            "targetActorId": .string(targetActorId),
+            "targetActorName": .string(targetNode.displayName),
+            "response": .string(response)
+        ]))
+    }
+
+    private func executeConcludeDiscussion(request: ToolInvocationRequest) -> ToolInvocationResult {
+        let discussionChannelId = request.arguments["discussionChannelId"]?.asString ?? ""
+        let summary = request.arguments["summary"]?.asString ?? "Discussion concluded."
+
+        guard !discussionChannelId.isEmpty else {
+            return .init(
+                tool: request.tool, ok: false,
+                error: .init(code: "invalid_arguments", message: "`discussionChannelId` is required.", retryable: false)
+            )
+        }
+
+        logger.info(
+            "actor.discussion.concluded",
+            metadata: [
+                "discussion_channel": .string(discussionChannelId),
+                "summary": .string(summary)
+            ]
+        )
+
+        return .init(tool: request.tool, ok: true, data: .object([
+            "discussionChannelId": .string(discussionChannelId),
+            "concluded": .bool(true),
+            "summary": .string(summary)
+        ]))
+    }
+
+    private func projectForChannel(channelId: String, topicId: String? = nil) async -> ProjectRecord? {
         let projects = await store.listProjects()
+        if let topicId, !topicId.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            let compositeId = "\(channelId):\(topicId)"
+            if let found = projects
+                .sorted(by: { $0.createdAt < $1.createdAt })
+                .first(where: { project in
+                    project.channels.contains(where: { $0.channelId == compositeId })
+                }) {
+                return found
+            }
+        }
         return projects
             .sorted(by: { $0.createdAt < $1.createdAt })
             .first(where: { project in
@@ -2373,7 +2748,7 @@ public actor CoreService {
 
     private func normalizeTaskStatus(_ raw: String) throws -> String {
         let value = raw.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        let allowed = Set(["backlog", "ready", "in_progress", "done"])
+        let allowed = Set(["pending_approval", "backlog", "ready", "in_progress", "done", "blocked", "needs_review"])
         guard allowed.contains(value) else {
             throw ProjectError.invalidPayload
         }

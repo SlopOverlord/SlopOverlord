@@ -3,10 +3,12 @@ import Foundation
 public struct ChannelMessageRequest: Codable, Sendable {
     public var userId: String
     public var content: String
+    public var topicId: String?
 
-    public init(userId: String, content: String) {
+    public init(userId: String, content: String, topicId: String? = nil) {
         self.userId = userId
         self.content = content
+        self.topicId = topicId
     }
 }
 
@@ -1032,6 +1034,7 @@ public enum ActorCommunicationType: String, Codable, Sendable {
     case chat
     case task
     case event
+    case discussion
 }
 
 public enum ActorSocketPosition: String, Codable, Sendable {

@@ -344,12 +344,13 @@ public actor RuntimeSystem {
     }
 
     /// Generates visor bulletin and applies digest into channel histories.
-    public func generateVisorBulletin() async -> MemoryBulletin {
+    public func generateVisorBulletin(taskSummary: String? = nil) async -> MemoryBulletin {
         let channelSnapshots = await channels.snapshots()
         let workerSnapshots = await workers.snapshots()
         let bulletin = await visor.generateBulletin(
             channels: channelSnapshots,
-            workers: workerSnapshots
+            workers: workerSnapshots,
+            taskSummary: taskSummary
         )
         await channels.applyBulletinDigest(bulletin.digest)
         return bulletin

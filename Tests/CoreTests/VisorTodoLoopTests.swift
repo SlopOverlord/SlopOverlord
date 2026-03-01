@@ -30,7 +30,7 @@ func visorCreatesBacklogTasksFromBranchTodos() async throws {
     let tasks = try #require(project?.tasks)
 
     #expect(tasks.count == 2)
-    #expect(tasks.allSatisfy { $0.status == "backlog" })
+    #expect(tasks.allSatisfy { $0.status == "pending_approval" })
     #expect(tasks.allSatisfy { $0.description.contains("Source: visor-auto") })
     #expect(tasks.allSatisfy { $0.description.contains("Origin channel: general") })
 }

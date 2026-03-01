@@ -7,7 +7,7 @@ enum TaskApprovalReference: Equatable {
 
 enum TaskApprovalCommandParser {
     static func parse(_ content: String) -> TaskApprovalReference? {
-        let pattern = #"^\s*(pick\s*up|pickup|возьми|запусти)\s+#([A-Za-z0-9._-]+)\s*$"#
+        let pattern = #"^\s*(pick\s*up|pickup|approve|аппрув|одобри|возьми|запусти)\s+#([A-Za-z0-9._-]+)\s*$"#
         guard let regex = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive]) else {
             return nil
         }

@@ -121,6 +121,41 @@ enum ToolCatalog {
             title: "Schedule task",
             status: "adapter",
             description: "Schedule recurring task via external adapter."
+        ),
+        .init(
+            id: "project.task_list",
+            domain: "project",
+            title: "List project tasks",
+            status: "fully_functional",
+            description: "List tasks for the project associated with the current channel."
+        ),
+        .init(
+            id: "project.task_create",
+            domain: "project",
+            title: "Create project task",
+            status: "fully_functional",
+            description: "Create a new task in the project associated with the current channel."
+        ),
+        .init(
+            id: "project.escalate_to_user",
+            domain: "project",
+            title: "Escalate to user",
+            status: "fully_functional",
+            description: "Escalate a task or issue to the human user with a reason, sending a notification to the channel."
+        ),
+        .init(
+            id: "actor.discuss_with_actor",
+            domain: "actor",
+            title: "Discuss with actor",
+            status: "fully_functional",
+            description: "Initiate LLM-to-LLM discussion with another actor on a topic. Returns the other actor's response."
+        ),
+        .init(
+            id: "actor.conclude_discussion",
+            domain: "actor",
+            title: "Conclude discussion",
+            status: "fully_functional",
+            description: "End an ongoing LLM-to-LLM discussion with another actor, summarizing the outcome."
         )
     ]
 

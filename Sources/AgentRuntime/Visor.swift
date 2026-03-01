@@ -12,14 +12,17 @@ public actor Visor {
     }
 
     /// Builds periodic runtime bulletin and publishes digest event.
-    public func generateBulletin(channels: [ChannelSnapshot], workers: [WorkerSnapshot]) async -> MemoryBulletin {
+    public func generateBulletin(channels: [ChannelSnapshot], workers: [WorkerSnapshot], taskSummary: String? = nil) async -> MemoryBulletin {
         let headline = "Runtime bulletin: \(channels.count) channels, \(workers.count) workers"
         let activeWorkers = workers.filter { $0.status == .running || $0.status == .waitingInput }.count
-        let items = [
+        var items = [
             "Active channels: \(channels.count)",
             "Workers in progress: \(activeWorkers)",
             "Total workers known: \(workers.count)"
         ]
+        if let taskSummary, !taskSummary.isEmpty {
+            items.append(taskSummary)
+        }
         let digest = items.joined(separator: " | ")
         let bulletin = MemoryBulletin(headline: headline, digest: digest, items: items)
 

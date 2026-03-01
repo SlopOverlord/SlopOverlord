@@ -14,8 +14,6 @@ import {
   updateActorTeam
 } from "../../api";
 
-const BOARD_WIDTH = 1400;
-const BOARD_HEIGHT = 840;
 const NODE_WIDTH = 180;
 const NODE_HEIGHT = 88;
 const SOCKETS = ["top", "right", "bottom", "left"];
@@ -43,8 +41,8 @@ function normalizeNode(item, index) {
   const id = asString(item?.id, `actor:${index + 1}`);
   const kind = asString(item?.kind, "action");
   const normalizedKind = ["agent", "human", "action"].includes(kind) ? kind : "action";
-  const positionX = clamp(asNumber(item?.positionX, 120 + (index % 6) * 220), 0, BOARD_WIDTH - NODE_WIDTH);
-  const positionY = clamp(asNumber(item?.positionY, 120 + Math.floor(index / 6) * 160), 0, BOARD_HEIGHT - NODE_HEIGHT);
+  const positionX = asNumber(item?.positionX, 120 + (index % 6) * 220);
+  const positionY = asNumber(item?.positionY, 120 + Math.floor(index / 6) * 160);
 
   return {
     id,
@@ -77,12 +75,22 @@ function normalizeLink(item, index, nodeIds) {
     sourceActorId,
     targetActorId,
     direction: direction === "two_way" ? "two_way" : "one_way",
-    communicationType: ["chat", "task", "event"].includes(communicationType) ? communicationType : "chat",
+    communicationType: ["chat", "task", "event", "discussion"].includes(communicationType) ? communicationType : "chat",
     sourceSocket: normalizeSocket(item?.sourceSocket, "right"),
     targetSocket: normalizeSocket(item?.targetSocket, "left"),
     createdAt: item?.createdAt || new Date().toISOString()
   };
 }
+
+const TEAM_COLORS = [
+  { bg: "rgba(34, 197, 94, 0.10)", border: "rgba(34, 197, 94, 0.35)", dot: "#22c55e" },
+  { bg: "rgba(99, 120, 255, 0.10)", border: "rgba(99, 120, 255, 0.35)", dot: "#6378ff" },
+  { bg: "rgba(251, 191, 36, 0.10)", border: "rgba(251, 191, 36, 0.30)", dot: "#fbbf24" },
+  { bg: "rgba(236, 72, 153, 0.10)", border: "rgba(236, 72, 153, 0.30)", dot: "#ec4899" },
+  { bg: "rgba(139, 92, 246, 0.10)", border: "rgba(139, 92, 246, 0.30)", dot: "#8b5cf6" },
+  { bg: "rgba(20, 184, 166, 0.10)", border: "rgba(20, 184, 166, 0.30)", dot: "#14b8a6" }
+];
+const TEAM_PADDING = 24;
 
 function normalizeTeam(item, index, nodeIds) {
   const id = asString(item?.id, `team:${index + 1}`);
@@ -95,6 +103,29 @@ function normalizeTeam(item, index, nodeIds) {
     name: asString(item?.name, id),
     memberActorIds: members,
     createdAt: item?.createdAt || new Date().toISOString()
+  };
+}
+
+function computeTeamBounds(team, nodeMap) {
+  const members = team.memberActorIds.map((id) => nodeMap.get(id)).filter(Boolean);
+  if (members.length === 0) {
+    return null;
+  }
+  let minX = Infinity;
+  let minY = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+  for (const node of members) {
+    minX = Math.min(minX, node.positionX);
+    minY = Math.min(minY, node.positionY);
+    maxX = Math.max(maxX, node.positionX + NODE_WIDTH);
+    maxY = Math.max(maxY, node.positionY + NODE_HEIGHT);
+  }
+  return {
+    x: minX - TEAM_PADDING,
+    y: minY - TEAM_PADDING - 28,
+    width: maxX - minX + TEAM_PADDING * 2,
+    height: maxY - minY + TEAM_PADDING * 2 + 28
   };
 }
 
@@ -246,19 +277,30 @@ export function ActorsView() {
   const [nodeDraftRole, setNodeDraftRole] = useState("");
   const [nodeDraftChannel, setNodeDraftChannel] = useState("");
   const [dragState, setDragState] = useState(null);
+  const [teamGroupDrag, setTeamGroupDrag] = useState(null);
+  const [selectedTeamId, setSelectedTeamId] = useState(null);
   const [portDrag, setPortDrag] = useState(null);
   const [hoverInputPort, setHoverInputPort] = useState(null);
   const [linkMenu, setLinkMenu] = useState(null);
   const [showNewActorPopup, setShowNewActorPopup] = useState(false);
   const [showNewTeamPopup, setShowNewTeamPopup] = useState(false);
 
+  const [viewTransform, setViewTransform] = useState({ x: 0, y: 0, scale: 1 });
+  const [panState, setPanState] = useState(null);
+
   const boardRef = useRef(board);
   const boardCanvasRef = useRef(null);
+  const scrollerRef = useRef(null);
   const dragMovedRef = useRef(false);
+  const viewTransformRef = useRef(viewTransform);
 
   useEffect(() => {
     boardRef.current = board;
   }, [board]);
+
+  useEffect(() => {
+    viewTransformRef.current = viewTransform;
+  }, [viewTransform]);
 
   function applyBoardResponse(response, successMessage) {
     if (!response) {
@@ -271,6 +313,33 @@ export function ActorsView() {
     setBoard(normalized);
     setStatusText(successMessage);
     return true;
+  }
+
+  function fitToView(nodes) {
+    const el = scrollerRef.current;
+    if (!el || nodes.length === 0) {
+      return;
+    }
+    const rect = el.getBoundingClientRect();
+    let minX = Infinity;
+    let minY = Infinity;
+    let maxX = -Infinity;
+    let maxY = -Infinity;
+    for (const node of nodes) {
+      minX = Math.min(minX, node.positionX);
+      minY = Math.min(minY, node.positionY);
+      maxX = Math.max(maxX, node.positionX + NODE_WIDTH);
+      maxY = Math.max(maxY, node.positionY + NODE_HEIGHT);
+    }
+    const PAD = 80;
+    const cw = maxX - minX + PAD * 2;
+    const ch = maxY - minY + PAD * 2;
+    const scale = Math.min(rect.width / cw, rect.height / ch, 1.5);
+    const x = (rect.width - cw * scale) / 2 - (minX - PAD) * scale;
+    const y = (rect.height - ch * scale) / 2 - (minY - PAD) * scale;
+    const vt = { x, y, scale };
+    viewTransformRef.current = vt;
+    setViewTransform(vt);
   }
 
   useEffect(() => {
@@ -294,6 +363,7 @@ export function ActorsView() {
       setBoard(normalized);
       setStatusText(`Loaded ${normalized.nodes.length} actors`);
       setIsLoading(false);
+      requestAnimationFrame(() => fitToView(normalized.nodes));
     }
 
     loadBoard().catch(() => {
@@ -307,6 +377,56 @@ export function ActorsView() {
       isCancelled = true;
     };
   }, []);
+
+  useEffect(() => {
+    const el = scrollerRef.current;
+    if (!el) {
+      return undefined;
+    }
+    function handleWheel(e) {
+      e.preventDefault();
+      const rect = el.getBoundingClientRect();
+      const mx = e.clientX - rect.left;
+      const my = e.clientY - rect.top;
+      const vt = viewTransformRef.current;
+      const factor = e.deltaY < 0 ? 1.08 : 1 / 1.08;
+      const ns = clamp(vt.scale * factor, 0.1, 5);
+      const ratio = ns / vt.scale;
+      const next = {
+        x: mx - (mx - vt.x) * ratio,
+        y: my - (my - vt.y) * ratio,
+        scale: ns
+      };
+      viewTransformRef.current = next;
+      setViewTransform(next);
+    }
+    el.addEventListener("wheel", handleWheel, { passive: false });
+    return () => el.removeEventListener("wheel", handleWheel);
+  }, []);
+
+  useEffect(() => {
+    if (!panState) {
+      return undefined;
+    }
+    function handleMove(e) {
+      const next = {
+        ...viewTransformRef.current,
+        x: panState.originX + (e.clientX - panState.originClientX),
+        y: panState.originY + (e.clientY - panState.originClientY)
+      };
+      viewTransformRef.current = next;
+      setViewTransform(next);
+    }
+    function handleUp() {
+      setPanState(null);
+    }
+    window.addEventListener("pointermove", handleMove);
+    window.addEventListener("pointerup", handleUp);
+    return () => {
+      window.removeEventListener("pointermove", handleMove);
+      window.removeEventListener("pointerup", handleUp);
+    };
+  }, [panState]);
 
   /** Persist current board state to server (nodes, links, teams). Use after any user-driven change. */
   async function persistBoard(successMessage = "Board saved") {
@@ -323,15 +443,15 @@ export function ActorsView() {
   }
 
   function toBoardCoordinates(clientX, clientY) {
-    const boardElement = boardCanvasRef.current;
-    if (!boardElement) {
+    const el = scrollerRef.current;
+    if (!el) {
       return { x: 0, y: 0 };
     }
-
-    const rect = boardElement.getBoundingClientRect();
+    const rect = el.getBoundingClientRect();
+    const vt = viewTransformRef.current;
     return {
-      x: clamp(clientX - rect.left, 0, BOARD_WIDTH),
-      y: clamp(clientY - rect.top, 0, BOARD_HEIGHT)
+      x: (clientX - rect.left - vt.x) / vt.scale,
+      y: (clientY - rect.top - vt.y) / vt.scale
     };
   }
 
@@ -341,17 +461,17 @@ export function ActorsView() {
     }
 
     function handlePointerMove(event) {
-      const deltaX = event.clientX - dragState.originClientX;
-      const deltaY = event.clientY - dragState.originClientY;
+      const scale = viewTransformRef.current.scale;
+      const deltaX = (event.clientX - dragState.originClientX) / scale;
+      const deltaY = (event.clientY - dragState.originClientY) / scale;
       dragMovedRef.current = true;
-
-      const nextX = clamp(dragState.originNodeX + deltaX, 0, BOARD_WIDTH - NODE_WIDTH);
-      const nextY = clamp(dragState.originNodeY + deltaY, 0, BOARD_HEIGHT - NODE_HEIGHT);
 
       const nextBoard = {
         ...boardRef.current,
         nodes: boardRef.current.nodes.map((node) =>
-          node.id === dragState.nodeId ? { ...node, positionX: nextX, positionY: nextY } : node
+          node.id === dragState.nodeId
+            ? { ...node, positionX: dragState.originNodeX + deltaX, positionY: dragState.originNodeY + deltaY }
+            : node
         )
       };
       boardRef.current = nextBoard;
@@ -374,6 +494,52 @@ export function ActorsView() {
       window.removeEventListener("pointerup", handlePointerUp);
     };
   }, [dragState]);
+
+  useEffect(() => {
+    if (!teamGroupDrag) {
+      return undefined;
+    }
+
+    function handlePointerMove(event) {
+      const scale = viewTransformRef.current.scale;
+      const deltaX = (event.clientX - teamGroupDrag.originClientX) / scale;
+      const deltaY = (event.clientY - teamGroupDrag.originClientY) / scale;
+      dragMovedRef.current = true;
+
+      const nextBoard = {
+        ...boardRef.current,
+        nodes: boardRef.current.nodes.map((node) => {
+          const origin = teamGroupDrag.origins[node.id];
+          if (!origin) {
+            return node;
+          }
+          return {
+            ...node,
+            positionX: origin.x + deltaX,
+            positionY: origin.y + deltaY
+          };
+        })
+      };
+      boardRef.current = nextBoard;
+      setBoard(nextBoard);
+    }
+
+    function handlePointerUp() {
+      const shouldPersist = dragMovedRef.current;
+      dragMovedRef.current = false;
+      setTeamGroupDrag(null);
+      if (shouldPersist) {
+        void persistBoard("Board layout saved");
+      }
+    }
+
+    window.addEventListener("pointermove", handlePointerMove);
+    window.addEventListener("pointerup", handlePointerUp);
+    return () => {
+      window.removeEventListener("pointermove", handlePointerMove);
+      window.removeEventListener("pointerup", handlePointerUp);
+    };
+  }, [teamGroupDrag]);
 
   useEffect(() => {
     if (!portDrag) {
@@ -602,8 +768,8 @@ export function ActorsView() {
       linkedAgentId: null,
       channelId: `channel:${slug}`,
       role: null,
-      positionX: clamp(360 + (index % 5) * 190, 0, BOARD_WIDTH - NODE_WIDTH),
-      positionY: clamp(220 + Math.floor(index / 5) * 150, 0, BOARD_HEIGHT - NODE_HEIGHT),
+      positionX: 360 + (index % 5) * 190,
+      positionY: 220 + Math.floor(index / 5) * 150,
       createdAt: new Date().toISOString()
     });
     setIsSaving(false);
@@ -790,6 +956,48 @@ export function ActorsView() {
     return map;
   }, [board.nodes]);
 
+  const teamBoundsMap = useMemo(() => {
+    const map = new Map();
+    board.teams.forEach((team, index) => {
+      const bounds = computeTeamBounds(team, nodeMap);
+      if (bounds) {
+        map.set(team.id, { team, bounds, colorIndex: index % TEAM_COLORS.length });
+      }
+    });
+    return map;
+  }, [board.teams, board.nodes, nodeMap]);
+
+  function onTeamGroupPointerDown(event, team) {
+    if (event.button !== 0) {
+      return;
+    }
+    event.stopPropagation();
+    setSelectedNodeId(null);
+    setSelectedLinkId(null);
+    setLinkMenu(null);
+    setSelectedTeamId(team.id);
+    dragMovedRef.current = false;
+    const origins = {};
+    for (const memberId of team.memberActorIds) {
+      const node = nodeMap.get(memberId);
+      if (node) {
+        origins[memberId] = { x: node.positionX, y: node.positionY };
+      }
+    }
+    setTeamGroupDrag({
+      teamId: team.id,
+      originClientX: event.clientX,
+      originClientY: event.clientY,
+      origins
+    });
+  }
+
+  function openTeamEditor(team) {
+    beginTeamEdit(team);
+    setShowNewTeamPopup(true);
+    setShowNewActorPopup(false);
+  }
+
   let previewLine = null;
   if (portDrag) {
     const sourceNode = nodeMap.get(portDrag.sourceNodeId);
@@ -818,11 +1026,9 @@ export function ActorsView() {
     if (!linkMenu) {
       return null;
     }
-    const MENU_WIDTH = 236;
-    const MENU_HEIGHT = 158;
     return {
-      left: clamp(linkMenu.anchorX + 12, 10, BOARD_WIDTH - MENU_WIDTH - 10),
-      top: clamp(linkMenu.anchorY - 12, 10, BOARD_HEIGHT - MENU_HEIGHT - 10)
+      left: linkMenu.anchorX + 12,
+      top: linkMenu.anchorY - 12
     };
   }, [linkMenu]);
 
@@ -830,15 +1036,9 @@ export function ActorsView() {
     if (!selectedNode) {
       return null;
     }
-    const MENU_WIDTH = 240;
-    const MENU_HEIGHT = 280;
-    let left = selectedNode.positionX + NODE_WIDTH + 14;
-    if (left + MENU_WIDTH > BOARD_WIDTH - 10) {
-      left = selectedNode.positionX - MENU_WIDTH - 14;
-    }
     return {
-      left: clamp(left, 10, BOARD_WIDTH - MENU_WIDTH - 10),
-      top: clamp(selectedNode.positionY, 10, BOARD_HEIGHT - MENU_HEIGHT - 10)
+      left: selectedNode.positionX + NODE_WIDTH + 14,
+      top: selectedNode.positionY
     };
   }, [selectedNode?.positionX, selectedNode?.positionY]);
 
@@ -846,20 +1046,77 @@ export function ActorsView() {
     <main className="actors-shell">
       <div className="actors-layout">
         <section className="actors-board-pane">
-          <div className="actors-board-scroller">
+          <div
+            className="actors-board-scroller"
+            ref={scrollerRef}
+            onPointerDown={(event) => {
+              if (event.target !== scrollerRef.current) {
+                return;
+              }
+              setSelectedNodeId(null);
+              setSelectedLinkId(null);
+              setSelectedTeamId(null);
+              setLinkMenu(null);
+              if (event.button === 0) {
+                const vt = viewTransformRef.current;
+                setPanState({
+                  originClientX: event.clientX,
+                  originClientY: event.clientY,
+                  originX: vt.x,
+                  originY: vt.y
+                });
+              }
+            }}
+          >
             <div
               ref={boardCanvasRef}
               className="actors-board"
-              style={{ width: BOARD_WIDTH, height: BOARD_HEIGHT }}
-              onPointerDown={(event) => {
-                if (event.target === event.currentTarget) {
-                  setSelectedNodeId(null);
-                  setSelectedLinkId(null);
-                  setLinkMenu(null);
-                }
+              style={{
+                transform: `translate(${viewTransform.x}px, ${viewTransform.y}px) scale(${viewTransform.scale})`,
+                transformOrigin: "0 0"
               }}
             >
-              <svg className="actors-links-layer" width={BOARD_WIDTH} height={BOARD_HEIGHT}>
+              {Array.from(teamBoundsMap.values()).map(({ team, bounds, colorIndex }) => {
+                const color = TEAM_COLORS[colorIndex];
+                const isSelected = selectedTeamId === team.id;
+                return (
+                  <div
+                    key={team.id}
+                    className={`actor-team-group ${isSelected ? "selected" : ""}`}
+                    style={{
+                      left: bounds.x,
+                      top: bounds.y,
+                      width: bounds.width,
+                      height: bounds.height,
+                      background: color.bg,
+                      borderColor: color.border
+                    }}
+                    onPointerDown={(event) => onTeamGroupPointerDown(event, team)}
+                  >
+                    <span className="actor-team-group-label" style={{ color: color.dot }}>
+                      <span className="actor-team-group-dot" style={{ background: color.dot }} />
+                      {team.name}
+                    </span>
+                    {isSelected ? (
+                      <button
+                        type="button"
+                        className="actor-team-group-edit"
+                        style={{ borderColor: color.border, color: color.dot }}
+                        onPointerDown={(event) => event.stopPropagation()}
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          openTeamEditor(team);
+                        }}
+                        title="Edit team"
+                      >
+                        ✎
+                      </button>
+                    ) : null}
+                  </div>
+                );
+              })}
+
+              <svg className="actors-links-layer">
                 {board.links.map((link) => {
                   const sourceNode = nodeMap.get(link.sourceActorId);
                   const targetNode = nodeMap.get(link.targetActorId);
@@ -924,6 +1181,7 @@ export function ActorsView() {
                       event.stopPropagation();
                       setSelectedNodeId(node.id);
                       setSelectedLinkId(null);
+                      setSelectedTeamId(null);
                       setLinkMenu(null);
                     }}
                     role="button"
