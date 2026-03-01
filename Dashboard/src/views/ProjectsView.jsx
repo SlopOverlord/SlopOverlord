@@ -778,6 +778,146 @@ function ProjectTaskEditModal({
   );
 }
 
+function AddChannelModal({ isOpen, projectChannels, availableChannels, draft, onChange, onClose, onAdd }) {
+  const [channelSearch, setChannelSearch] = useState("");
+  const [dropdownOpen, setDropdownOpen] = useState(false);
+  const searchRef = useRef(null);
+
+  const projectChannelIds = useMemo(() => new Set(projectChannels.map((ch) => ch.channelId)), [projectChannels]);
+
+  const filteredChannels = useMemo(() => {
+    const q = channelSearch.trim().toLowerCase();
+    return availableChannels.filter((ch) => {
+      if (projectChannelIds.has(ch.channelId)) {
+        return false;
+      }
+      if (!q) {
+        return true;
+      }
+      return (
+        ch.channelId.toLowerCase().includes(q) ||
+        ch.displayName.toLowerCase().includes(q)
+      );
+    });
+  }, [availableChannels, projectChannelIds, channelSearch]);
+
+  if (!isOpen) {
+    return null;
+  }
+
+  function selectChannel(channel) {
+    onChange("channelId", channel.channelId);
+    setChannelSearch("");
+    setDropdownOpen(false);
+  }
+
+  function clearSelection() {
+    onChange("channelId", "");
+    setChannelSearch("");
+  }
+
+  const selectedChannel = availableChannels.find((ch) => ch.channelId === draft.channelId);
+
+  return (
+    <div className="project-modal-overlay" onClick={onClose}>
+      <section className="project-modal" onClick={(event) => event.stopPropagation()}>
+        <div className="project-modal-head">
+          <h3>Add Channel</h3>
+          <button type="button" className="project-modal-close" aria-label="Close" onClick={onClose}>
+            ×
+          </button>
+        </div>
+
+        <form
+          className="project-task-form"
+          onSubmit={(event) => {
+            event.preventDefault();
+            onAdd();
+          }}
+        >
+          <label>
+            Channel Title
+            <input
+              value={draft.title}
+              onChange={(event) => onChange("title", event.target.value)}
+              placeholder="Channel title..."
+              autoFocus
+            />
+          </label>
+
+          <label>
+            Channel ID
+            <div className="actor-team-members-picker">
+              {draft.channelId ? (
+                <div className="actor-team-tags">
+                  <span className="actor-team-tag">
+                    {selectedChannel ? selectedChannel.displayName : draft.channelId}
+                    <button
+                      type="button"
+                      className="actor-team-tag-remove"
+                      aria-label="Remove channel"
+                      onClick={clearSelection}
+                    >
+                      ×
+                    </button>
+                  </span>
+                </div>
+              ) : null}
+              <div className="actor-team-search-wrap">
+                <input
+                  ref={searchRef}
+                  className="actor-team-search"
+                  value={channelSearch}
+                  onChange={(event) => {
+                    setChannelSearch(event.target.value);
+                    setDropdownOpen(true);
+                  }}
+                  onFocus={() => setDropdownOpen(true)}
+                  onBlur={() => setTimeout(() => setDropdownOpen(false), 150)}
+                  placeholder="Search channels..."
+                  autoComplete="off"
+                />
+                {dropdownOpen ? (
+                  <ul className="actor-team-dropdown">
+                    {filteredChannels.length === 0 ? (
+                      <li className="actor-team-dropdown-empty">
+                        {availableChannels.length === 0 ? "No channels available" : "No matching channels"}
+                      </li>
+                    ) : (
+                      filteredChannels.map((ch) => (
+                        <li
+                          key={ch.channelId}
+                          className="actor-team-dropdown-item"
+                          onMouseDown={(event) => {
+                            event.preventDefault();
+                            selectChannel(ch);
+                          }}
+                        >
+                          <span className="actor-team-dropdown-name">{ch.displayName}</span>
+                          <span className="actor-team-dropdown-id">{ch.channelId}</span>
+                        </li>
+                      ))
+                    )}
+                  </ul>
+                ) : null}
+              </div>
+            </div>
+          </label>
+
+          <div className="project-modal-actions">
+            <button type="button" onClick={onClose}>
+              Cancel
+            </button>
+            <button type="submit" className="project-primary" disabled={!draft.channelId.trim()}>
+              Add Channel
+            </button>
+          </div>
+        </form>
+      </section>
+    </div>
+  );
+}
+
 function ProjectTabPlaceholder({ title, text }) {
   return (
     <section className="project-pane">
@@ -808,6 +948,9 @@ export function ProjectsView({
   const [projectNameDraft, setProjectNameDraft] = useState("");
   const [createModalActors, setCreateModalActors] = useState([]);
   const [createModalTeams, setCreateModalTeams] = useState([]);
+  const [isAddChannelModalOpen, setIsAddChannelModalOpen] = useState(false);
+  const [addChannelDraft, setAddChannelDraft] = useState({ title: "", channelId: "" });
+  const [availableChannels, setAvailableChannels] = useState([]);
 
   const selectedProject = useMemo(
     () => projects.find((project) => project.id === routeProjectId) || null,
@@ -1221,24 +1364,62 @@ export function ProjectsView({
     setStatusText("Task deleted.");
   }
 
-  async function addProjectChannel() {
+  async function openAddChannelModal() {
     if (!selectedProject) {
       return;
     }
 
-    const titleInput = window.prompt("Channel title", "New channel");
-    if (titleInput == null) {
+    const board = await fetchActorsBoard();
+    const channels = [];
+    if (board && Array.isArray(board.nodes)) {
+      for (const node of board.nodes) {
+        if (node.channelId) {
+          channels.push({
+            channelId: String(node.channelId),
+            displayName: String(node.displayName || node.channelId)
+          });
+        }
+      }
+    }
+
+    const uniqueChannels = [];
+    const seen = new Set();
+    for (const ch of channels) {
+      if (!seen.has(ch.channelId)) {
+        seen.add(ch.channelId);
+        uniqueChannels.push(ch);
+      }
+    }
+
+    setAvailableChannels(uniqueChannels);
+    setAddChannelDraft({
+      title: "New channel",
+      channelId: ""
+    });
+    setIsAddChannelModalOpen(true);
+  }
+
+  function closeAddChannelModal() {
+    setIsAddChannelModalOpen(false);
+    setAddChannelDraft({ title: "", channelId: "" });
+  }
+
+  function updateAddChannelDraft(field, value) {
+    setAddChannelDraft((previous) => ({
+      ...previous,
+      [field]: value
+    }));
+  }
+
+  async function submitAddChannel() {
+    if (!selectedProject) {
       return;
     }
 
-    const channelIdInput = window.prompt("Channel id", `${toSlug(selectedProject.name)}-${selectedProject.chats.length + 1}`);
-    if (channelIdInput == null) {
-      return;
-    }
-
-    const title = String(titleInput || "").trim() || "New channel";
-    const channelId = String(channelIdInput || "").trim();
+    const title = String(addChannelDraft.title || "").trim() || "New channel";
+    const channelId = String(addChannelDraft.channelId || "").trim();
     if (!channelId) {
+      setStatusText("Channel ID is required.");
       return;
     }
 
@@ -1250,6 +1431,7 @@ export function ProjectsView({
 
     replaceProjectInState(updated);
     setStatusText("Channel added.");
+    closeAddChannelModal();
   }
 
   async function removeProjectChannel(chatId) {
@@ -1702,7 +1884,7 @@ export function ProjectsView({
         <section className="project-pane">
           <div className="project-pane-head">
             <h4>Channels</h4>
-            <button type="button" onClick={addProjectChannel}>
+            <button type="button" onClick={openAddChannelModal}>
               Add Channel
             </button>
           </div>
@@ -1835,6 +2017,16 @@ export function ProjectsView({
         onDelete={deleteTaskFromModal}
         actors={createModalActors}
         teams={createModalTeams}
+      />
+
+      <AddChannelModal
+        isOpen={isAddChannelModalOpen}
+        projectChannels={selectedProject?.chats || []}
+        availableChannels={availableChannels}
+        draft={addChannelDraft}
+        onChange={updateAddChannelDraft}
+        onClose={closeAddChannelModal}
+        onAdd={submitAddChannel}
       />
     </main>
   );
