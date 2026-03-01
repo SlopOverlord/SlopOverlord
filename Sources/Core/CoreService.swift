@@ -101,6 +101,13 @@ public actor CoreService {
         case conflict
     }
 
+    public enum ChannelPluginError: Error {
+        case invalidID
+        case invalidPayload
+        case notFound
+        case conflict
+    }
+
     private let runtime: RuntimeSystem
     private let store: any PersistenceStore
     private let openAIProviderCatalog: OpenAIProviderCatalogService
@@ -111,6 +118,7 @@ public actor CoreService {
     private let toolsAuthorization: ToolAuthorizationService
     private let toolExecution: ToolExecutionService
     private let systemLogStore: SystemLogFileStore
+    private let channelDelivery: ChannelDeliveryService
     private let logger: Logger
     private let configPath: String
     private var workspaceRootURL: URL
@@ -140,6 +148,7 @@ public actor CoreService {
         self.agentCatalogStore = AgentCatalogFileStore(agentsRootURL: self.agentsRootURL)
         self.sessionStore = AgentSessionFileStore(agentsRootURL: self.agentsRootURL)
         self.systemLogStore = SystemLogFileStore(workspaceRootURL: self.workspaceRootURL)
+        self.channelDelivery = ChannelDeliveryService(store: self.store)
         self.actorBoardStore = ActorBoardFileStore(workspaceRootURL: self.workspaceRootURL)
         let orchestratorCatalogStore = AgentCatalogFileStore(agentsRootURL: self.agentsRootURL)
         let orchestratorSessionStore = AgentSessionFileStore(agentsRootURL: self.agentsRootURL)
@@ -199,6 +208,12 @@ public actor CoreService {
     /// Routes interactive message into a running worker.
     public func postChannelRoute(channelId: String, workerId: String, request: ChannelRouteRequest) async -> Bool {
         await runtime.routeMessage(channelId: channelId, workerId: workerId, message: request.message)
+    }
+
+    /// Delivers an outbound message to the channel plugin responsible for this channelId.
+    @discardableResult
+    public func deliverToChannelPlugin(channelId: String, userId: String = "system", content: String) async -> Bool {
+        await channelDelivery.deliver(channelId: channelId, userId: userId, content: content)
     }
 
     /// Returns current state snapshot for a channel.
@@ -613,6 +628,114 @@ public actor CoreService {
         } catch {
             throw mapAgentToolsError(error)
         }
+    }
+
+    // MARK: - Channel Plugins
+
+    public func listChannelPlugins() async -> [ChannelPluginRecord] {
+        await store.listChannelPlugins()
+    }
+
+    public func getChannelPlugin(id: String) async throws -> ChannelPluginRecord {
+        guard let normalized = normalizedPluginID(id) else {
+            throw ChannelPluginError.invalidID
+        }
+        guard let plugin = await store.channelPlugin(id: normalized) else {
+            throw ChannelPluginError.notFound
+        }
+        return plugin
+    }
+
+    public func createChannelPlugin(_ request: ChannelPluginCreateRequest) async throws -> ChannelPluginRecord {
+        let id: String
+        if let requestID = request.id {
+            guard let normalized = normalizedPluginID(requestID) else {
+                throw ChannelPluginError.invalidID
+            }
+            if await store.channelPlugin(id: normalized) != nil {
+                throw ChannelPluginError.conflict
+            }
+            id = normalized
+        } else {
+            id = UUID().uuidString.lowercased()
+        }
+
+        let type = request.type.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !type.isEmpty else {
+            throw ChannelPluginError.invalidPayload
+        }
+
+        let baseUrl = request.baseUrl.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !baseUrl.isEmpty else {
+            throw ChannelPluginError.invalidPayload
+        }
+
+        let now = Date()
+        let plugin = ChannelPluginRecord(
+            id: id,
+            type: type,
+            baseUrl: baseUrl,
+            channelIds: request.channelIds ?? [],
+            config: request.config ?? [:],
+            enabled: request.enabled ?? true,
+            createdAt: now,
+            updatedAt: now
+        )
+        await store.saveChannelPlugin(plugin)
+        return plugin
+    }
+
+    public func updateChannelPlugin(id: String, request: ChannelPluginUpdateRequest) async throws -> ChannelPluginRecord {
+        guard let normalized = normalizedPluginID(id) else {
+            throw ChannelPluginError.invalidID
+        }
+        guard var plugin = await store.channelPlugin(id: normalized) else {
+            throw ChannelPluginError.notFound
+        }
+        if let type = request.type {
+            let trimmed = type.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty else { throw ChannelPluginError.invalidPayload }
+            plugin.type = trimmed
+        }
+        if let baseUrl = request.baseUrl {
+            let trimmed = baseUrl.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty else { throw ChannelPluginError.invalidPayload }
+            plugin.baseUrl = trimmed
+        }
+        if let channelIds = request.channelIds {
+            plugin.channelIds = channelIds
+        }
+        if let config = request.config {
+            plugin.config = config
+        }
+        if let enabled = request.enabled {
+            plugin.enabled = enabled
+        }
+        plugin.updatedAt = Date()
+        await store.saveChannelPlugin(plugin)
+        return plugin
+    }
+
+    public func deleteChannelPlugin(id: String) async throws {
+        guard let normalized = normalizedPluginID(id) else {
+            throw ChannelPluginError.invalidID
+        }
+        guard await store.channelPlugin(id: normalized) != nil else {
+            throw ChannelPluginError.notFound
+        }
+        await store.deleteChannelPlugin(id: normalized)
+    }
+
+    /// Finds the enabled plugin responsible for a given channel ID.
+    public func channelPluginForChannel(channelId: String) async -> ChannelPluginRecord? {
+        let plugins = await store.listChannelPlugins()
+        return plugins.first { $0.enabled && $0.channelIds.contains(channelId) }
+    }
+
+    private func normalizedPluginID(_ raw: String) -> String? {
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !trimmed.isEmpty, trimmed.count <= 128 else { return nil }
+        return trimmed
     }
 
     /// Returns actor graph snapshot used by visual canvas board.
@@ -1468,6 +1591,7 @@ public actor CoreService {
                 "agent_id": .string(delegation.agentID ?? "none")
             ]
         )
+        // Build a descriptive spawn message including agent/actor details and log path.
         let delegateMessage: String
         if let agentID = delegation.agentID {
             delegateMessage = "Task \(task.id) delegated to agent \(agentID)."
@@ -1477,9 +1601,14 @@ public actor CoreService {
             delegateMessage = "Task \(task.id) started in channel \(delegation.channelID)."
         }
         let logsPath = projectTaskLogFileURL(projectID: project.id, taskID: task.id).path
+        let spawnMessage = "\(delegateMessage) Logs: \(logsPath)"
         await runtime.appendSystemMessage(
             channelId: delegation.channelID,
-            content: "\(delegateMessage) Logs: \(logsPath)"
+            content: spawnMessage
+        )
+        await deliverToChannelPlugin(
+            channelId: delegation.channelID,
+            content: spawnMessage
         )
     }
 
@@ -1829,10 +1958,9 @@ public actor CoreService {
         project.updatedAt = Date()
         await store.saveProject(project)
         _ = await triggerVisorBulletin()
-        await runtime.appendSystemMessage(
-            channelId: event.channelId,
-            content: "Visor created \(createdCount) backlog tasks for approval."
-        )
+        let visorMessage = "Visor created \(createdCount) backlog tasks for approval."
+        await runtime.appendSystemMessage(channelId: event.channelId, content: visorMessage)
+        await deliverToChannelPlugin(channelId: event.channelId, content: visorMessage)
 
         if duplicateCount > 0 {
             logger.info(
@@ -1987,6 +2115,17 @@ public actor CoreService {
                     content: "\(failedActor) failed task \(task.id); moved back to backlog."
                 )
             }
+
+            let statusMessage: String
+            if nextStatus == "done" {
+                statusMessage = "Task \(task.id) completed."
+            } else if failureNote != nil {
+                statusMessage = "Task \(task.id) failed; moved back to backlog."
+            } else {
+                statusMessage = "Task \(task.id) status changed to \(nextStatus)."
+            }
+            await runtime.appendSystemMessage(channelId: event.channelId, content: statusMessage)
+            await deliverToChannelPlugin(channelId: event.channelId, content: statusMessage)
 
             logger.info(
                 "visor.task.synced_from_worker_event",

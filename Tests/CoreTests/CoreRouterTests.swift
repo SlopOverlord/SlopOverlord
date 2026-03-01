@@ -1466,3 +1466,128 @@ func agentSessionLifecycleEndpoints() async throws {
     )
     #expect(getDeletedResponse.status == 404)
 }
+
+// MARK: - Channel Plugins CRUD
+
+@Test
+func channelPluginCrudEndpoints() async throws {
+    let sqlitePath = FileManager.default.temporaryDirectory
+        .appendingPathComponent("core-plugin-crud-\(UUID().uuidString).sqlite")
+        .path
+    var config = CoreConfig.default
+    config.sqlitePath = sqlitePath
+    let service = CoreService(config: config)
+    let router = CoreRouter(service: service)
+
+    let listResponse = await router.handle(method: "GET", path: "/v1/plugins", body: nil)
+    #expect(listResponse.status == 200)
+
+    let createBody = try JSONEncoder().encode(
+        ChannelPluginCreateRequest(
+            id: "test-telegram",
+            type: "telegram",
+            baseUrl: "http://127.0.0.1:9100",
+            channelIds: ["tg-general"],
+            config: ["botToken": "fake-token"],
+            enabled: true
+        )
+    )
+    let createResponse = await router.handle(method: "POST", path: "/v1/plugins", body: createBody)
+    #expect(createResponse.status == 201)
+
+    let decoder = JSONDecoder()
+    decoder.dateDecodingStrategy = .iso8601
+    let created = try decoder.decode(ChannelPluginRecord.self, from: createResponse.body)
+    #expect(created.id == "test-telegram")
+    #expect(created.type == "telegram")
+    #expect(created.channelIds == ["tg-general"])
+    #expect(created.config["botToken"] == "fake-token")
+    #expect(created.enabled == true)
+
+    let duplicateResponse = await router.handle(method: "POST", path: "/v1/plugins", body: createBody)
+    #expect(duplicateResponse.status == 409)
+
+    let getResponse = await router.handle(method: "GET", path: "/v1/plugins/test-telegram", body: nil)
+    #expect(getResponse.status == 200)
+    let fetched = try decoder.decode(ChannelPluginRecord.self, from: getResponse.body)
+    #expect(fetched.id == "test-telegram")
+
+    let updateBody = try JSONEncoder().encode(
+        ChannelPluginUpdateRequest(
+            channelIds: ["tg-general", "tg-dev"],
+            config: ["botToken": "updated-token"],
+            enabled: false
+        )
+    )
+    let updateResponse = await router.handle(method: "PUT", path: "/v1/plugins/test-telegram", body: updateBody)
+    #expect(updateResponse.status == 200)
+    let updated = try decoder.decode(ChannelPluginRecord.self, from: updateResponse.body)
+    #expect(updated.channelIds == ["tg-general", "tg-dev"])
+    #expect(updated.config["botToken"] == "updated-token")
+    #expect(updated.enabled == false)
+
+    let listAfterUpdate = await router.handle(method: "GET", path: "/v1/plugins", body: nil)
+    #expect(listAfterUpdate.status == 200)
+    let allPlugins = try decoder.decode([ChannelPluginRecord].self, from: listAfterUpdate.body)
+    #expect(allPlugins.count == 1)
+
+    let deleteResponse = await router.handle(method: "DELETE", path: "/v1/plugins/test-telegram", body: nil)
+    #expect(deleteResponse.status == 200)
+
+    let getDeletedResponse = await router.handle(method: "GET", path: "/v1/plugins/test-telegram", body: nil)
+    #expect(getDeletedResponse.status == 404)
+
+    let deleteAgainResponse = await router.handle(method: "DELETE", path: "/v1/plugins/test-telegram", body: nil)
+    #expect(deleteAgainResponse.status == 404)
+}
+
+@Test
+func channelPluginValidation() async throws {
+    let sqlitePath = FileManager.default.temporaryDirectory
+        .appendingPathComponent("core-plugin-validation-\(UUID().uuidString).sqlite")
+        .path
+    var config = CoreConfig.default
+    config.sqlitePath = sqlitePath
+    let service = CoreService(config: config)
+    let router = CoreRouter(service: service)
+
+    let emptyTypeBody = try JSONEncoder().encode(
+        ChannelPluginCreateRequest(type: "", baseUrl: "http://localhost:9100")
+    )
+    let emptyTypeResponse = await router.handle(method: "POST", path: "/v1/plugins", body: emptyTypeBody)
+    #expect(emptyTypeResponse.status == 400)
+
+    let emptyUrlBody = try JSONEncoder().encode(
+        ChannelPluginCreateRequest(type: "telegram", baseUrl: "")
+    )
+    let emptyUrlResponse = await router.handle(method: "POST", path: "/v1/plugins", body: emptyUrlBody)
+    #expect(emptyUrlResponse.status == 400)
+}
+
+@Test
+func channelPluginLookupByChannelId() async throws {
+    let sqlitePath = FileManager.default.temporaryDirectory
+        .appendingPathComponent("core-plugin-lookup-\(UUID().uuidString).sqlite")
+        .path
+    var config = CoreConfig.default
+    config.sqlitePath = sqlitePath
+    let service = CoreService(config: config)
+
+    let _ = try await service.createChannelPlugin(
+        ChannelPluginCreateRequest(
+            id: "lookup-plugin",
+            type: "telegram",
+            baseUrl: "http://127.0.0.1:9200",
+            channelIds: ["ch-alpha", "ch-beta"]
+        )
+    )
+
+    let found = await service.channelPluginForChannel(channelId: "ch-alpha")
+    #expect(found?.id == "lookup-plugin")
+
+    let foundBeta = await service.channelPluginForChannel(channelId: "ch-beta")
+    #expect(foundBeta?.id == "lookup-plugin")
+
+    let notFound = await service.channelPluginForChannel(channelId: "ch-missing")
+    #expect(notFound == nil)
+}

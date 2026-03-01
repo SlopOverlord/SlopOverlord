@@ -69,6 +69,24 @@ public actor InMemoryPersistenceStore: PersistenceStore {
     public func deleteProject(id: String) async {
         projects[id] = nil
     }
+
+    private var channelPlugins: [String: ChannelPluginRecord] = [:]
+
+    public func listChannelPlugins() async -> [ChannelPluginRecord] {
+        channelPlugins.values.sorted { $0.createdAt < $1.createdAt }
+    }
+
+    public func channelPlugin(id: String) async -> ChannelPluginRecord? {
+        channelPlugins[id]
+    }
+
+    public func saveChannelPlugin(_ plugin: ChannelPluginRecord) async {
+        channelPlugins[plugin.id] = plugin
+    }
+
+    public func deleteChannelPlugin(id: String) async {
+        channelPlugins[id] = nil
+    }
 }
 
 enum CorePersistenceFactory {
@@ -191,5 +209,16 @@ enum CorePersistenceFactory {
         );
 
         CREATE INDEX IF NOT EXISTS idx_dashboard_project_tasks_project ON dashboard_project_tasks(project_id);
+
+        CREATE TABLE IF NOT EXISTS channel_plugins (
+            id TEXT PRIMARY KEY,
+            type TEXT NOT NULL,
+            base_url TEXT NOT NULL,
+            channel_ids_json TEXT NOT NULL DEFAULT '[]',
+            config_json TEXT NOT NULL DEFAULT '{}',
+            enabled INTEGER NOT NULL DEFAULT 1,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        );
         """
 }

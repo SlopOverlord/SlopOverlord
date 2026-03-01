@@ -31,4 +31,16 @@ public protocol PersistenceStore: Sendable {
 
     /// Deletes one dashboard project and all nested records.
     func deleteProject(id: String) async
+
+    /// Lists all channel plugin records.
+    func listChannelPlugins() async -> [ChannelPluginRecord]
+
+    /// Returns one channel plugin by identifier.
+    func channelPlugin(id: String) async -> ChannelPluginRecord?
+
+    /// Creates or replaces one channel plugin record.
+    func saveChannelPlugin(_ plugin: ChannelPluginRecord) async
+
+    /// Deletes one channel plugin record.
+    func deleteChannelPlugin(id: String) async
 }

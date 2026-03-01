@@ -20,6 +20,7 @@ public actor SQLiteStore: PersistenceStore {
     private var fallbackBulletins: [MemoryBulletin] = []
     private var fallbackArtifacts: [String: String] = [:]
     private var fallbackProjects: [String: ProjectRecord] = [:]
+    private var fallbackPlugins: [String: ChannelPluginRecord] = [:]
 
     /// Creates a persistence store and applies schema when SQLite is available.
     public init(path: String, schemaSQL: String, fallbackProjectsPath: String? = nil) {
@@ -521,6 +522,93 @@ public actor SQLiteStore: PersistenceStore {
 #endif
     }
 
+    // MARK: - Channel Plugins
+
+    public func listChannelPlugins() async -> [ChannelPluginRecord] {
+#if canImport(SQLite3)
+        guard let db else {
+            return fallbackPlugins.values.sorted { $0.createdAt < $1.createdAt }
+        }
+        let result = loadChannelPlugins(db: db)
+        if result.isEmpty && !fallbackPlugins.isEmpty {
+            return fallbackPlugins.values.sorted { $0.createdAt < $1.createdAt }
+        }
+        return result
+#else
+        return fallbackPlugins.values.sorted { $0.createdAt < $1.createdAt }
+#endif
+    }
+
+    public func channelPlugin(id: String) async -> ChannelPluginRecord? {
+#if canImport(SQLite3)
+        if let db {
+            let sql =
+                """
+                SELECT id, type, base_url, channel_ids_json, config_json, enabled, created_at, updated_at
+                FROM channel_plugins
+                WHERE id = ?
+                LIMIT 1;
+                """
+            var statement: OpaquePointer?
+            guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK else {
+                return fallbackPlugins[id]
+            }
+            defer { sqlite3_finalize(statement) }
+            bindText(id, at: 1, statement: statement)
+            if sqlite3_step(statement) == SQLITE_ROW {
+                return decodePluginRow(statement: statement)
+            }
+            return nil
+        }
+#endif
+        return fallbackPlugins[id]
+    }
+
+    public func saveChannelPlugin(_ plugin: ChannelPluginRecord) async {
+        fallbackPlugins[plugin.id] = plugin
+#if canImport(SQLite3)
+        guard let db else { return }
+
+        let sql =
+            """
+            INSERT OR REPLACE INTO channel_plugins(
+                id, type, base_url, channel_ids_json, config_json, enabled, created_at, updated_at
+            ) VALUES(?, ?, ?, ?, ?, ?, ?, ?);
+            """
+        var statement: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK else { return }
+        defer { sqlite3_finalize(statement) }
+
+        let channelIdsJSON = (try? String(data: JSONEncoder().encode(plugin.channelIds), encoding: .utf8)) ?? "[]"
+        let configJSON = (try? String(data: JSONEncoder().encode(plugin.config), encoding: .utf8)) ?? "{}"
+
+        bindText(plugin.id, at: 1, statement: statement)
+        bindText(plugin.type, at: 2, statement: statement)
+        bindText(plugin.baseUrl, at: 3, statement: statement)
+        bindText(channelIdsJSON, at: 4, statement: statement)
+        bindText(configJSON, at: 5, statement: statement)
+        sqlite3_bind_int(statement, 6, plugin.enabled ? 1 : 0)
+        bindText(isoFormatter.string(from: plugin.createdAt), at: 7, statement: statement)
+        bindText(isoFormatter.string(from: plugin.updatedAt), at: 8, statement: statement)
+
+        _ = sqlite3_step(statement)
+#endif
+    }
+
+    public func deleteChannelPlugin(id: String) async {
+        fallbackPlugins[id] = nil
+#if canImport(SQLite3)
+        guard let db else { return }
+
+        let sql = "DELETE FROM channel_plugins WHERE id = ?;"
+        var statement: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK else { return }
+        defer { sqlite3_finalize(statement) }
+        bindText(id, at: 1, statement: statement)
+        _ = sqlite3_step(statement)
+#endif
+    }
+
     private func persistFallbackProjectsToDisk() {
         let projects = fallbackProjects.values.sorted { left, right in
             left.createdAt < right.createdAt
@@ -752,6 +840,57 @@ public actor SQLiteStore: PersistenceStore {
         for statement in statements {
             _ = sqlite3_exec(db, statement, nil, nil, nil)
         }
+    }
+
+    private func loadChannelPlugins(db: OpaquePointer) -> [ChannelPluginRecord] {
+        let sql =
+            """
+            SELECT id, type, base_url, channel_ids_json, config_json, enabled, created_at, updated_at
+            FROM channel_plugins
+            ORDER BY created_at ASC;
+            """
+        var statement: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK else { return [] }
+        defer { sqlite3_finalize(statement) }
+
+        var result: [ChannelPluginRecord] = []
+        while sqlite3_step(statement) == SQLITE_ROW {
+            if let record = decodePluginRow(statement: statement) {
+                result.append(record)
+            }
+        }
+        return result
+    }
+
+    private func decodePluginRow(statement: OpaquePointer?) -> ChannelPluginRecord? {
+        guard
+            let idPtr = sqlite3_column_text(statement, 0),
+            let typePtr = sqlite3_column_text(statement, 1),
+            let baseUrlPtr = sqlite3_column_text(statement, 2),
+            let channelIdsPtr = sqlite3_column_text(statement, 3),
+            let configPtr = sqlite3_column_text(statement, 4),
+            let createdAtPtr = sqlite3_column_text(statement, 6),
+            let updatedAtPtr = sqlite3_column_text(statement, 7)
+        else {
+            return nil
+        }
+
+        let enabled = sqlite3_column_int(statement, 5) != 0
+        let channelIds = (try? JSONDecoder().decode([String].self, from: Data(String(cString: channelIdsPtr).utf8))) ?? []
+        let config = (try? JSONDecoder().decode([String: String].self, from: Data(String(cString: configPtr).utf8))) ?? [:]
+        let createdAt = isoFormatter.date(from: String(cString: createdAtPtr)) ?? Date()
+        let updatedAt = isoFormatter.date(from: String(cString: updatedAtPtr)) ?? createdAt
+
+        return ChannelPluginRecord(
+            id: String(cString: idPtr),
+            type: String(cString: typePtr),
+            baseUrl: String(cString: baseUrlPtr),
+            channelIds: channelIds,
+            config: config,
+            enabled: enabled,
+            createdAt: createdAt,
+            updatedAt: updatedAt
+        )
     }
 #endif
 }

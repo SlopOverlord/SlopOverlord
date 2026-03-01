@@ -87,3 +87,14 @@ CREATE TABLE IF NOT EXISTS dashboard_project_tasks (
 );
 
 CREATE INDEX IF NOT EXISTS idx_dashboard_project_tasks_project ON dashboard_project_tasks(project_id);
+
+CREATE TABLE IF NOT EXISTS channel_plugins (
+    id TEXT PRIMARY KEY,
+    type TEXT NOT NULL,
+    base_url TEXT NOT NULL,
+    channel_ids_json TEXT NOT NULL DEFAULT '[]',
+    config_json TEXT NOT NULL DEFAULT '{}',
+    enabled INTEGER NOT NULL DEFAULT 1,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);

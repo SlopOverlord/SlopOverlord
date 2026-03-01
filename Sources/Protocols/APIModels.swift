@@ -332,6 +332,98 @@ public struct AgentConfigUpdateRequest: Codable, Sendable {
     }
 }
 
+// MARK: - Channel Plugins
+
+public struct ChannelPluginRecord: Codable, Sendable, Equatable {
+    public var id: String
+    public var type: String
+    public var baseUrl: String
+    public var channelIds: [String]
+    public var config: [String: String]
+    public var enabled: Bool
+    public var createdAt: Date
+    public var updatedAt: Date
+
+    public init(
+        id: String,
+        type: String,
+        baseUrl: String,
+        channelIds: [String] = [],
+        config: [String: String] = [:],
+        enabled: Bool = true,
+        createdAt: Date = Date(),
+        updatedAt: Date = Date()
+    ) {
+        self.id = id
+        self.type = type
+        self.baseUrl = baseUrl
+        self.channelIds = channelIds
+        self.config = config
+        self.enabled = enabled
+        self.createdAt = createdAt
+        self.updatedAt = updatedAt
+    }
+}
+
+public struct ChannelPluginCreateRequest: Codable, Sendable {
+    public var id: String?
+    public var type: String
+    public var baseUrl: String
+    public var channelIds: [String]?
+    public var config: [String: String]?
+    public var enabled: Bool?
+
+    public init(
+        id: String? = nil,
+        type: String,
+        baseUrl: String,
+        channelIds: [String]? = nil,
+        config: [String: String]? = nil,
+        enabled: Bool? = nil
+    ) {
+        self.id = id
+        self.type = type
+        self.baseUrl = baseUrl
+        self.channelIds = channelIds
+        self.config = config
+        self.enabled = enabled
+    }
+}
+
+public struct ChannelPluginUpdateRequest: Codable, Sendable {
+    public var type: String?
+    public var baseUrl: String?
+    public var channelIds: [String]?
+    public var config: [String: String]?
+    public var enabled: Bool?
+
+    public init(
+        type: String? = nil,
+        baseUrl: String? = nil,
+        channelIds: [String]? = nil,
+        config: [String: String]? = nil,
+        enabled: Bool? = nil
+    ) {
+        self.type = type
+        self.baseUrl = baseUrl
+        self.channelIds = channelIds
+        self.config = config
+        self.enabled = enabled
+    }
+}
+
+public struct ChannelPluginDeliverRequest: Codable, Sendable {
+    public var channelId: String
+    public var userId: String
+    public var content: String
+
+    public init(channelId: String, userId: String, content: String) {
+        self.channelId = channelId
+        self.userId = userId
+        self.content = content
+    }
+}
+
 public enum AgentPolicyDefault: String, Codable, Sendable {
     case allow
     case deny

@@ -147,6 +147,10 @@ private enum ErrorCode {
     static let projectDeleteFailed = "project_delete_failed"
     static let projectListFailed = "project_list_failed"
     static let projectReadFailed = "project_read_failed"
+    static let invalidPluginId = "invalid_plugin_id"
+    static let invalidPluginPayload = "invalid_plugin_payload"
+    static let pluginNotFound = "plugin_not_found"
+    static let pluginConflict = "plugin_conflict"
 }
 
 private struct AcceptResponse: Encodable {
@@ -1008,7 +1012,84 @@ public actor CoreRouter {
             }
         }
 
+        // MARK: - Channel Plugins
+
+        add(.get, "/v1/plugins") { _ in
+            let plugins = await service.listChannelPlugins()
+            return Self.encodable(status: HTTPStatus.ok, payload: plugins)
+        }
+
+        add(.post, "/v1/plugins") { request in
+            guard let body = request.body,
+                  let payload = Self.decode(body, as: ChannelPluginCreateRequest.self)
+            else {
+                return Self.json(status: HTTPStatus.badRequest, payload: ["error": ErrorCode.invalidPluginPayload])
+            }
+            do {
+                let plugin = try await service.createChannelPlugin(payload)
+                return Self.encodable(status: HTTPStatus.created, payload: plugin)
+            } catch let error as CoreService.ChannelPluginError {
+                return Self.channelPluginErrorResponse(error)
+            } catch {
+                return Self.json(status: HTTPStatus.internalServerError, payload: ["error": ErrorCode.invalidPluginPayload])
+            }
+        }
+
+        add(.get, "/v1/plugins/:pluginId") { request in
+            let pluginId = request.pathParam("pluginId") ?? ""
+            do {
+                let plugin = try await service.getChannelPlugin(id: pluginId)
+                return Self.encodable(status: HTTPStatus.ok, payload: plugin)
+            } catch let error as CoreService.ChannelPluginError {
+                return Self.channelPluginErrorResponse(error)
+            } catch {
+                return Self.json(status: HTTPStatus.internalServerError, payload: ["error": ErrorCode.pluginNotFound])
+            }
+        }
+
+        add(.put, "/v1/plugins/:pluginId") { request in
+            let pluginId = request.pathParam("pluginId") ?? ""
+            guard let body = request.body,
+                  let payload = Self.decode(body, as: ChannelPluginUpdateRequest.self)
+            else {
+                return Self.json(status: HTTPStatus.badRequest, payload: ["error": ErrorCode.invalidPluginPayload])
+            }
+            do {
+                let plugin = try await service.updateChannelPlugin(id: pluginId, request: payload)
+                return Self.encodable(status: HTTPStatus.ok, payload: plugin)
+            } catch let error as CoreService.ChannelPluginError {
+                return Self.channelPluginErrorResponse(error)
+            } catch {
+                return Self.json(status: HTTPStatus.internalServerError, payload: ["error": ErrorCode.invalidPluginPayload])
+            }
+        }
+
+        add(.delete, "/v1/plugins/:pluginId") { request in
+            let pluginId = request.pathParam("pluginId") ?? ""
+            do {
+                try await service.deleteChannelPlugin(id: pluginId)
+                return Self.json(status: HTTPStatus.ok, payload: ["ok": "true"])
+            } catch let error as CoreService.ChannelPluginError {
+                return Self.channelPluginErrorResponse(error)
+            } catch {
+                return Self.json(status: HTTPStatus.internalServerError, payload: ["error": ErrorCode.pluginNotFound])
+            }
+        }
+
         return routes
+    }
+
+    private static func channelPluginErrorResponse(_ error: CoreService.ChannelPluginError) -> CoreRouterResponse {
+        switch error {
+        case .invalidID:
+            return json(status: HTTPStatus.badRequest, payload: ["error": ErrorCode.invalidPluginId])
+        case .invalidPayload:
+            return json(status: HTTPStatus.badRequest, payload: ["error": ErrorCode.invalidPluginPayload])
+        case .notFound:
+            return json(status: HTTPStatus.notFound, payload: ["error": ErrorCode.pluginNotFound])
+        case .conflict:
+            return json(status: HTTPStatus.conflict, payload: ["error": ErrorCode.pluginConflict])
+        }
     }
 
     private static func agentSessionErrorResponse(_ error: CoreService.AgentSessionError, fallback: String) -> CoreRouterResponse {

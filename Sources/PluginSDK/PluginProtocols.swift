@@ -1,6 +1,11 @@
 import Foundation
 import Protocols
 
+/// In-process gateway plugin for direct integration.
+/// For out-of-process channel plugins (Telegram, Slack, etc.) see the transport-based
+/// Channel Plugin Protocol: docs/specs/channel-plugin-protocol.md
+/// Out-of-process plugins communicate with Core over HTTP (POST /deliver, POST /validate)
+/// and are registered via the /v1/plugins REST API.
 public protocol GatewayPlugin: Sendable {
     var id: String { get }
     func start() async throws
