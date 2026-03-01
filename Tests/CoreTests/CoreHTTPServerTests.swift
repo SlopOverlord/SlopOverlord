@@ -9,16 +9,64 @@ import Testing
 
 private struct SSEMalformedResponseError: Error {}
 
-private func readFirstSSEEvent(url: URL) async throws -> (HTTPURLResponse, String, Data) {
-    var request = URLRequest(url: url)
-    request.timeoutInterval = 5
-    let (bytes, response) = try await URLSession.shared.bytes(for: request)
-    guard let httpResponse = response as? HTTPURLResponse else {
-        throw SSEMalformedResponseError()
+private final class SSEDataCollector: NSObject, URLSessionDataDelegate {
+    private var receivedData = Data()
+    private var httpResponse: HTTPURLResponse?
+    private var continuation: CheckedContinuation<(HTTPURLResponse, Data), Error>?
+    private var task: URLSessionDataTask?
+
+    func start(request: URLRequest) async throws -> (HTTPURLResponse, Data) {
+        try await withCheckedThrowingContinuation { continuation in
+            self.continuation = continuation
+            let session = URLSession(configuration: .default, delegate: self, delegateQueue: nil)
+            self.task = session.dataTask(with: request)
+            self.task?.resume()
+            session.finishTasksAndInvalidate()
+        }
     }
 
+    func urlSession(_ session: URLSession, dataTask: URLSessionDataTask, didReceive data: Data) {
+        receivedData.append(data)
+        if let response = httpResponse, receivedData.count > 0 {
+            let text = String(data: receivedData, encoding: .utf8) ?? ""
+            if text.contains("data: "), let continuation = continuation {
+                self.continuation = nil
+                dataTask.cancel()
+                continuation.resume(returning: (response, receivedData))
+            }
+        }
+    }
+
+    func urlSession(_ session: URLSession, dataTask: URLSessionDataTask, didReceive response: URLResponse, completionHandler: @escaping (URLSession.ResponseDisposition) -> Void) {
+        httpResponse = response as? HTTPURLResponse
+        completionHandler(.allow)
+    }
+
+    func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
+        guard let continuation = continuation else { return }
+        self.continuation = nil
+        if let error = error {
+            continuation.resume(throwing: error)
+        } else if let response = httpResponse {
+            continuation.resume(returning: (response, receivedData))
+        } else {
+            continuation.resume(throwing: SSEMalformedResponseError())
+        }
+    }
+}
+
+private func readFirstSSEEvent(url: URL) async throws -> (HTTPURLResponse, String, Data) {
+    var request = URLRequest(url: url)
+    request.timeoutInterval = 10
+
+    let collector = SSEDataCollector()
+    let (response, data) = try await collector.start(request: request)
+
+    let text = String(data: data, encoding: .utf8) ?? ""
+    let lines = text.components(separatedBy: CharacterSet.newlines)
+
     var eventName = "message"
-    for try await line in bytes.lines {
+    for line in lines {
         if line.hasPrefix(":") || line.isEmpty {
             continue
         }
@@ -28,7 +76,7 @@ private func readFirstSSEEvent(url: URL) async throws -> (HTTPURLResponse, Strin
         }
         if line.hasPrefix("data: ") {
             let payload = String(line.dropFirst("data: ".count))
-            return (httpResponse, eventName, Data(payload.utf8))
+            return (response, eventName, Data(payload.utf8))
         }
     }
 
