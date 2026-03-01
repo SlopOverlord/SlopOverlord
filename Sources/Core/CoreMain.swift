@@ -83,6 +83,8 @@ struct CoreMain: AsyncParsableCommand {
 
             logger.info("SlopOverlord Core initialized")
 
+            await service.bootstrapChannelPlugins()
+
             if !oneshot {
                 try server.start()
                 logger.info("Core HTTP server listening on \(config.listen.host):\(config.listen.port)")
@@ -113,7 +115,10 @@ struct CoreMain: AsyncParsableCommand {
             // Foreground server mode by default: keep process alive for container/service runtime.
             if !oneshot {
                 logger.info("SlopOverlord Core foreground server mode is active")
-                defer { try? server.shutdown() }
+                defer {
+                    try? server.shutdown()
+                    Task { await service.shutdownChannelPlugins() }
+                }
                 try server.waitUntilClosed()
             }
         } catch {
@@ -206,6 +211,7 @@ private func createWorkspaceDirectories(at workspaceRoot: URL) throws {
         workspaceRoot.appendingPathComponent("artifacts", isDirectory: true),
         workspaceRoot.appendingPathComponent("memory", isDirectory: true),
         workspaceRoot.appendingPathComponent("logs", isDirectory: true),
+        workspaceRoot.appendingPathComponent("plugins", isDirectory: true),
         workspaceRoot.appendingPathComponent("tmp", isDirectory: true)
     ]
 

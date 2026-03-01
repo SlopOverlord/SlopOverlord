@@ -78,6 +78,37 @@ public struct CoreConfig: Codable, Sendable {
         }
     }
 
+    public struct ChannelConfig: Codable, Sendable, Equatable {
+        public struct Telegram: Codable, Sendable, Equatable {
+            /// Telegram Bot API token.
+            public var botToken: String
+            /// Maps SlopOverlord channelId → Telegram chat_id.
+            public var channelChatMap: [String: Int64]
+            /// When non-empty, only these Telegram user IDs are allowed.
+            public var allowedUserIds: [Int64]
+            /// When non-empty, only these Telegram chat IDs are allowed.
+            public var allowedChatIds: [Int64]
+
+            public init(
+                botToken: String,
+                channelChatMap: [String: Int64] = [:],
+                allowedUserIds: [Int64] = [],
+                allowedChatIds: [Int64] = []
+            ) {
+                self.botToken = botToken
+                self.channelChatMap = channelChatMap
+                self.allowedUserIds = allowedUserIds
+                self.allowedChatIds = allowedChatIds
+            }
+        }
+
+        public var telegram: Telegram?
+
+        public init(telegram: Telegram? = nil) {
+            self.telegram = telegram
+        }
+    }
+
     public var listen: Listen
     public var workspace: Workspace
     public var auth: Auth
@@ -86,6 +117,7 @@ public struct CoreConfig: Codable, Sendable {
     public var nodes: [String]
     public var gateways: [String]
     public var plugins: [PluginConfig]
+    public var channels: ChannelConfig
     public var sqlitePath: String
 
     public init(
@@ -97,6 +129,7 @@ public struct CoreConfig: Codable, Sendable {
         nodes: [String],
         gateways: [String],
         plugins: [PluginConfig],
+        channels: ChannelConfig = ChannelConfig(),
         sqlitePath: String
     ) {
         self.listen = listen
@@ -107,6 +140,7 @@ public struct CoreConfig: Codable, Sendable {
         self.nodes = nodes
         self.gateways = gateways
         self.plugins = plugins
+        self.channels = channels
         self.sqlitePath = sqlitePath
     }
 
@@ -133,6 +167,7 @@ public struct CoreConfig: Codable, Sendable {
             nodes: ["local"],
             gateways: [],
             plugins: [],
+            channels: .init(),
             sqlitePath: CoreConfig.defaultSQLiteFileName
         )
     }
@@ -199,6 +234,7 @@ public struct CoreConfig: Codable, Sendable {
         case nodes
         case gateways
         case plugins
+        case channels
         case sqlitePath
     }
 
@@ -211,6 +247,7 @@ public struct CoreConfig: Codable, Sendable {
         memory = try container.decode(Memory.self, forKey: .memory)
         nodes = try container.decodeIfPresent([String].self, forKey: .nodes) ?? []
         gateways = try container.decodeIfPresent([String].self, forKey: .gateways) ?? []
+        channels = try container.decodeIfPresent(ChannelConfig.self, forKey: .channels) ?? .init()
         sqlitePath = try container.decode(String.self, forKey: .sqlitePath)
         if sqlitePath == CoreConfig.legacyDefaultSQLitePath {
             sqlitePath = CoreConfig.defaultSQLiteFileName

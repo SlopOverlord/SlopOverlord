@@ -1197,6 +1197,7 @@ body.mobile-menu-open {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 10px;
+  align-content: start;
 }
 
 .project-board-list--empty {
@@ -1781,17 +1782,22 @@ body.mobile-menu-open {
 }
 
 .agents-shell {
-  display: grid;
-  gap: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  flex: 1;
+  min-height: 0;
 }
 
 .agents-index {
+  width: 100%;
+  max-width: 80em;
   min-height: 620px;
   border: 1px solid var(--line);
   border-radius: var(--radius);
   background: radial-gradient(110% 90% at 50% 0%, rgba(72, 58, 119, 0.14) 0%, rgba(7, 10, 17, 0) 42%), #070b13;
   display: grid;
-  grid-template-rows: auto 1fr auto;
+  grid-template-rows: 1fr auto;
 }
 
 .agents-index-head {
@@ -1844,6 +1850,97 @@ body.mobile-menu-open {
   margin: 0;
   padding: 0 14px 12px;
   font-size: 0.85rem;
+}
+
+.agent-board-list .project-board-card {
+  padding: 10px 12px;
+  gap: 4px;
+}
+
+.agent-board-list .project-board-card-head h3 {
+  font-size: 0.92rem;
+}
+
+.agent-board-list .project-board-description {
+  font-size: 0.8rem;
+  min-height: 0;
+  line-height: 1.3;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.agent-board-list .project-board-updated {
+  font-size: 0.72rem;
+}
+
+.agent-list-container {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  align-content: start;
+}
+
+.agent-list-item-card {
+  border: 1px solid var(--line);
+    border-radius: 12px;
+    padding: 14px;
+    display: grid;
+    gap: 8px;
+    background: rgba(10, 13, 21, 0.55);
+}
+
+.agent-list-item-card:hover {
+  border-color: var(--line-strong);
+  background: #141925;
+}
+
+.agent-list-item-card:focus-visible {
+  border-color: var(--accent);
+  outline: none;
+}
+
+.agent-list-icon {
+  width: 52px;
+  height: 52px;
+  border-radius: 12px;
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.02);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 30px;
+  color: #959db1;
+}
+
+.agent-list-main {
+  min-width: 0;
+  display: grid;
+  gap: 6px;
+}
+
+.agent-list-head {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 10px;
+}
+
+.agent-list-head h4 {
+  margin: 0;
+  font-size: 1rem;
+}
+
+.agent-list-main p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 1.03rem;
+}
+
+.agent-list-id {
+  font-size: 0.94rem;
+  color: #c5cbda;
 }
 
 .agents-create-layout {
@@ -1907,7 +2004,6 @@ body.mobile-menu-open {
 }
 
 .agent-list-main {
-  grid-area: main;
   display: inline-flex;
   align-items: baseline;
   gap: 10px;
@@ -2648,6 +2744,151 @@ body.agent-chat-no-page-scroll .page {
   gap: 12px;
 }
 
+/* ---- Agent Channels Tab ---- */
+.agent-channels-shell {
+  gap: 14px;
+}
+
+.agent-channels-empty {
+  padding: 16px 0 4px;
+}
+
+.agent-channels-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.agent-channel-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface);
+}
+
+.agent-channel-info {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
+.agent-channel-id {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.agent-channel-icon {
+  font-size: 16px;
+  font-variation-settings: "FILL" 1, "wght" 400, "GRAD" 0, "opsz" 20;
+  color: var(--accent);
+  flex-shrink: 0;
+}
+
+.agent-channel-node-id {
+  font-size: 0.75rem;
+  color: var(--muted);
+  font-family: "JetBrains Mono", "SFMono-Regular", Menlo, Consolas, monospace;
+}
+
+.agent-channel-remove {
+  flex-shrink: 0;
+  min-width: auto;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 8px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.agent-channel-remove:hover {
+  border-color: #ef4444;
+  color: #ef4444;
+  background: rgba(239, 68, 68, 0.06);
+}
+
+.agent-channel-remove .material-symbols-rounded {
+  font-size: 17px;
+  font-variation-settings: "FILL" 0, "wght" 300, "GRAD" 0, "opsz" 20;
+}
+
+.agent-channel-form {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface);
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.agent-channel-form-label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 0.85rem;
+  font-weight: 500;
+  color: var(--text);
+}
+
+.agent-channel-form-hint {
+  font-size: 0.77rem;
+  color: var(--muted);
+  font-weight: 400;
+}
+
+.agent-channel-form-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.agent-channel-form-actions button {
+  min-width: auto;
+  padding: 6px 14px;
+  font-size: 0.82rem;
+}
+
+.agent-channels-add-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: auto;
+  width: fit-content;
+  padding: 7px 14px;
+  font-size: 0.85rem;
+  font-weight: 600;
+  border-radius: 9px;
+  border: 1px solid var(--line);
+  background: var(--surface);
+  color: var(--text);
+  cursor: pointer;
+}
+
+.agent-channels-add-btn:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.agent-channels-add-btn .material-symbols-rounded {
+  font-size: 17px;
+  font-variation-settings: "FILL" 0, "wght" 400, "GRAD" 0, "opsz" 20;
+}
+
 .agent-tools-head {
   align-items: flex-start;
 }
@@ -3261,11 +3502,19 @@ body.agent-chat-no-page-scroll .page {
   color: var(--muted);
 }
 
-.settings-nav-item span:first-child {
-  width: 24px;
-  min-width: 24px;
-  text-align: center;
-  font-size: 0.72rem;
+.settings-nav-icon {
+  width: 20px;
+  min-width: 20px;
+  font-size: 18px;
+  font-variation-settings: "FILL" 0, "wght" 300, "GRAD" 0, "opsz" 20;
+  line-height: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.settings-nav-item.active .settings-nav-icon {
+  font-variation-settings: "FILL" 1, "wght" 400, "GRAD" 0, "opsz" 20;
 }
 
 .settings-nav-item:hover {
@@ -3419,6 +3668,542 @@ body.agent-chat-no-page-scroll .page {
 
 .entry-editor-head h3 {
   margin: 0;
+}
+
+.entry-editor-block {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 12px;
+  margin-top: 10px;
+  background: var(--surface);
+}
+
+.entry-editor-block-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+
+.entry-editor-block-title {
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.entry-editor-toggle {
+  font-size: 0.8rem;
+  font-weight: 600;
+  padding: 4px 12px;
+  border-radius: 20px;
+  border: 1px solid var(--line);
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  min-width: auto;
+}
+
+.entry-editor-toggle.active {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: rgba(99, 120, 255, 0.08);
+}
+
+.entry-editor-empty {
+  font-size: 0.85rem;
+  color: var(--muted);
+  margin: 0;
+}
+
+.entry-form-hint {
+  font-size: 0.78rem;
+  color: var(--muted);
+  opacity: 0.7;
+  margin-top: -2px;
+}
+
+.tg-settings-shell {
+  max-width: 640px;
+}
+
+/* ---- Card ---- */
+.tg-card {
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--surface-3);
+  overflow: hidden;
+}
+
+.tg-card-header {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 16px;
+  background: none;
+  border: none;
+  cursor: pointer;
+  text-align: left;
+  color: var(--text);
+  gap: 12px;
+}
+
+.tg-card-header:hover {
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.tg-card-identity {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.tg-icon {
+  width: 36px;
+  height: 36px;
+  flex-shrink: 0;
+  border-radius: 50%;
+}
+
+.tg-card-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.tg-card-title-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.tg-card-title {
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.tg-status-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: #22c55e;
+  background: rgba(34, 197, 94, 0.10);
+  border: 1px solid rgba(34, 197, 94, 0.25);
+  border-radius: 20px;
+  padding: 1px 8px;
+}
+
+.tg-status-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #22c55e;
+  flex-shrink: 0;
+}
+
+.tg-card-subtitle {
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+
+.tg-chevron {
+  color: var(--muted);
+  transition: transform 0.15s ease;
+  flex-shrink: 0;
+}
+
+.tg-chevron-up {
+  transform: rotate(180deg);
+}
+
+/* ---- Body ---- */
+.tg-card-body {
+  border-top: 1px solid var(--line);
+}
+
+.tg-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 14px 16px;
+}
+
+.tg-row-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.tg-row-label {
+  font-size: 0.88rem;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.tg-row-desc {
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+
+/* ---- Section ---- */
+.tg-section {
+  border-top: 1px solid var(--line);
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.tg-section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.tg-section-title {
+  font-size: 0.82rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--muted);
+}
+
+/* ---- Fields ---- */
+.tg-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.tg-field-label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 0.85rem;
+  font-weight: 500;
+  color: var(--text);
+}
+
+.tg-field-hint {
+  font-size: 0.77rem;
+  color: var(--muted);
+  font-weight: 400;
+}
+
+.tg-token-field {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.tg-token-field input {
+  flex: 1;
+  min-width: 0;
+  font-family: monospace;
+  font-size: 0.82rem;
+}
+
+.tg-token-reveal {
+  flex-shrink: 0;
+  min-width: auto;
+  padding: 0 10px;
+  height: 34px;
+  font-size: 0.8rem;
+  font-weight: 500;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  background: var(--surface-3);
+  color: var(--muted);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.tg-token-reveal:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.tg-help-link {
+  font-size: 0.82rem;
+  color: var(--accent);
+  text-decoration: none;
+  width: fit-content;
+}
+
+.tg-help-link:hover {
+  text-decoration: underline;
+}
+
+/* ---- Add button ---- */
+.tg-add-btn {
+  min-width: auto;
+  padding: 5px 14px;
+  font-size: 0.82rem;
+  font-weight: 600;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  background: var(--surface);
+  color: var(--text);
+  cursor: pointer;
+}
+
+.tg-add-btn:hover:not(:disabled) {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.tg-add-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+/* ---- Binding rows ---- */
+.tg-empty {
+  font-size: 0.82rem;
+  color: var(--muted);
+  margin: 0;
+}
+
+.tg-binding-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface);
+}
+
+.tg-binding-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.tg-binding-name {
+  font-size: 0.88rem;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.tg-binding-desc {
+  font-size: 0.78rem;
+  color: var(--muted);
+}
+
+.tg-binding-actions {
+  display: flex;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.tg-binding-actions button {
+  min-width: auto;
+  padding: 5px 12px;
+  font-size: 0.8rem;
+  border-radius: 8px;
+}
+
+/* ---- Binding edit form ---- */
+.tg-binding-form {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface);
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.tg-binding-form-fields {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+.tg-binding-form-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.tg-binding-form-actions button {
+  min-width: auto;
+  padding: 5px 14px;
+  font-size: 0.82rem;
+}
+
+/* ---- Footer ---- */
+.tg-footer {
+  border-top: 1px solid var(--line);
+  padding: 14px 16px;
+}
+
+.tg-disconnect-btn {
+  min-width: auto;
+  padding: 7px 16px;
+  font-size: 0.85rem;
+  font-weight: 600;
+  border-radius: 10px;
+  border: 1px solid var(--line);
+  background: transparent;
+  color: var(--text);
+  cursor: pointer;
+}
+
+.tg-disconnect-btn:hover {
+  border-color: #ef4444;
+  color: #ef4444;
+}
+
+/* ---- Telegram Add Binding Modal ---- */
+.tg-modal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(3, 5, 9, 0.78);
+  padding: 20px;
+}
+
+.tg-modal {
+  width: min(480px, 100%);
+  border: 1px solid var(--line-strong);
+  border-radius: 16px;
+  background: #0d1118;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.tg-modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 18px 20px 14px;
+}
+
+.tg-modal-header h3 {
+  margin: 0;
+  font-size: 1.1rem;
+  font-weight: 700;
+  color: var(--text);
+}
+
+.tg-modal-close {
+  min-width: auto;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  border-radius: 8px;
+}
+
+.tg-modal-close:hover {
+  border-color: var(--line);
+  color: var(--text);
+}
+
+.tg-modal-close .material-symbols-rounded {
+  font-size: 20px;
+}
+
+.tg-modal-body {
+  padding: 0 20px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.tg-modal-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.tg-modal-field-label {
+  font-size: 0.88rem;
+  font-weight: 600;
+  color: var(--accent);
+}
+
+.tg-modal-field input {
+  font-size: 0.9rem;
+}
+
+.tg-select-wrap {
+  position: relative;
+}
+
+.tg-select-wrap select {
+  appearance: none;
+  -webkit-appearance: none;
+  padding-right: 36px;
+  font-size: 0.9rem;
+  cursor: pointer;
+}
+
+.tg-select-chevron {
+  position: absolute;
+  right: 10px;
+  top: 50%;
+  transform: translateY(-50%);
+  font-size: 20px;
+  color: var(--muted);
+  pointer-events: none;
+}
+
+.tg-modal-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  padding: 14px 20px;
+  border-top: 1px solid var(--line);
+}
+
+.tg-modal-cancel {
+  min-width: auto;
+  padding: 8px 18px;
+  font-size: 0.88rem;
+  font-weight: 500;
+  border: none;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.tg-modal-cancel:hover {
+  color: var(--text);
+}
+
+.tg-modal-submit {
+  min-width: auto;
+  padding: 8px 20px;
+  font-size: 0.88rem;
+  font-weight: 600;
+  border: none;
+  border-radius: 10px;
+  background: var(--accent);
+  color: #fff;
+  cursor: pointer;
+}
+
+.tg-modal-submit:hover {
+  filter: brightness(1.1);
 }
 
 .entry-form-grid {

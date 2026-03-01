@@ -6,20 +6,22 @@ import { ProviderEditor } from "./components/ProviderEditor";
 import { SettingsMainHeader } from "./components/SettingsMainHeader";
 import { SettingsPlaceholder } from "./components/SettingsPlaceholder";
 import { SettingsSidebar } from "./components/SettingsSidebar";
+import { TelegramEditor } from "./components/TelegramEditor";
 
 const SETTINGS_ITEMS = [
-  { id: "logging", title: "Logging", icon: "LG" },
-  { id: "browser", title: "Browser", icon: "BR" },
-  { id: "ui", title: "Ui", icon: "UI" },
-  { id: "providers", title: "Providers", icon: "PR" },
-  { id: "nodehost", title: "NodeHost", icon: "NH" },
-  { id: "bindings", title: "Bindings", icon: "BD" },
-  { id: "broadcast", title: "Broadcast", icon: "BC" },
-  { id: "audio", title: "Audio", icon: "AU" },
-  { id: "media", title: "Media", icon: "ME" },
-  { id: "approvals", title: "Approvals", icon: "AP" },
-  { id: "session", title: "Session", icon: "SS" },
-  { id: "plugins", title: "Plugins", icon: "PL" }
+  { id: "providers", title: "Providers", icon: "hub" },
+  { id: "channels", title: "Channels", icon: "forum" },
+  { id: "approvals", title: "Approvals", icon: "fact_check" },
+  { id: "plugins", title: "Plugins", icon: "extension" },
+  { id: "browser", title: "Browser", icon: "open_in_browser" },
+  { id: "ui", title: "UI", icon: "palette" },
+  { id: "nodehost", title: "NodeHost", icon: "dns" },
+  { id: "bindings", title: "Bindings", icon: "cable" },
+  { id: "broadcast", title: "Broadcast", icon: "cell_tower" },
+  { id: "audio", title: "Audio", icon: "volume_up" },
+  { id: "media", title: "Media", icon: "perm_media" },
+  { id: "session", title: "Session", icon: "manage_accounts" },
+  { id: "logging", title: "Logging", icon: "description" }
 ];
 
 const PROVIDER_CATALOG = [
@@ -97,6 +99,7 @@ const EMPTY_CONFIG = {
   nodes: ["local"],
   gateways: [],
   plugins: [],
+  channels: { telegram: null },
   sqlitePath: "core.sqlite"
 };
 
@@ -226,6 +229,20 @@ function normalizeConfig(config) {
 
   const plugins = Array.isArray(config?.plugins) ? config.plugins : [];
   normalized.plugins = plugins.map(normalizePlugin);
+
+  const tg = config?.channels?.telegram;
+  if (tg && typeof tg === "object") {
+    normalized.channels = {
+      telegram: {
+        botToken: String(tg.botToken || ""),
+        channelChatMap: tg.channelChatMap && typeof tg.channelChatMap === "object" ? tg.channelChatMap : {},
+        allowedUserIds: Array.isArray(tg.allowedUserIds) ? tg.allowedUserIds : [],
+        allowedChatIds: Array.isArray(tg.allowedChatIds) ? tg.allowedChatIds : []
+      }
+    };
+  } else {
+    normalized.channels = { telegram: null };
+  }
 
   return normalized;
 }
@@ -717,6 +734,13 @@ export function ConfigView({ sectionId = "providers", onSectionChange = null }) 
     }
     if (selectedSettings === "nodehost") {
       return <NodeHostEditor draftConfig={draftConfig} mutateDraft={mutateDraft} parseLines={parseLines} />;
+    }
+    if (selectedSettings === "channels") {
+      return (
+        <div className="tg-settings-shell">
+          <TelegramEditor draftConfig={draftConfig} mutateDraft={mutateDraft} />
+        </div>
+      );
     }
 
     const section = SETTINGS_ITEMS.find((item) => item.id === selectedSettings);

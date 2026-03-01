@@ -6,6 +6,7 @@ import {
   fetchAgentTasks
 } from "../../api";
 import { AgentChatTab } from "./components/AgentChatTab";
+import { AgentChannelsTab } from "./components/AgentChannelsTab";
 import { AgentConfigTab } from "./components/AgentConfigTab";
 import { AgentToolsTab } from "./components/AgentToolsTab";
 
@@ -16,6 +17,7 @@ const AGENT_TABS = [
   { id: "tasks", title: "Tasks" },
   { id: "skills", title: "Skills" },
   { id: "tools", title: "Tools" },
+  { id: "channels", title: "Channels" },
   { id: "cron", title: "Cron" },
   { id: "config", title: "Config" }
 ];
@@ -199,15 +201,6 @@ function AgentsIndexSection({
 }) {
   return (
     <section className="agents-index">
-      <header className="agents-index-head">
-        <h2>Agents</h2>
-        {agents.length > 0 && !isLoadingAgents ? (
-          <button type="button" className="agents-create-inline" onClick={onOpenCreateModal}>
-            Create Agent
-          </button>
-        ) : null}
-      </header>
-
       {isLoadingAgents ? (
         <div className="agents-empty-stage">
           <p className="placeholder-text">Loading agents from Core...</p>
@@ -220,15 +213,24 @@ function AgentsIndexSection({
           </button>
         </div>
       ) : (
-        <div className="agent-list">
+        <div className="agent-list-container">
           {agents.map((agent) => (
-            <button key={agent.id} type="button" className="agent-list-item" onClick={() => onSelectAgent(agent.id)}>
+            <button
+              key={agent.id}
+              type="button"
+              className="agent-list-item-card"
+              onClick={() => onSelectAgent(agent.id)}
+            >
+              <span className="agent-list-icon material-symbols-rounded" aria-hidden="true">
+                smart_toy
+              </span>
               <div className="agent-list-main">
-                <strong>{agent.displayName}</strong>
-                <span>{agent.id}</span>
+                <div className="agent-list-head">
+                  <h4>{agent.displayName}</h4>
+                </div>
+                <p>{agent.role || "General-purpose assistant"}</p>
+                <span className="agent-list-id">ID: {agent.id}</span>
               </div>
-              <span className="agent-list-open">›</span>
-              <p>{agent.role}</p>
             </button>
           ))}
         </div>
@@ -414,6 +416,14 @@ export function AgentsView({ routeAgentId = null, routeTab = "overview", onRoute
       );
     }
 
+    if (tab === "channels") {
+      return (
+        <section className="entry-editor-card agent-content-card">
+          <AgentChannelsTab agentId={agent.id} agentDisplayName={agent.displayName} />
+        </section>
+      );
+    }
+
     return (
       <section className="entry-editor-card agent-content-card">
         <AgentConfigTab agentId={agent.id} />
@@ -442,6 +452,15 @@ export function AgentsView({ routeAgentId = null, routeTab = "overview", onRoute
   if (!activeAgent) {
     return (
       <main className="agents-shell">
+        <header className="agents-index-head">
+          <h2>Agents</h2>
+          {agents.length > 0 && !isLoadingAgents ? (
+            <button type="button" className="agents-create-inline" onClick={openCreateModal}>
+              Create Agent
+            </button>
+          ) : null}
+        </header>
+
         <AgentsIndexSection
           agents={agents}
           isLoadingAgents={isLoadingAgents}

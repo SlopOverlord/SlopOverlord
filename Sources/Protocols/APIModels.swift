@@ -337,12 +337,21 @@ public struct AgentConfigUpdateRequest: Codable, Sendable {
 // MARK: - Channel Plugins
 
 public struct ChannelPluginRecord: Codable, Sendable, Equatable {
+    /// Delivery mode constants.
+    public enum DeliveryMode {
+        public static let http = "http"
+        public static let inProcess = "in-process"
+    }
+
     public var id: String
     public var type: String
+    /// HTTP base URL for out-of-process plugins. Empty for in-process plugins.
     public var baseUrl: String
     public var channelIds: [String]
     public var config: [String: String]
     public var enabled: Bool
+    /// `"http"` (default) or `"in-process"`. Determines how Core delivers messages.
+    public var deliveryMode: String
     public var createdAt: Date
     public var updatedAt: Date
 
@@ -353,6 +362,7 @@ public struct ChannelPluginRecord: Codable, Sendable, Equatable {
         channelIds: [String] = [],
         config: [String: String] = [:],
         enabled: Bool = true,
+        deliveryMode: String = DeliveryMode.http,
         createdAt: Date = Date(),
         updatedAt: Date = Date()
     ) {
@@ -362,6 +372,7 @@ public struct ChannelPluginRecord: Codable, Sendable, Equatable {
         self.channelIds = channelIds
         self.config = config
         self.enabled = enabled
+        self.deliveryMode = deliveryMode
         self.createdAt = createdAt
         self.updatedAt = updatedAt
     }

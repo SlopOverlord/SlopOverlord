@@ -226,7 +226,7 @@ final class ActorBoardFileStore {
             }
 
             let linkedAgentID = node.linkedAgentId?.trimmingCharacters(in: .whitespacesAndNewlines)
-            if let linkedAgentID, currentAgentIDs.contains(linkedAgentID), agentNodeIDs.contains(nodeID) {
+            if let linkedAgentID, currentAgentIDs.contains(linkedAgentID) {
                 return nil
             }
 

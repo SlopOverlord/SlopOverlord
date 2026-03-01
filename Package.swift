@@ -10,10 +10,10 @@ let package = Package(
         .library(name: "Protocols", targets: ["Protocols"]),
         .library(name: "PluginSDK", targets: ["PluginSDK"]),
         .library(name: "AgentRuntime", targets: ["AgentRuntime"]),
+        .library(name: "ChannelPluginTelegram", targets: ["ChannelPluginTelegram"]),
         .executable(name: "Core", targets: ["Core"]),
         .executable(name: "Node", targets: ["Node"]),
-        .executable(name: "App", targets: ["App"]),
-        .executable(name: "ChannelPluginTelegram", targets: ["ChannelPluginTelegram"])
+        .executable(name: "App", targets: ["App"])
     ],
     dependencies: [
         .package(url: "https://github.com/apple/swift-argument-parser.git", from: "1.5.0"),
@@ -44,6 +44,7 @@ let package = Package(
             name: "Core",
             dependencies: [
                 "AgentRuntime",
+                "ChannelPluginTelegram",
                 "Protocols",
                 "PluginSDK",
                 .product(name: "ArgumentParser", package: "swift-argument-parser"),
@@ -81,15 +82,12 @@ let package = Package(
             ],
             path: "Sources/App"
         ),
-        .executableTarget(
+        .target(
             name: "ChannelPluginTelegram",
             dependencies: [
                 "Protocols",
-                .product(name: "ArgumentParser", package: "swift-argument-parser"),
-                .product(name: "Logging", package: "swift-log"),
-                .product(name: "NIOCore", package: "swift-nio"),
-                .product(name: "NIOPosix", package: "swift-nio"),
-                .product(name: "NIOHTTP1", package: "swift-nio")
+                "PluginSDK",
+                .product(name: "Logging", package: "swift-log")
             ],
             path: "Sources/ChannelPluginTelegram"
         ),

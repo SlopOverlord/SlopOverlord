@@ -1791,12 +1791,12 @@ export function ProjectsView({
   return (
     <main className="projects-shell">
       {projects.length > 0 && (
-        <div className="projects-head">
+        <header className="agents-index-head">
           <h2>Projects</h2>
-          <button type="button" className="project-new-action" onClick={openCreateProjectModal}>
+          <button type="button" className="agents-create-inline" onClick={openCreateProjectModal}>
             New Project
           </button>
-        </div>
+        </header>
       )}
 
       {selectedProject ? renderProjectDetails(selectedProject) : renderProjectList()}

@@ -39,6 +39,7 @@ public actor SQLiteStore: PersistenceStore {
         if sqlite3_open(path, &db) == SQLITE_OK {
             _ = sqlite3_exec(db, schemaSQL, nil, nil, nil)
             Self.applyProjectTaskMigrations(db: db)
+            Self.applyChannelPluginMigrations(db: db)
         } else {
             db = nil
         }
@@ -544,7 +545,7 @@ public actor SQLiteStore: PersistenceStore {
         if let db {
             let sql =
                 """
-                SELECT id, type, base_url, channel_ids_json, config_json, enabled, created_at, updated_at
+                SELECT id, type, base_url, channel_ids_json, config_json, enabled, delivery_mode, created_at, updated_at
                 FROM channel_plugins
                 WHERE id = ?
                 LIMIT 1;
@@ -572,8 +573,8 @@ public actor SQLiteStore: PersistenceStore {
         let sql =
             """
             INSERT OR REPLACE INTO channel_plugins(
-                id, type, base_url, channel_ids_json, config_json, enabled, created_at, updated_at
-            ) VALUES(?, ?, ?, ?, ?, ?, ?, ?);
+                id, type, base_url, channel_ids_json, config_json, enabled, delivery_mode, created_at, updated_at
+            ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?);
             """
         var statement: OpaquePointer?
         guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK else { return }
@@ -588,8 +589,9 @@ public actor SQLiteStore: PersistenceStore {
         bindText(channelIdsJSON, at: 4, statement: statement)
         bindText(configJSON, at: 5, statement: statement)
         sqlite3_bind_int(statement, 6, plugin.enabled ? 1 : 0)
-        bindText(isoFormatter.string(from: plugin.createdAt), at: 7, statement: statement)
-        bindText(isoFormatter.string(from: plugin.updatedAt), at: 8, statement: statement)
+        bindText(plugin.deliveryMode, at: 7, statement: statement)
+        bindText(isoFormatter.string(from: plugin.createdAt), at: 8, statement: statement)
+        bindText(isoFormatter.string(from: plugin.updatedAt), at: 9, statement: statement)
 
         _ = sqlite3_step(statement)
 #endif
@@ -842,10 +844,21 @@ public actor SQLiteStore: PersistenceStore {
         }
     }
 
+    private static func applyChannelPluginMigrations(db: OpaquePointer?) {
+        guard let db else {
+            return
+        }
+        _ = sqlite3_exec(
+            db,
+            "ALTER TABLE channel_plugins ADD COLUMN delivery_mode TEXT NOT NULL DEFAULT 'http';",
+            nil, nil, nil
+        )
+    }
+
     private func loadChannelPlugins(db: OpaquePointer) -> [ChannelPluginRecord] {
         let sql =
             """
-            SELECT id, type, base_url, channel_ids_json, config_json, enabled, created_at, updated_at
+            SELECT id, type, base_url, channel_ids_json, config_json, enabled, delivery_mode, created_at, updated_at
             FROM channel_plugins
             ORDER BY created_at ASC;
             """
@@ -869,13 +882,15 @@ public actor SQLiteStore: PersistenceStore {
             let baseUrlPtr = sqlite3_column_text(statement, 2),
             let channelIdsPtr = sqlite3_column_text(statement, 3),
             let configPtr = sqlite3_column_text(statement, 4),
-            let createdAtPtr = sqlite3_column_text(statement, 6),
-            let updatedAtPtr = sqlite3_column_text(statement, 7)
+            let createdAtPtr = sqlite3_column_text(statement, 7),
+            let updatedAtPtr = sqlite3_column_text(statement, 8)
         else {
             return nil
         }
 
         let enabled = sqlite3_column_int(statement, 5) != 0
+        let deliveryModePtr = sqlite3_column_text(statement, 6)
+        let deliveryMode = deliveryModePtr.map { String(cString: $0) } ?? ChannelPluginRecord.DeliveryMode.http
         let channelIds = (try? JSONDecoder().decode([String].self, from: Data(String(cString: channelIdsPtr).utf8))) ?? []
         let config = (try? JSONDecoder().decode([String: String].self, from: Data(String(cString: configPtr).utf8))) ?? [:]
         let createdAt = isoFormatter.date(from: String(cString: createdAtPtr)) ?? Date()
@@ -888,6 +903,7 @@ public actor SQLiteStore: PersistenceStore {
             channelIds: channelIds,
             config: config,
             enabled: enabled,
+            deliveryMode: deliveryMode,
             createdAt: createdAt,
             updatedAt: updatedAt
         )

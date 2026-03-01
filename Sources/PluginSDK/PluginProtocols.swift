@@ -1,14 +1,21 @@
 import Foundation
 import Protocols
 
+/// Receives inbound messages from external channels and routes them into Core.
+/// Implementations bridge external platforms (Telegram, Slack, etc.) to channel runtime.
+public protocol InboundMessageReceiver: Sendable {
+    func postMessage(channelId: String, userId: String, content: String) async -> Bool
+}
+
 /// In-process gateway plugin for direct integration.
-/// For out-of-process channel plugins (Telegram, Slack, etc.) see the transport-based
-/// Channel Plugin Protocol: docs/specs/channel-plugin-protocol.md
-/// Out-of-process plugins communicate with Core over HTTP (POST /deliver, POST /validate)
-/// and are registered via the /v1/plugins REST API.
+/// Bundled plugins (e.g. Telegram) are linked directly; external plugins are loaded via dlopen.
+/// For out-of-process channel plugins see: docs/specs/channel-plugin-protocol.md
 public protocol GatewayPlugin: Sendable {
     var id: String { get }
-    func start() async throws
+    /// Channel IDs this plugin handles. Used to register plugin delivery routes.
+    var channelIds: [String] { get }
+    /// Start the plugin, supplying a receiver for inbound messages from the platform.
+    func start(inboundReceiver: any InboundMessageReceiver) async throws
     func stop() async
     func send(channelId: String, message: String) async throws
 }

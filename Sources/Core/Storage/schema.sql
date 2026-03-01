@@ -95,6 +95,7 @@ CREATE TABLE IF NOT EXISTS channel_plugins (
     channel_ids_json TEXT NOT NULL DEFAULT '[]',
     config_json TEXT NOT NULL DEFAULT '{}',
     enabled INTEGER NOT NULL DEFAULT 1,
+    delivery_mode TEXT NOT NULL DEFAULT 'http',
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
 );

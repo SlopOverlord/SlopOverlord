@@ -3,10 +3,13 @@ import Foundation
 import FoundationNetworking
 #endif
 import Protocols
+import PluginSDK
 
-/// Delivers outbound channel messages to registered channel plugins via HTTP.
+/// Delivers outbound channel messages to registered channel plugins.
+/// Supports both in-process GatewayPlugin instances and out-of-process HTTP plugins.
 actor ChannelDeliveryService {
     private let store: any PersistenceStore
+    private var inProcessPlugins: [String: any GatewayPlugin] = [:]
 #if canImport(FoundationNetworking)
     private let session: URLSession
 #endif
@@ -22,18 +25,51 @@ actor ChannelDeliveryService {
 #endif
     }
 
-    /// Delivers a message to the plugin responsible for `channelId`, if any.
-    /// Returns `true` when delivery was attempted and the plugin responded 2xx.
-    @discardableResult
-    func deliver(channelId: String, userId: String, content: String) async -> Bool {
-        let plugins = await store.listChannelPlugins()
-        guard let plugin = plugins.first(where: { $0.enabled && $0.channelIds.contains(channelId) }) else {
-            return false
+    /// Registers an in-process GatewayPlugin for its declared channel IDs.
+    func registerPlugin(_ plugin: any GatewayPlugin) {
+        for channelId in plugin.channelIds {
+            inProcessPlugins[channelId] = plugin
         }
-        return await post(plugin: plugin, channelId: channelId, userId: userId, content: content)
     }
 
-    private func post(plugin: ChannelPluginRecord, channelId: String, userId: String, content: String) async -> Bool {
+    /// Removes the in-process plugin registration for all its channel IDs.
+    func unregisterPlugin(_ plugin: any GatewayPlugin) {
+        for channelId in plugin.channelIds {
+            inProcessPlugins[channelId] = nil
+        }
+    }
+
+    /// Delivers a message to the plugin responsible for `channelId`, if any.
+    /// Prefers in-process delivery; falls back to HTTP for out-of-process plugins.
+    /// Returns `true` when delivery was attempted successfully.
+    @discardableResult
+    func deliver(channelId: String, userId: String, content: String) async -> Bool {
+        if let plugin = inProcessPlugins[channelId] {
+            do {
+                try await plugin.send(channelId: channelId, message: content)
+                return true
+            } catch {
+                return false
+            }
+        }
+
+        let plugins = await store.listChannelPlugins()
+        guard let plugin = plugins.first(where: {
+            $0.enabled
+            && $0.deliveryMode != ChannelPluginRecord.DeliveryMode.inProcess
+            && $0.channelIds.contains(channelId)
+        }) else {
+            return false
+        }
+        return await postHTTP(plugin: plugin, channelId: channelId, userId: userId, content: content)
+    }
+
+    private func postHTTP(
+        plugin: ChannelPluginRecord,
+        channelId: String,
+        userId: String,
+        content: String
+    ) async -> Bool {
 #if canImport(FoundationNetworking)
         let urlString = plugin.baseUrl.hasSuffix("/")
             ? "\(plugin.baseUrl)deliver"

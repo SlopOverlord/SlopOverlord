@@ -1,7 +1,9 @@
 import Foundation
 import AgentRuntime
+import ChannelPluginTelegram
 import Logging
 import Protocols
+import PluginSDK
 
 public enum AgentSessionStreamUpdateKind: String, Codable, Sendable {
     case sessionReady = "session_ready"
@@ -125,6 +127,7 @@ public actor CoreService {
     private var agentsRootURL: URL
     private var currentConfig: CoreConfig
     private var eventTask: Task<Void, Never>?
+    private var activeGatewayPlugins: [any GatewayPlugin] = []
 
     /// Creates core orchestration service with runtime and persistence backend.
     public init(
@@ -195,6 +198,80 @@ public actor CoreService {
 
     deinit {
         eventTask?.cancel()
+    }
+
+    // MARK: - Gateway Plugin Lifecycle
+
+    /// Creates and starts in-process gateway plugins declared in config.
+    /// Must be called after `CoreService.init` from an async context (e.g. CoreMain).
+    public func bootstrapChannelPlugins() async {
+        if let telegramConfig = currentConfig.channels.telegram {
+            let plugin = TelegramGatewayPlugin(
+                botToken: telegramConfig.botToken,
+                channelChatMap: telegramConfig.channelChatMap,
+                allowedUserIds: telegramConfig.allowedUserIds,
+                allowedChatIds: telegramConfig.allowedChatIds,
+                logger: Logger(label: "slopoverlord.plugin.telegram")
+            )
+            await channelDelivery.registerPlugin(plugin)
+            activeGatewayPlugins.append(plugin)
+
+            await seedTelegramPluginRecord(plugin: plugin, config: telegramConfig)
+
+            do {
+                try await plugin.start(inboundReceiver: self)
+                logger.info("Telegram gateway plugin started.")
+            } catch {
+                logger.error("Failed to start Telegram gateway plugin: \(error)")
+            }
+        }
+
+        let pluginsDir = workspaceRootURL.appendingPathComponent("plugins", isDirectory: true)
+        let loader = PluginLoader(logger: logger)
+        let externalPlugins = await loader.loadGatewayPlugins(
+            from: pluginsDir,
+            inboundReceiver: self
+        )
+        for plugin in externalPlugins {
+            await channelDelivery.registerPlugin(plugin)
+            activeGatewayPlugins.append(plugin)
+            do {
+                try await plugin.start(inboundReceiver: self)
+                logger.info("External gateway plugin \(plugin.id) started.")
+            } catch {
+                logger.error("Failed to start external gateway plugin \(plugin.id): \(error)")
+            }
+        }
+    }
+
+    /// Stops all active in-process gateway plugins. Called on shutdown.
+    public func shutdownChannelPlugins() async {
+        for plugin in activeGatewayPlugins {
+            await plugin.stop()
+        }
+        activeGatewayPlugins.removeAll()
+    }
+
+    private func seedTelegramPluginRecord(
+        plugin: TelegramGatewayPlugin,
+        config: CoreConfig.ChannelConfig.Telegram
+    ) async {
+        let channelIds = Array(config.channelChatMap.keys)
+        let pluginId = "telegram"
+        let existing = await store.channelPlugin(id: pluginId)
+        let now = Date()
+        let record = ChannelPluginRecord(
+            id: pluginId,
+            type: "telegram",
+            baseUrl: "",
+            channelIds: channelIds,
+            config: [:],
+            enabled: true,
+            deliveryMode: ChannelPluginRecord.DeliveryMode.inProcess,
+            createdAt: existing?.createdAt ?? now,
+            updatedAt: now
+        )
+        await store.saveChannelPlugin(record)
     }
 
     /// Accepts a user channel message and returns routing decision.
@@ -1432,6 +1509,7 @@ public actor CoreService {
         let url = URL(fileURLWithPath: configPath)
         try payload.write(to: url, options: .atomic)
 
+        let previousChannels = currentConfig.channels
         currentConfig = config
         workspaceRootURL = config
             .resolvedWorkspaceRootURL(currentDirectory: FileManager.default.currentDirectoryPath)
@@ -1448,7 +1526,44 @@ public actor CoreService {
         let modelProvider = CoreModelProviderFactory.buildModelProvider(config: config, resolvedModels: resolvedModels)
         let defaultModel = modelProvider?.models.first ?? resolvedModels.first
         await runtime.updateModelProvider(modelProvider: modelProvider, defaultModel: defaultModel)
+
+        if previousChannels.telegram != config.channels.telegram {
+            await reloadTelegramPlugin(newConfig: config.channels.telegram)
+        }
+
         return currentConfig
+    }
+
+    private func reloadTelegramPlugin(newConfig: CoreConfig.ChannelConfig.Telegram?) async {
+        if let existing = activeGatewayPlugins.first(where: { $0.id == "telegram" }) {
+            logger.info("Telegram config changed — stopping existing plugin.")
+            await existing.stop()
+            await channelDelivery.unregisterPlugin(existing)
+            activeGatewayPlugins.removeAll { $0.id == "telegram" }
+        }
+
+        guard let telegramConfig = newConfig, !telegramConfig.botToken.isEmpty else {
+            logger.info("Telegram plugin removed (no config or empty token).")
+            return
+        }
+
+        logger.info("Telegram config changed — starting new plugin.")
+        let plugin = TelegramGatewayPlugin(
+            botToken: telegramConfig.botToken,
+            channelChatMap: telegramConfig.channelChatMap,
+            allowedUserIds: telegramConfig.allowedUserIds,
+            allowedChatIds: telegramConfig.allowedChatIds,
+            logger: Logger(label: "slopoverlord.plugin.telegram")
+        )
+        await channelDelivery.registerPlugin(plugin)
+        activeGatewayPlugins.append(plugin)
+        await seedTelegramPluginRecord(plugin: plugin, config: telegramConfig)
+        do {
+            try await plugin.start(inboundReceiver: self)
+            logger.info("Telegram plugin reloaded successfully.")
+        } catch {
+            logger.error("Failed to reload Telegram plugin: \(error)")
+        }
     }
 
     private func handleTaskApprovalCommand(channelId: String, reference: TaskApprovalReference) async -> ChannelRouteDecision {
@@ -3313,5 +3428,39 @@ private extension JSONValue {
             }
             return nil
         }
+    }
+}
+
+// MARK: - InboundMessageReceiver
+
+private actor ResponseCollector {
+    private var value = ""
+    func set(_ text: String) { value = text }
+    func get() -> String { value }
+}
+
+extension CoreService: InboundMessageReceiver {
+    /// Called by in-process channel plugins when a message arrives from an external platform.
+    /// Routes through the runtime, collects the response, and delivers it back to the channel plugin.
+    public func postMessage(channelId: String, userId: String, content: String) async -> Bool {
+        let request = ChannelMessageRequest(userId: userId, content: content)
+        let collector = ResponseCollector()
+
+        let onChunk: @Sendable (String) async -> Bool = { chunk in
+            await collector.set(chunk)
+            return true
+        }
+
+        _ = await runtime.postMessage(
+            channelId: channelId,
+            request: request,
+            onResponseChunk: onChunk
+        )
+
+        let reply = await collector.get().trimmingCharacters(in: .whitespacesAndNewlines)
+        if !reply.isEmpty {
+            await channelDelivery.deliver(channelId: channelId, userId: "assistant", content: reply)
+        }
+        return true
     }
 }

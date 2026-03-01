@@ -921,6 +921,7 @@ export function ActorsView() {
 
     if (applyBoardResponse(response, "Team deleted") && editingTeamId === teamId) {
       resetTeamForm();
+      setShowNewTeamPopup(false);
     }
   }
 
@@ -1502,28 +1503,22 @@ export function ActorsView() {
                     {editingTeamId ? "Save Team" : "Create Team"}
                   </button>
                   {editingTeamId ? (
-                    <button type="button" onClick={resetTeamForm}>
-                      Cancel
-                    </button>
+                    <>
+                      <button type="button" onClick={resetTeamForm}>
+                        Cancel
+                      </button>
+                      <button
+                        type="button"
+                        className="danger"
+                        disabled={isSaving}
+                        onClick={() => void deleteTeam(editingTeamId)}
+                      >
+                        Delete
+                      </button>
+                    </>
                   ) : null}
                 </div>
               </form>
-              {board.teams.length > 0 ? (
-                <div className="actor-team-list">
-                  {board.teams.map((team) => (
-                    <article key={team.id}>
-                      <strong>{team.name}</strong>
-                      <p>{team.memberActorIds.length} members</p>
-                      <button type="button" onClick={() => beginTeamEdit(team)}>
-                        Edit
-                      </button>
-                      <button type="button" onClick={() => void deleteTeam(team.id)}>
-                        Delete
-                      </button>
-                    </article>
-                  ))}
-                </div>
-              ) : null}
             </div>
             </div>
           ) : null}

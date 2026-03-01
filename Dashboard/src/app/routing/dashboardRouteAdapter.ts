@@ -11,7 +11,7 @@ export const TOP_LEVEL_SECTIONS = [
   "logs"
 ] as const;
 
-export const AGENT_TABS = ["overview", "chat", "memories", "tasks", "skills", "tools", "cron", "config"] as const;
+export const AGENT_TABS = ["overview", "chat", "memories", "tasks", "skills", "tools", "channels", "cron", "config"] as const;
 export const PROJECT_TABS = ["overview", "tasks", "workers", "memories", "visor", "settings"] as const;
 
 const TOP_LEVEL_SECTION_SET = new Set<string>(TOP_LEVEL_SECTIONS);

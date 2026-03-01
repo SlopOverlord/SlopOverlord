@@ -32,7 +32,7 @@ export function SettingsSidebar({
             className={`settings-nav-item ${selectedSettings === item.id ? "active" : ""}`}
             onClick={() => onSelectSettings(item.id)}
           >
-            <span>{item.icon}</span>
+            <span className="material-symbols-rounded settings-nav-icon">{item.icon}</span>
             <span>{item.title}</span>
           </button>
         ))}
