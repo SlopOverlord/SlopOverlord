@@ -189,7 +189,13 @@ public actor WorkerRuntime {
             payload: ["progress": .string("received_route")]
         )
 
-        if message.lowercased().contains("done") || message.lowercased().contains("готово") {
+        let normalizedMessage = message.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        if normalizedMessage == "fail" || normalizedMessage == "ошибка" {
+            await fail(workerId: workerId, error: "Interactive worker marked as failed by route command")
+            return WorkerRouteResult(accepted: true, completed: true, artifactRef: nil)
+        }
+
+        if normalizedMessage.contains("done") || normalizedMessage.contains("готово") {
             let artifact = await completeNow(workerId: workerId, summary: "Interactive worker completed after route command")
             return WorkerRouteResult(accepted: true, completed: true, artifactRef: artifact)
         }

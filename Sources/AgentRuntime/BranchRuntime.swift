@@ -22,6 +22,10 @@ public actor BranchRuntime {
     public func spawn(channelId: String, prompt: String) async -> String {
         let branchId = UUID().uuidString
         let recalled = await memoryStore.recall(query: prompt, limit: 5)
+        let todos = TodoExtractor.extractCandidates(from: prompt)
+        for todo in todos {
+            _ = await memoryStore.save(note: "[todo] \(todo)")
+        }
         branches[branchId] = BranchState(
             channelId: channelId,
             prompt: prompt,
@@ -37,7 +41,10 @@ public actor BranchRuntime {
                 payload: .object([
                     "prompt": .string(prompt),
                     "memoryRefs": .array(recalled.map { .string($0.id) })
-                ])
+                ]),
+                extensions: todos.isEmpty ? [:] : [
+                    "todos": .array(todos.map { .string($0) })
+                ]
             )
         )
 

@@ -1,5 +1,6 @@
 import Foundation
 import AgentRuntime
+import Logging
 import Protocols
 
 public enum AgentSessionStreamUpdateKind: String, Codable, Sendable {
@@ -110,6 +111,7 @@ public actor CoreService {
     private let toolsAuthorization: ToolAuthorizationService
     private let toolExecution: ToolExecutionService
     private let systemLogStore: SystemLogFileStore
+    private let logger: Logger
     private let configPath: String
     private var workspaceRootURL: URL
     private var agentsRootURL: URL
@@ -156,6 +158,7 @@ public actor CoreService {
             agentCatalogStore: self.agentCatalogStore,
             processRegistry: processRegistry
         )
+        self.logger = Logger(label: "slopoverlord.core.visor")
         self.currentConfig = config
         Task { [weak self] in
             guard let self else {
@@ -187,7 +190,10 @@ public actor CoreService {
 
     /// Accepts a user channel message and returns routing decision.
     public func postChannelMessage(channelId: String, request: ChannelMessageRequest) async -> ChannelRouteDecision {
-        await runtime.postMessage(channelId: channelId, request: request)
+        if let approvalReference = TaskApprovalCommandParser.parse(request.content) {
+            return await handleTaskApprovalCommand(channelId: channelId, reference: approvalReference)
+        }
+        return await runtime.postMessage(channelId: channelId, request: request)
     }
 
     /// Routes interactive message into a running worker.
@@ -386,21 +392,23 @@ public actor CoreService {
 
         let now = Date()
         let normalizedStatus = try normalizeTaskStatus(request.status)
-        project.tasks.append(
-            ProjectTask(
-                id: UUID().uuidString,
-                title: try normalizeTaskTitle(request.title),
-                description: normalizeTaskDescription(request.description),
-                priority: try normalizeTaskPriority(request.priority),
-                status: normalizedStatus,
-                createdAt: now,
-                updatedAt: now
-            )
+        let task = ProjectTask(
+            id: UUID().uuidString,
+            title: try normalizeTaskTitle(request.title),
+            description: normalizeTaskDescription(request.description),
+            priority: try normalizeTaskPriority(request.priority),
+            status: normalizedStatus,
+            createdAt: now,
+            updatedAt: now
         )
+        project.tasks.append(task)
         project.updatedAt = now
         await store.saveProject(project)
         if normalizedStatus == "ready" {
-            _ = await triggerVisorBulletin()
+            await handleTaskBecameReady(projectID: normalizedID, taskID: task.id)
+            if let updated = await store.project(id: normalizedID) {
+                return updated
+            }
         }
         return project
     }
@@ -443,7 +451,10 @@ public actor CoreService {
         project.updatedAt = Date()
         await store.saveProject(project)
         if previousStatus != "ready", task.status == "ready" {
-            _ = await triggerVisorBulletin()
+            await handleTaskBecameReady(projectID: normalizedProject, taskID: task.id)
+            if let updated = await store.project(id: normalizedProject) {
+                return updated
+            }
         }
         return project
     }
@@ -1245,6 +1256,446 @@ public actor CoreService {
         return currentConfig
     }
 
+    private func handleTaskApprovalCommand(channelId: String, reference: TaskApprovalReference) async -> ChannelRouteDecision {
+        guard let project = await projectForChannel(channelId: channelId) else {
+            await runtime.appendSystemMessage(
+                channelId: channelId,
+                content: "project_not_found_for_channel"
+            )
+            return ChannelRouteDecision(
+                action: .respond,
+                reason: "project_not_found_for_channel",
+                confidence: 1.0,
+                tokenBudget: 0
+            )
+        }
+
+        guard let task = resolveTask(reference: reference, in: project) else {
+            await runtime.appendSystemMessage(
+                channelId: channelId,
+                content: "task_not_found"
+            )
+            return ChannelRouteDecision(
+                action: .respond,
+                reason: "task_not_found",
+                confidence: 1.0,
+                tokenBudget: 0
+            )
+        }
+
+        do {
+            _ = try await updateProjectTask(
+                projectID: project.id,
+                taskID: task.id,
+                request: ProjectTaskUpdateRequest(status: "ready")
+            )
+            await runtime.appendSystemMessage(
+                channelId: channelId,
+                content: "Task \(task.id) approved and queued for execution."
+            )
+            logger.info(
+                "visor.task.approved",
+                metadata: [
+                    "project_id": .string(project.id),
+                    "task_id": .string(task.id),
+                    "channel_id": .string(channelId),
+                    "source": .string("nl_command")
+                ]
+            )
+            return ChannelRouteDecision(
+                action: .respond,
+                reason: "task_approved_command",
+                confidence: 1.0,
+                tokenBudget: 0
+            )
+        } catch {
+            await runtime.appendSystemMessage(
+                channelId: channelId,
+                content: "task_not_found"
+            )
+            return ChannelRouteDecision(
+                action: .respond,
+                reason: "task_not_found",
+                confidence: 1.0,
+                tokenBudget: 0
+            )
+        }
+    }
+
+    private func handleTaskBecameReady(projectID: String, taskID: String) async {
+        guard var project = await store.project(id: projectID),
+              let taskIndex = project.tasks.firstIndex(where: { $0.id == taskID })
+        else {
+            return
+        }
+
+        var task = project.tasks[taskIndex]
+        guard task.status == "ready" else {
+            return
+        }
+
+        _ = await triggerVisorBulletin()
+        logger.info(
+            "visor.task.approved",
+            metadata: [
+                "project_id": .string(projectID),
+                "task_id": .string(taskID),
+                "source": .string("status_ready")
+            ]
+        )
+
+        let workers = await runtime.workerSnapshots()
+        let hasActiveWorker = workers.contains { snapshot in
+            snapshot.taskId == task.id &&
+            (snapshot.status == .queued || snapshot.status == .running || snapshot.status == .waitingInput)
+        }
+        guard !hasActiveWorker else {
+            return
+        }
+
+        guard let executionChannelID = resolveExecutionChannelID(project: project, task: task) else {
+            return
+        }
+
+        let workerId = await runtime.createWorker(
+            spec: WorkerTaskSpec(
+                taskId: task.id,
+                channelId: executionChannelID,
+                title: task.title,
+                objective: task.description,
+                tools: ["shell", "file", "exec", "browser"],
+                mode: .interactive
+            )
+        )
+
+        task.status = "in_progress"
+        task.updatedAt = Date()
+        project.tasks[taskIndex] = task
+        project.updatedAt = Date()
+        await store.saveProject(project)
+
+        logger.info(
+            "visor.task.worker_spawned",
+            metadata: [
+                "project_id": .string(project.id),
+                "task_id": .string(task.id),
+                "worker_id": .string(workerId),
+                "channel_id": .string(executionChannelID)
+            ]
+        )
+    }
+
+    private func resolveExecutionChannelID(project: ProjectRecord, task: ProjectTask) -> String? {
+        if let markedChannelID = extractOriginChannelID(from: task.description),
+           project.channels.contains(where: { $0.channelId == markedChannelID }) {
+            return markedChannelID
+        }
+        return project.channels.sorted(by: { $0.createdAt < $1.createdAt }).first?.channelId
+    }
+
+    private func extractOriginChannelID(from description: String) -> String? {
+        let pattern = #"(?im)^Origin channel:\s*(\S+)\s*$"#
+        guard let regex = try? NSRegularExpression(pattern: pattern) else {
+            return nil
+        }
+        let nsDescription = description as NSString
+        let range = NSRange(location: 0, length: nsDescription.length)
+        guard let match = regex.firstMatch(in: description, options: [], range: range),
+              match.numberOfRanges > 1
+        else {
+            return nil
+        }
+        let capture = match.range(at: 1)
+        guard capture.location != NSNotFound else {
+            return nil
+        }
+        return nsDescription.substring(with: capture)
+    }
+
+    private func handleVisorEvent(_ event: EventEnvelope) async {
+        switch event.messageType {
+        case .branchSpawned:
+            await handleBranchSpawned(event)
+        case .workerCompleted:
+            await syncTaskStatusFromWorkerEvent(event: event, nextStatus: "done", failureNote: nil)
+        case .workerFailed:
+            let errorText = event.payload.objectValue["error"]?.stringValue
+            await syncTaskStatusFromWorkerEvent(event: event, nextStatus: "backlog", failureNote: errorText)
+        default:
+            break
+        }
+    }
+
+    private func handleBranchSpawned(_ event: EventEnvelope) async {
+        var todos = event.extensions["todos"]?.stringArrayValue ?? []
+        if todos.isEmpty, let prompt = event.payload.objectValue["prompt"]?.stringValue {
+            todos = TodoExtractor.extractCandidates(from: prompt)
+        }
+
+        logger.info(
+            "visor.todo.extracted",
+            metadata: [
+                "channel_id": .string(event.channelId),
+                "count": .stringConvertible(todos.count)
+            ]
+        )
+
+        guard !todos.isEmpty else {
+            return
+        }
+
+        guard var project = await projectForChannel(channelId: event.channelId) else {
+            logger.info(
+                "visor.todo.extracted",
+                metadata: [
+                    "channel_id": .string(event.channelId),
+                    "count": .string("0"),
+                    "skip": .string("project_not_found_for_channel")
+                ]
+            )
+            return
+        }
+
+        let activeStatuses = Set(["backlog", "ready", "in_progress"])
+        var existingTitleKeys = Set(
+            project.tasks
+                .filter { activeStatuses.contains($0.status) }
+                .map { normalizedTaskTitleKey($0.title) }
+        )
+        var createdCount = 0
+        var duplicateCount = 0
+
+        for todo in todos {
+            let title = summarizedTodoTitle(from: todo)
+            let titleKey = normalizedTaskTitleKey(title)
+            guard !titleKey.isEmpty else {
+                continue
+            }
+            if existingTitleKeys.contains(titleKey) {
+                duplicateCount += 1
+                continue
+            }
+
+            let now = Date()
+            project.tasks.append(
+                ProjectTask(
+                    id: UUID().uuidString,
+                    title: title,
+                    description: visorTaskDescription(todo: todo, channelId: event.channelId),
+                    priority: "medium",
+                    status: "backlog",
+                    createdAt: now,
+                    updatedAt: now
+                )
+            )
+            existingTitleKeys.insert(titleKey)
+            createdCount += 1
+
+            logger.info(
+                "visor.task.created",
+                metadata: [
+                    "project_id": .string(project.id),
+                    "channel_id": .string(event.channelId),
+                    "title": .string(title)
+                ]
+            )
+        }
+
+        guard createdCount > 0 else {
+            return
+        }
+
+        project.updatedAt = Date()
+        await store.saveProject(project)
+        _ = await triggerVisorBulletin()
+        await runtime.appendSystemMessage(
+            channelId: event.channelId,
+            content: "Visor created \(createdCount) backlog tasks for approval."
+        )
+
+        if duplicateCount > 0 {
+            logger.info(
+                "visor.todo.extracted",
+                metadata: [
+                    "channel_id": .string(event.channelId),
+                    "duplicate_skipped": .stringConvertible(duplicateCount)
+                ]
+            )
+        }
+    }
+
+    private func syncTaskStatusFromWorkerEvent(
+        event: EventEnvelope,
+        nextStatus: String,
+        failureNote: String?
+    ) async {
+        guard let taskID = event.taskId else {
+            return
+        }
+
+        let projects = await store.listProjects()
+        for var project in projects {
+            guard let taskIndex = project.tasks.firstIndex(where: { $0.id == taskID }) else {
+                continue
+            }
+
+            var task = project.tasks[taskIndex]
+            task.status = nextStatus
+            task.updatedAt = Date()
+            if let failureNote {
+                let timestamp = ISO8601DateFormatter().string(from: event.ts)
+                let note = "Worker failed at \(timestamp): \(failureNote)"
+                if task.description.isEmpty {
+                    task.description = note
+                } else {
+                    task.description += "\n\n\(note)"
+                }
+            }
+            project.tasks[taskIndex] = task
+            project.updatedAt = Date()
+            await store.saveProject(project)
+
+            logger.info(
+                "visor.task.synced_from_worker_event",
+                metadata: [
+                    "project_id": .string(project.id),
+                    "task_id": .string(task.id),
+                    "event_type": .string(event.messageType.rawValue),
+                    "status": .string(nextStatus)
+                ]
+            )
+            return
+        }
+    }
+
+    private func projectForChannel(channelId: String) async -> ProjectRecord? {
+        let projects = await store.listProjects()
+        return projects
+            .sorted(by: { $0.createdAt < $1.createdAt })
+            .first(where: { project in
+                project.channels.contains(where: { $0.channelId == channelId })
+            })
+    }
+
+    private func resolveTask(reference: TaskApprovalReference, in project: ProjectRecord) -> ProjectTask? {
+        switch reference {
+        case .taskID(let taskID):
+            let lowercasedTaskID = taskID.lowercased()
+            return project.tasks.first(where: { task in
+                task.id == taskID || task.id.lowercased() == lowercasedTaskID
+            })
+        case .index(let oneBasedIndex):
+            guard oneBasedIndex > 0 else {
+                return nil
+            }
+            let ordered = project.tasks.sorted(by: { $0.createdAt < $1.createdAt })
+            let zeroBasedIndex = oneBasedIndex - 1
+            guard ordered.indices.contains(zeroBasedIndex) else {
+                return nil
+            }
+            return ordered[zeroBasedIndex]
+        }
+    }
+
+    private func summarizedTodoTitle(from todo: String) -> String {
+        let normalized = normalizeWhitespace(todo)
+        if normalized.isEmpty {
+            return "Visor task"
+        }
+
+        let separators = CharacterSet(charactersIn: "\n.;:")
+        if let splitRange = normalized.rangeOfCharacter(from: separators) {
+            let prefix = normalizeWhitespace(String(normalized[..<splitRange.lowerBound]))
+            if prefix.count >= 6 {
+                return String(prefix.prefix(120))
+            }
+        }
+
+        return String(normalized.prefix(120))
+    }
+
+    private func visorTaskDescription(todo: String, channelId: String) -> String {
+        var lines: [String] = [
+            "Source: visor-auto",
+            "Origin channel: \(channelId)",
+            "",
+            "Todo: \(normalizeWhitespace(todo))"
+        ]
+
+        let subtasks = extractSubtasks(from: todo)
+        if subtasks.count > 1 {
+            lines.append("")
+            lines.append(contentsOf: subtasks.map { "- [ ] \($0)" })
+        }
+
+        return normalizeTaskDescription(lines.joined(separator: "\n"))
+    }
+
+    private func extractSubtasks(from todo: String) -> [String] {
+        var seen: Set<String> = []
+        var subtasks: [String] = []
+
+        for rawLine in todo.components(separatedBy: .newlines) {
+            let line = rawLine.trimmingCharacters(in: .whitespacesAndNewlines)
+            if let checklist = captureGroup(line, pattern: #"(?i)^[-*]\s*\[\s*\]\s*(.+)$"#) {
+                let value = normalizeWhitespace(checklist)
+                let key = value.lowercased()
+                if value.count >= 3, seen.insert(key).inserted {
+                    subtasks.append(value)
+                }
+            } else if let bullet = captureGroup(line, pattern: #"^[-*]\s+(.+)$"#) {
+                let value = normalizeWhitespace(bullet)
+                let key = value.lowercased()
+                if value.count >= 3, seen.insert(key).inserted {
+                    subtasks.append(value)
+                }
+            }
+        }
+
+        if subtasks.count > 1 {
+            return subtasks
+        }
+
+        let segments = todo
+            .split(separator: ";")
+            .map { normalizeWhitespace(String($0)) }
+            .filter { $0.count >= 3 }
+        if segments.count > 1 {
+            return Array(segments.prefix(8))
+        }
+
+        return []
+    }
+
+    private func normalizedTaskTitleKey(_ value: String) -> String {
+        normalizeWhitespace(value).lowercased()
+    }
+
+    private func normalizeWhitespace(_ value: String) -> String {
+        value
+            .replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private func captureGroup(_ source: String, pattern: String) -> String? {
+        guard let regex = try? NSRegularExpression(pattern: pattern) else {
+            return nil
+        }
+        let nsSource = source as NSString
+        let fullRange = NSRange(location: 0, length: nsSource.length)
+        guard let match = regex.firstMatch(in: source, options: [], range: fullRange),
+              match.numberOfRanges > 1
+        else {
+            return nil
+        }
+
+        let range = match.range(at: 1)
+        guard range.location != NSNotFound else {
+            return nil
+        }
+        return nsSource.substring(with: range)
+    }
+
     private func normalizeProjectName(_ raw: String) throws -> String {
         let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty, trimmed.count <= 160 else {
@@ -1581,7 +2032,36 @@ public actor CoreService {
             let stream = await runtime.eventBus.subscribe()
             for await event in stream {
                 await store.persist(event: event)
+                await handleVisorEvent(event)
             }
+        }
+    }
+}
+
+private extension JSONValue {
+    var objectValue: [String: JSONValue] {
+        if case .object(let object) = self {
+            return object
+        }
+        return [:]
+    }
+
+    var stringValue: String? {
+        if case .string(let value) = self {
+            return value
+        }
+        return nil
+    }
+
+    var stringArrayValue: [String]? {
+        guard case .array(let values) = self else {
+            return nil
+        }
+        return values.compactMap { value in
+            if case .string(let stringValue) = value {
+                return stringValue
+            }
+            return nil
         }
     }
 }
