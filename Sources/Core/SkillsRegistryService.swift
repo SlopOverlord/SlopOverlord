@@ -255,12 +255,24 @@ actor SkillsRegistryService {
     nonisolated static func parseSkillsFromHTML(_ html: String) -> [SkillInfo] {
         var parsedSkills: [SkillInfo] = []
         var seenIDs = Set<String>()
+        let installsBySkillID = extractInstallsBySkillID(from: html)
 
         // First, try to extract skills from embedded Next.js JSON state.
         if let nextDataJSON = extractNextDataJSON(from: html),
            let data = nextDataJSON.data(using: .utf8),
            let json = try? JSONSerialization.jsonObject(with: data) {
-            for skill in collectSkills(from: json) {
+            for var skill in collectSkills(from: json) {
+                if skill.installs == 0, let installs = installsBySkillID[skill.id] {
+                    skill = SkillInfo(
+                        id: skill.id,
+                        owner: skill.owner,
+                        repo: skill.repo,
+                        name: skill.name,
+                        description: skill.description,
+                        installs: installs,
+                        githubUrl: skill.githubUrl
+                    )
+                }
                 if seenIDs.insert(skill.id).inserted {
                     parsedSkills.append(skill)
                 }
@@ -311,7 +323,7 @@ actor SkillsRegistryService {
                         repo: decodedRepo,
                         name: decodedName,
                         description: nil,
-                        installs: 0,
+                        installs: installsBySkillID[id] ?? 0,
                         githubUrl: "https://github.com/\(decodedOwner)/\(decodedRepo)"
                     )
                 )
@@ -324,6 +336,13 @@ actor SkillsRegistryService {
     nonisolated private static func sortSkills(_ skills: [SkillInfo], by sort: SortOption) -> [SkillInfo] {
         switch sort {
         case .installs, .trending:
+            guard let firstInstalls = skills.first?.installs else {
+                return skills
+            }
+            // Keep source order when installs are missing/equal (common for HTML fallback).
+            if skills.allSatisfy({ $0.installs == firstInstalls }) {
+                return skills
+            }
             return skills.sorted { lhs, rhs in
                 if lhs.installs == rhs.installs {
                     return lhs.id < rhs.id
@@ -561,6 +580,81 @@ actor SkillsRegistryService {
             return nil
         }
         return String(source[stringRange])
+    }
+
+    nonisolated private static func extractInstallsBySkillID(from html: String) -> [String: Int] {
+        var installsBySkillID: [String: Int] = [:]
+
+        // JSON-like embedded records: "id":"owner/skill", ... "installs":12345
+        let jsonPatterns = [
+            #""(?:id|slug)"\s*:\s*"([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+)".{0,260}?"(?:installs|install_count|downloadCount|download_count|downloads|usageCount)"\s*:\s*([0-9]+)"#,
+            #"\\\"(?:id|slug)\\\"\s*:\s*\\\"([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+)\\\".{0,260}?\\\"(?:installs|install_count|downloadCount|download_count|downloads|usageCount)\\\"\s*:\s*([0-9]+)"#
+        ]
+        for pattern in jsonPatterns {
+            if let regex = try? NSRegularExpression(pattern: pattern, options: [.dotMatchesLineSeparators]) {
+                let range = NSRange(location: 0, length: html.utf16.count)
+                for match in regex.matches(in: html, range: range) {
+                    guard match.numberOfRanges >= 3,
+                          let id = substring(html, range: match.range(at: 1)),
+                          let installsRaw = substring(html, range: match.range(at: 2)),
+                          let installs = Int(installsRaw)
+                    else {
+                        continue
+                    }
+                    installsBySkillID[id] = max(installsBySkillID[id] ?? 0, installs)
+                }
+            }
+        }
+
+        // Card-like markup: href="/owner/repo/skill" ... "123.4k installs"
+        let cardPattern = #"href="/([^"/?#]+)/([^"/?#]+)/([^"/?#]+)"[\s\S]{0,480}?([0-9]+(?:\.[0-9]+)?[kKmM]?)\s*installs"#
+        if let regex = try? NSRegularExpression(pattern: cardPattern, options: [.dotMatchesLineSeparators]) {
+            let range = NSRange(location: 0, length: html.utf16.count)
+            for match in regex.matches(in: html, range: range) {
+                guard match.numberOfRanges >= 5,
+                      let owner = substring(html, range: match.range(at: 1)),
+                      let name = substring(html, range: match.range(at: 3)),
+                      let installsText = substring(html, range: match.range(at: 4)),
+                      let installs = parseAbbreviatedNumber(installsText)
+                else {
+                    continue
+                }
+
+                let decodedOwner = owner.removingPercentEncoding ?? owner
+                let decodedName = name.removingPercentEncoding ?? name
+                let id = "\(decodedOwner)/\(decodedName)"
+                installsBySkillID[id] = max(installsBySkillID[id] ?? 0, installs)
+            }
+        }
+
+        return installsBySkillID
+    }
+
+    nonisolated private static func parseAbbreviatedNumber(_ raw: String) -> Int? {
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            return nil
+        }
+
+        let suffix = trimmed.last
+        let numberPart: String
+        let multiplier: Double
+        switch suffix {
+        case "k", "K":
+            numberPart = String(trimmed.dropLast())
+            multiplier = 1_000
+        case "m", "M":
+            numberPart = String(trimmed.dropLast())
+            multiplier = 1_000_000
+        default:
+            numberPart = trimmed
+            multiplier = 1
+        }
+
+        guard let value = Double(numberPart.replacingOccurrences(of: ",", with: "")) else {
+            return nil
+        }
+        return Int(value * multiplier)
     }
 }
 

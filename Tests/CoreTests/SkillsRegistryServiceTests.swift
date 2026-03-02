@@ -78,3 +78,20 @@ func parseSkillsFromHTMLExtractsSkillLinks() throws {
     #expect(parsed.contains(where: { $0.id == "sergiopaladino/chat-ui" && $0.repo == "claude-code-skills" }))
     #expect(parsed.contains(where: { $0.id == "anthropics/frontend-design" && $0.repo == "skills" }))
 }
+
+@Test
+func parseSkillsFromHTMLExtractsInstallsFromCardMarkup() throws {
+    let html = """
+    <html>
+      <body>
+        <a href="/anthropics/skills/frontend-design">frontend-design</a>
+        <span>111.9k installs</span>
+      </body>
+    </html>
+    """
+
+    let parsed = SkillsRegistryService.parseSkillsFromHTML(html)
+    let skill = parsed.first(where: { $0.id == "anthropics/frontend-design" })
+
+    #expect(skill?.installs == 111_900)
+}
