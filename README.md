@@ -1,5 +1,7 @@
 # SlopOverlord Runtime v1
 
+[![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/SlopOverlord/SlopOverlord)
+
 Multi-agent runtime skeleton in Swift 6.2 with Channel/Branch/Worker architecture, Core API router, Node daemon, Dashboard, docs, and Docker compose.
 
 Includes `AnyLanguageModel` integration for agent responses via `PluginSDK.AnyLanguageModelProviderPlugin` (OpenAI/Ollama).

@@ -143,6 +143,7 @@ public actor CoreService {
     private var currentConfig: CoreConfig
     private var eventTask: Task<Void, Never>?
     private var activeGatewayPlugins: [any GatewayPlugin] = []
+    private var visorScheduler: VisorScheduler?
 
     /// Creates core orchestration service with runtime and persistence backend.
     public init(
@@ -262,14 +263,28 @@ public actor CoreService {
                 logger.error("Failed to start external gateway plugin \(plugin.id): \(error)")
             }
         }
+
+        // Initialize and start periodic visor scheduler
+        if visorScheduler == nil {
+            visorScheduler = VisorScheduler(
+                config: VisorSchedulerConfig.default,
+                logger: logger
+            ) { [weak self] in
+                guard let self else { return }
+                _ = await self.triggerVisorBulletin()
+            }
+        }
+        await visorScheduler?.start()
     }
 
-    /// Stops all active in-process gateway plugins. Called on shutdown.
+    /// Stops all active in-process gateway plugins and visor scheduler. Called on shutdown.
     public func shutdownChannelPlugins() async {
         for plugin in activeGatewayPlugins {
             await plugin.stop()
         }
         activeGatewayPlugins.removeAll()
+
+        await visorScheduler?.stop()
     }
 
     private func seedTelegramPluginRecord(
