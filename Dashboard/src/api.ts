@@ -51,3 +51,7 @@ export const fetchAgentToolsCatalog = coreApi.fetchAgentToolsCatalog;
 export const fetchAgentToolsPolicy = coreApi.fetchAgentToolsPolicy;
 export const updateAgentToolsPolicy = coreApi.updateAgentToolsPolicy;
 export const invokeAgentTool = coreApi.invokeAgentTool;
+export const fetchSkillsRegistry: (search?: string, sort?: string, limit?: number, offset?: number) => Promise<Record<string, unknown> | null> = coreApi.fetchSkillsRegistry;
+export const fetchAgentSkills = coreApi.fetchAgentSkills;
+export const installAgentSkill = coreApi.installAgentSkill;
+export const uninstallAgentSkill = coreApi.uninstallAgentSkill;

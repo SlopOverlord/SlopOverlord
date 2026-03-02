@@ -107,7 +107,7 @@ private final class CoreHTTPHandler: ChannelInboundHandler, @unchecked Sendable 
             }
 
             let method = head.method.rawValue
-            let path = normalizedPath(head.uri)
+            let path = head.uri
             let bodyData = readData(from: &bodyBuffer)
             let router = self.router
 
@@ -314,12 +314,6 @@ private final class CoreHTTPHandler: ChannelInboundHandler, @unchecked Sendable 
         }
     }
 
-    private func normalizedPath(_ uri: String) -> String {
-        if let separatorIndex = uri.firstIndex(of: "?") {
-            return String(uri[..<separatorIndex])
-        }
-        return uri
-    }
 
     private func readData(from buffer: inout ByteBuffer?) -> Data? {
         guard var buffer else {

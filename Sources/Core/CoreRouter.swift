@@ -1,4 +1,5 @@
 import Foundation
+import Logging
 import AgentRuntime
 import Protocols
 
@@ -48,6 +49,7 @@ public struct HTTPRequest: Sendable {
     public var path: String
     public var segments: [String]
     public var params: [String: String]
+    public var query: [String: String]
     public var body: Data?
 
     public init(
@@ -55,17 +57,23 @@ public struct HTTPRequest: Sendable {
         path: String,
         segments: [String],
         params: [String: String] = [:],
+        query: [String: String] = [:],
         body: Data? = nil
     ) {
         self.method = method
         self.path = path
         self.segments = segments
         self.params = params
+        self.query = query
         self.body = body
     }
 
     public func pathParam(_ key: String) -> String? {
         params[key]
+    }
+
+    public func queryParam(_ key: String) -> String? {
+        query[key]
     }
 
     public func decode<T: Decodable>(_ type: T.Type) -> T? {
@@ -151,6 +159,12 @@ private enum ErrorCode {
     static let invalidPluginPayload = "invalid_plugin_payload"
     static let pluginNotFound = "plugin_not_found"
     static let pluginConflict = "plugin_conflict"
+    static let skillsRegistryFailed = "skills_registry_failed"
+    static let skillsListFailed = "skills_list_failed"
+    static let skillsInstallFailed = "skills_install_failed"
+    static let skillsUninstallFailed = "skills_uninstall_failed"
+    static let skillNotFound = "skill_not_found"
+    static let skillAlreadyExists = "skill_already_exists"
 }
 
 private struct AcceptResponse: Encodable {
@@ -212,6 +226,7 @@ private struct WebSocketRouteDefinition {
 }
 
 public actor CoreRouter {
+    private static let logger = Logger(label: "slopoverlord.core.router")
     private let service: CoreService
     private var routes: [RouteDefinition]
     private var webSocketRoutes: [WebSocketRouteDefinition]
@@ -261,6 +276,7 @@ public actor CoreRouter {
             return Self.json(status: HTTPStatus.notFound, payload: ["error": ErrorCode.notFound])
         }
 
+        let queryParams = parseQueryString(from: path)
         let pathSegments = splitPath(path)
         for route in routes where route.method == httpMethod {
             guard let params = route.match(pathSegments: pathSegments) else {
@@ -272,6 +288,7 @@ public actor CoreRouter {
                 path: path,
                 segments: pathSegments,
                 params: params,
+                query: queryParams,
                 body: body
             )
             return await route.callback(request)
@@ -526,6 +543,65 @@ public actor CoreRouter {
                 return Self.agentToolsErrorResponse(error, fallback: ErrorCode.agentToolsWriteFailed)
             } catch {
                 return Self.json(status: HTTPStatus.internalServerError, payload: ["error": ErrorCode.agentToolsWriteFailed])
+            }
+        }
+
+        // MARK: - Skills Routes
+
+        add(.get, "/v1/skills/registry") { request in
+            let search = request.queryParam("search")
+            let sort = request.queryParam("sort") ?? "installs"
+            let limit = Int(request.queryParam("limit") ?? "") ?? 20
+            let offset = Int(request.queryParam("offset") ?? "") ?? 0
+            Self.logger.debug("[skills.registry] path=\(request.path) query=\(request.query) -> search=\(search ?? "nil") sort=\(sort) limit=\(limit) offset=\(offset)")
+            do {
+                let response = try await service.fetchSkillsRegistry(search: search, sort: sort, limit: limit, offset: offset)
+                return Self.encodable(status: HTTPStatus.ok, payload: response)
+            } catch {
+                return Self.json(status: HTTPStatus.internalServerError, payload: ["error": ErrorCode.skillsRegistryFailed])
+            }
+        }
+
+        add(.get, "/v1/agents/:agentId/skills") { request in
+            let agentId = request.pathParam("agentId") ?? ""
+            do {
+                let response = try await service.listAgentSkills(agentID: agentId)
+                return Self.encodable(status: HTTPStatus.ok, payload: response)
+            } catch let error as CoreService.AgentSkillsError {
+                return Self.agentSkillsErrorResponse(error, fallback: ErrorCode.skillsListFailed)
+            } catch {
+                return Self.json(status: HTTPStatus.internalServerError, payload: ["error": ErrorCode.skillsListFailed])
+            }
+        }
+
+        add(.post, "/v1/agents/:agentId/skills") { request in
+            let agentId = request.pathParam("agentId") ?? ""
+            guard let body = request.body,
+                  let payload = Self.decode(body, as: SkillInstallRequest.self)
+            else {
+                return Self.json(status: HTTPStatus.badRequest, payload: ["error": ErrorCode.invalidBody])
+            }
+
+            do {
+                let skill = try await service.installAgentSkill(agentID: agentId, request: payload)
+                return Self.encodable(status: HTTPStatus.created, payload: skill)
+            } catch let error as CoreService.AgentSkillsError {
+                return Self.agentSkillsErrorResponse(error, fallback: ErrorCode.skillsInstallFailed)
+            } catch {
+                return Self.json(status: HTTPStatus.internalServerError, payload: ["error": ErrorCode.skillsInstallFailed])
+            }
+        }
+
+        add(.delete, "/v1/agents/:agentId/skills/:skillId") { request in
+            let agentId = request.pathParam("agentId") ?? ""
+            let skillId = request.pathParam("skillId") ?? ""
+            do {
+                try await service.uninstallAgentSkill(agentID: agentId, skillID: skillId)
+                return Self.json(status: HTTPStatus.ok, payload: ["success": "true"])
+            } catch let error as CoreService.AgentSkillsError {
+                return Self.agentSkillsErrorResponse(error, fallback: ErrorCode.skillsUninstallFailed)
+            } catch {
+                return Self.json(status: HTTPStatus.internalServerError, payload: ["error": ErrorCode.skillsUninstallFailed])
             }
         }
 
@@ -1214,6 +1290,23 @@ public actor CoreRouter {
         }
     }
 
+    private static func agentSkillsErrorResponse(_ error: CoreService.AgentSkillsError, fallback: String) -> CoreRouterResponse {
+        switch error {
+        case .invalidAgentID:
+            return json(status: HTTPStatus.badRequest, payload: ["error": ErrorCode.invalidAgentId])
+        case .invalidPayload:
+            return json(status: HTTPStatus.badRequest, payload: ["error": ErrorCode.invalidBody])
+        case .agentNotFound:
+            return json(status: HTTPStatus.notFound, payload: ["error": ErrorCode.agentNotFound])
+        case .skillNotFound:
+            return json(status: HTTPStatus.notFound, payload: ["error": ErrorCode.skillNotFound])
+        case .skillAlreadyExists:
+            return json(status: HTTPStatus.conflict, payload: ["error": ErrorCode.skillAlreadyExists])
+        case .storageFailure, .networkFailure, .downloadFailure:
+            return json(status: HTTPStatus.internalServerError, payload: ["error": fallback])
+        }
+    }
+
     private static func json(status: Int, payload: [String: String]) -> CoreRouterResponse {
         let data = (try? JSONSerialization.data(withJSONObject: payload, options: [.sortedKeys])) ?? CoreRouterConstants.emptyJSONData
         return CoreRouterResponse(status: status, body: data)
@@ -1285,4 +1378,23 @@ private func splitPath(_ rawPath: String) -> [String] {
             return rawSegment.removingPercentEncoding ?? rawSegment
         }
         .filter { !$0.isEmpty }
+}
+
+private func parseQueryString(from rawPath: String) -> [String: String] {
+    let withoutHash = rawPath.split(separator: "#", maxSplits: 1, omittingEmptySubsequences: false).first.map(String.init) ?? rawPath
+    guard let queryStart = withoutHash.firstIndex(of: "?") else { return [:] }
+    let queryString = String(withoutHash[withoutHash.index(after: queryStart)...])
+    var result: [String: String] = [:]
+    for pair in queryString.split(separator: "&") {
+        let parts = pair.split(separator: "=", maxSplits: 1)
+        if parts.count == 2 {
+            let key = String(parts[0]).replacingOccurrences(of: "+", with: " ").removingPercentEncoding ?? String(parts[0])
+            let value = String(parts[1]).replacingOccurrences(of: "+", with: " ").removingPercentEncoding ?? String(parts[1])
+            result[key] = value
+        } else if parts.count == 1 {
+            let key = String(parts[0]).removingPercentEncoding ?? String(parts[0])
+            result[key] = ""
+        }
+    }
+    return result
 }

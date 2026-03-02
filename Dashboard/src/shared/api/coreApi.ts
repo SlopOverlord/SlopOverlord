@@ -81,6 +81,10 @@ export interface CoreApi {
     payload: AnyRecord,
     options?: RequestOptions
   ) => Promise<AnyRecord | null>;
+  fetchSkillsRegistry: (search?: string, sort?: string, limit?: number, offset?: number) => Promise<AnyRecord | null>;
+  fetchAgentSkills: (agentId: string) => Promise<AnyRecord | null>;
+  installAgentSkill: (agentId: string, owner: string, repo: string) => Promise<AnyRecord | null>;
+  uninstallAgentSkill: (agentId: string, skillId: string) => Promise<boolean>;
 }
 
 export function createCoreApi(): CoreApi {
@@ -651,6 +655,60 @@ export function createCoreApi(): CoreApi {
         return null;
       }
       return response.data;
+    },
+
+    fetchSkillsRegistry: async (search, sort = "installs", limit = 20, offset = 0) => {
+      const params = new URLSearchParams();
+      if (search) params.append("search", search);
+      params.append("sort", sort);
+      params.append("limit", String(limit));
+      params.append("offset", String(offset));
+      const path = `/v1/skills/registry?${params.toString()}`;
+      console.debug("[skills.registry] request:", { search: search ?? null, sort, limit, offset, path });
+      const response = await requestJson<AnyRecord>({
+        path
+      });
+      if (!response.ok) {
+        console.debug("[skills.registry] response: ok=false", response);
+        return null;
+      }
+      console.debug("[skills.registry] response:", {
+        ok: true,
+        total: response.data?.total,
+        skillsCount: Array.isArray(response.data?.skills) ? (response.data?.skills as unknown[]).length : 0,
+        data: response.data
+      });
+      return response.data;
+    },
+
+    fetchAgentSkills: async (agentId) => {
+      const response = await requestJson<AnyRecord>({
+        path: `/v1/agents/${encodeURIComponent(agentId)}/skills`
+      });
+      if (!response.ok) {
+        return null;
+      }
+      return response.data;
+    },
+
+    installAgentSkill: async (agentId, owner, repo) => {
+      const response = await requestJson<AnyRecord, AnyRecord>({
+        path: `/v1/agents/${encodeURIComponent(agentId)}/skills`,
+        method: "POST",
+        body: { owner, repo }
+      });
+      if (!response.ok) {
+        return null;
+      }
+      return response.data;
+    },
+
+    uninstallAgentSkill: async (agentId, skillId) => {
+      const response = await requestJson<AnyRecord>({
+        path: `/v1/agents/${encodeURIComponent(agentId)}/skills/${encodeURIComponent(skillId)}`,
+        method: "DELETE"
+      });
+      return response.ok;
     }
   };
 }

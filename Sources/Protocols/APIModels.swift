@@ -1195,3 +1195,114 @@ public struct ActorRouteResponse: Codable, Sendable, Equatable {
         self.resolvedAt = resolvedAt
     }
 }
+
+// MARK: - Skills Models
+
+/// Skill information from skills.sh registry
+public struct SkillInfo: Codable, Sendable, Equatable {
+    public var id: String
+    public var owner: String
+    public var repo: String
+    public var name: String
+    public var description: String?
+    public var installs: Int
+    public var githubUrl: String
+
+    public init(
+        id: String,
+        owner: String,
+        repo: String,
+        name: String,
+        description: String? = nil,
+        installs: Int = 0,
+        githubUrl: String
+    ) {
+        self.id = id
+        self.owner = owner
+        self.repo = repo
+        self.name = name
+        self.description = description
+        self.installs = installs
+        self.githubUrl = githubUrl
+    }
+}
+
+/// Response from skills.sh registry API
+public struct SkillsRegistryResponse: Codable, Sendable {
+    public var skills: [SkillInfo]
+    public var total: Int
+
+    public init(skills: [SkillInfo], total: Int) {
+        self.skills = skills
+        self.total = total
+    }
+}
+
+/// Installed skill metadata stored locally
+public struct InstalledSkill: Codable, Sendable, Equatable {
+    public var id: String
+    public var owner: String
+    public var repo: String
+    public var name: String
+    public var description: String?
+    public var installedAt: Date
+    public var version: String?
+    public var localPath: String
+
+    public init(
+        id: String,
+        owner: String,
+        repo: String,
+        name: String,
+        description: String? = nil,
+        installedAt: Date = Date(),
+        version: String? = nil,
+        localPath: String
+    ) {
+        self.id = id
+        self.owner = owner
+        self.repo = repo
+        self.name = name
+        self.description = description
+        self.installedAt = installedAt
+        self.version = version
+        self.localPath = localPath
+    }
+}
+
+/// Request to install a skill from GitHub
+public struct SkillInstallRequest: Codable, Sendable {
+    public var owner: String
+    public var repo: String
+    public var version: String?
+
+    public init(owner: String, repo: String, version: String? = nil) {
+        self.owner = owner
+        self.repo = repo
+        self.version = version
+    }
+}
+
+/// Manifest file format for skills.json in agent's skills directory
+public struct AgentSkillsManifest: Codable, Sendable {
+    public var version: Int
+    public var installedSkills: [InstalledSkill]
+
+    public init(version: Int = 1, installedSkills: [InstalledSkill] = []) {
+        self.version = version
+        self.installedSkills = installedSkills
+    }
+}
+
+/// Response for listing agent skills
+public struct AgentSkillsResponse: Codable, Sendable {
+    public var agentId: String
+    public var skills: [InstalledSkill]
+    public var skillsPath: String
+
+    public init(agentId: String, skills: [InstalledSkill], skillsPath: String) {
+        self.agentId = agentId
+        self.skills = skills
+        self.skillsPath = skillsPath
+    }
+}

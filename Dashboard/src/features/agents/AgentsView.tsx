@@ -9,6 +9,7 @@ import { AgentChatTab } from "./components/AgentChatTab";
 import { AgentChannelsTab } from "./components/AgentChannelsTab";
 import { AgentConfigTab } from "./components/AgentConfigTab";
 import { AgentToolsTab } from "./components/AgentToolsTab";
+import { AgentSkillsTab } from "./components/AgentSkillsTab";
 
 const AGENT_TABS = [
   { id: "overview", title: "Overview" },
@@ -391,12 +392,7 @@ export function AgentsView({ routeAgentId = null, routeTab = "overview", onRoute
     }
 
     if (tab === "skills") {
-      return (
-        <AgentPlaceholderTab
-          title="Skills"
-          description="Attach and configure skills for this agent."
-        />
-      );
+      return <AgentSkillsTab agentId={agent.id} />;
     }
 
     if (tab === "cron") {
