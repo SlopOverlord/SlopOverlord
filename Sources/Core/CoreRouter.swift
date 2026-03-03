@@ -165,6 +165,7 @@ private enum ErrorCode {
     static let skillsUninstallFailed = "skills_uninstall_failed"
     static let skillNotFound = "skill_not_found"
     static let skillAlreadyExists = "skill_already_exists"
+    static let tokenUsageReadFailed = "token_usage_read_failed"
 }
 
 private struct AcceptResponse: Encodable {
@@ -960,6 +961,16 @@ public actor CoreRouter {
             return Self.encodable(status: HTTPStatus.created, payload: WorkerCreateResponse(workerId: workerId))
         }
 
+        add(.get, "/v1/token-usage") { request in
+            let channelId = request.queryParam("channelId")
+            let taskId = request.queryParam("taskId")
+            let from: Date? = request.queryParam("from").flatMap { Self.isoDate(from: $0) }
+            let to: Date? = request.queryParam("to").flatMap { Self.isoDate(from: $0) }
+
+            let response = await service.listTokenUsage(channelId: channelId, taskId: taskId, from: from, to: to)
+            return Self.encodable(status: HTTPStatus.ok, payload: response)
+        }
+
         add(.patch, "/v1/projects/:projectId") { request in
             let projectId = request.pathParam("projectId") ?? ""
             guard let body = request.body,
@@ -1356,6 +1367,11 @@ public actor CoreRouter {
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
         return try? decoder.decode(type, from: data)
+    }
+
+    private static func isoDate(from string: String) -> Date? {
+        let formatter = ISO8601DateFormatter()
+        return formatter.date(from: string)
     }
 }
 

@@ -396,6 +396,25 @@ public actor CoreService {
         await store.listProjects()
     }
 
+    /// Lists token usage records with optional filters and aggregates.
+    public func listTokenUsage(
+        channelId: String? = nil,
+        taskId: String? = nil,
+        from: Date? = nil,
+        to: Date? = nil
+    ) async -> TokenUsageResponse {
+        let records = await store.listTokenUsage(channelId: channelId, taskId: taskId, from: from, to: to)
+        let totalPrompt = records.reduce(0) { $0 + $1.promptTokens }
+        let totalCompletion = records.reduce(0) { $0 + $1.completionTokens }
+        let total = records.reduce(0) { $0 + $1.totalTokens }
+        return TokenUsageResponse(
+            items: records,
+            totalPromptTokens: totalPrompt,
+            totalCompletionTokens: totalCompletion,
+            totalTokens: total
+        )
+    }
+
     /// Returns one dashboard project by identifier.
     public func getProject(id: String) async throws -> ProjectRecord {
         guard let normalizedID = normalizedProjectID(id) else {
@@ -3595,8 +3614,57 @@ public actor CoreService {
             for await event in stream {
                 await store.persist(event: event)
                 await handleVisorEvent(event)
+                await extractAndPersistTokenUsage(from: event)
             }
         }
+    }
+
+    /// Extracts token usage from branch.conclusion and worker.completed events.
+    private func extractAndPersistTokenUsage(from event: EventEnvelope) async {
+        let tokenUsage: TokenUsage?
+
+        switch event.messageType {
+        case .branchConclusion:
+            tokenUsage = extractTokenUsageFromBranchConclusion(event)
+        case .workerCompleted:
+            tokenUsage = extractTokenUsageFromWorkerCompleted(event)
+        default:
+            tokenUsage = nil
+        }
+
+        if let usage = tokenUsage {
+            await store.persistTokenUsage(
+                channelId: event.channelId,
+                taskId: event.taskId,
+                usage: usage
+            )
+        }
+    }
+
+    private func extractTokenUsageFromBranchConclusion(_ event: EventEnvelope) -> TokenUsage? {
+        guard case .object(let obj) = event.payload else { return nil }
+        guard case .object(let conclusionObj)? = obj["conclusion"] else { return nil }
+        guard case .object(let tokenUsageObj)? = conclusionObj["tokenUsage"] else { return nil }
+
+        guard case .number(let prompt)? = tokenUsageObj["prompt"],
+              case .number(let completion)? = tokenUsageObj["completion"] else {
+            return nil
+        }
+
+        return TokenUsage(prompt: Int(prompt), completion: Int(completion))
+    }
+
+    private func extractTokenUsageFromWorkerCompleted(_ event: EventEnvelope) -> TokenUsage? {
+        guard case .object(let obj) = event.payload else { return nil }
+        guard case .object(let resultObj)? = obj["result"] else { return nil }
+        guard case .object(let tokenUsageObj)? = resultObj["tokenUsage"] else { return nil }
+
+        guard case .number(let prompt)? = tokenUsageObj["prompt"],
+              case .number(let completion)? = tokenUsageObj["completion"] else {
+            return nil
+        }
+
+        return TokenUsage(prompt: Int(prompt), completion: Int(completion))
     }
 }
 

@@ -38,6 +38,32 @@ public actor InMemoryPersistenceStore: PersistenceStore {
         tokenUsages.append((channelId: channelId, taskId: taskId, usage: usage))
     }
 
+    public func listTokenUsage(channelId: String?, taskId: String?, from: Date?, to: Date?) async -> [TokenUsageRecord] {
+        var result: [TokenUsageRecord] = []
+        let formatter = ISO8601DateFormatter()
+
+        for (index, entry) in tokenUsages.enumerated() {
+            // Apply filters
+            if let channelId, entry.channelId != channelId { continue }
+            if let taskId, entry.taskId != taskId { continue }
+
+            // For in-memory store, we don't have exact timestamps per record, use index-based approximation
+            // In real implementation, records would have actual timestamps
+            let record = TokenUsageRecord(
+                id: "mem-\(index)",
+                channelId: entry.channelId,
+                taskId: entry.taskId,
+                promptTokens: entry.usage.prompt,
+                completionTokens: entry.usage.completion,
+                totalTokens: entry.usage.total,
+                createdAt: Date()
+            )
+            result.append(record)
+        }
+
+        return result
+    }
+
     public func persistBulletin(_ bulletin: MemoryBulletin) async {
         bulletins.append(bulletin)
     }

@@ -8,6 +8,9 @@ public protocol PersistenceStore: Sendable {
     /// Persists token accounting for a channel/task execution slice.
     func persistTokenUsage(channelId: String, taskId: String?, usage: TokenUsage) async
 
+    /// Lists token usage records with optional filters.
+    func listTokenUsage(channelId: String?, taskId: String?, from: Date?, to: Date?) async -> [TokenUsageRecord]
+
     /// Persists a generated memory bulletin.
     func persistBulletin(_ bulletin: MemoryBulletin) async
 

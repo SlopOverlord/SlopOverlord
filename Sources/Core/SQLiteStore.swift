@@ -130,6 +130,86 @@ public actor SQLiteStore: PersistenceStore {
 #endif
     }
 
+    /// Lists token usage records with optional filters.
+    public func listTokenUsage(channelId: String?, taskId: String?, from: Date?, to: Date?) async -> [TokenUsageRecord] {
+#if canImport(SQLite3)
+        guard let db else { return [] }
+
+        var conditions: [String] = []
+        if channelId != nil { conditions.append("channel_id = ?") }
+        if taskId != nil { conditions.append("task_id = ?") }
+        if from != nil { conditions.append("created_at >= ?") }
+        if to != nil { conditions.append("created_at <= ?") }
+
+        let whereClause = conditions.isEmpty ? "" : "WHERE " + conditions.joined(separator: " AND ")
+
+        let sql =
+            """
+            SELECT id, channel_id, task_id, prompt_tokens, completion_tokens, total_tokens, created_at
+            FROM token_usage
+            \(whereClause)
+            ORDER BY created_at DESC
+            LIMIT 1000;
+            """
+
+        var statement: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK else { return [] }
+        defer { sqlite3_finalize(statement) }
+
+        var paramIndex: Int32 = 1
+        if let channelId {
+            bindText(channelId, at: paramIndex, statement: statement)
+            paramIndex += 1
+        }
+        if let taskId {
+            bindOptionalText(taskId, at: paramIndex, statement: statement)
+            paramIndex += 1
+        }
+        if let from {
+            bindText(isoFormatter.string(from: from), at: paramIndex, statement: statement)
+            paramIndex += 1
+        }
+        if let to {
+            bindText(isoFormatter.string(from: to), at: paramIndex, statement: statement)
+        }
+
+        var result: [TokenUsageRecord] = []
+        while sqlite3_step(statement) == SQLITE_ROW {
+            guard
+                let idPtr = sqlite3_column_text(statement, 0),
+                let channelIdPtr = sqlite3_column_text(statement, 1),
+                let createdAtPtr = sqlite3_column_text(statement, 6)
+            else {
+                continue
+            }
+
+            let id = String(cString: idPtr)
+            let recordChannelId = String(cString: channelIdPtr)
+            let taskId = optionalText(statement: statement, index: 2)
+            let promptTokens = Int(sqlite3_column_int(statement, 3))
+            let completionTokens = Int(sqlite3_column_int(statement, 4))
+            let totalTokens = Int(sqlite3_column_int(statement, 5))
+            let createdAt = isoFormatter.date(from: String(cString: createdAtPtr)) ?? Date()
+
+            result.append(
+                TokenUsageRecord(
+                    id: id,
+                    channelId: recordChannelId,
+                    taskId: taskId,
+                    promptTokens: promptTokens,
+                    completionTokens: completionTokens,
+                    totalTokens: totalTokens,
+                    createdAt: createdAt
+                )
+            )
+        }
+
+        return result
+#else
+        return []
+#endif
+    }
+
     /// Persists generated memory bulletin.
     public func persistBulletin(_ bulletin: MemoryBulletin) async {
 #if canImport(SQLite3)

@@ -1306,3 +1306,54 @@ public struct AgentSkillsResponse: Codable, Sendable {
         self.skillsPath = skillsPath
     }
 }
+
+// MARK: - Token Usage Models
+
+/// Represents a persisted token usage record.
+public struct TokenUsageRecord: Codable, Sendable, Equatable {
+    public var id: String
+    public var channelId: String
+    public var taskId: String?
+    public var promptTokens: Int
+    public var completionTokens: Int
+    public var totalTokens: Int
+    public var createdAt: Date
+
+    public init(
+        id: String,
+        channelId: String,
+        taskId: String? = nil,
+        promptTokens: Int,
+        completionTokens: Int,
+        totalTokens: Int,
+        createdAt: Date = Date()
+    ) {
+        self.id = id
+        self.channelId = channelId
+        self.taskId = taskId
+        self.promptTokens = promptTokens
+        self.completionTokens = completionTokens
+        self.totalTokens = totalTokens
+        self.createdAt = createdAt
+    }
+}
+
+/// Response for token usage list endpoint with aggregates.
+public struct TokenUsageResponse: Codable, Sendable {
+    public var items: [TokenUsageRecord]
+    public var totalPromptTokens: Int
+    public var totalCompletionTokens: Int
+    public var totalTokens: Int
+
+    public init(
+        items: [TokenUsageRecord],
+        totalPromptTokens: Int = 0,
+        totalCompletionTokens: Int = 0,
+        totalTokens: Int = 0
+    ) {
+        self.items = items
+        self.totalPromptTokens = totalPromptTokens
+        self.totalCompletionTokens = totalCompletionTokens
+        self.totalTokens = totalTokens
+    }
+}
