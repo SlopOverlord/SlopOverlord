@@ -122,6 +122,8 @@ public actor CoreService {
     }
 
     private let runtime: RuntimeSystem
+    private let memoryStore: any MemoryStore
+    private let hybridMemoryStore: HybridMemoryStore?
     private let store: any PersistenceStore
     private let openAIProviderCatalog: OpenAIProviderCatalogService
     private let agentCatalogStore: AgentCatalogFileStore
@@ -145,6 +147,7 @@ public actor CoreService {
     private var eventTask: Task<Void, Never>?
     private var activeGatewayPlugins: [any GatewayPlugin] = []
     private var visorScheduler: VisorScheduler?
+    private var memoryOutboxIndexer: MemoryOutboxIndexer?
     private let recoveryManager: RecoveryManager
 
     /// Creates core orchestration service with runtime and persistence backend.
@@ -155,11 +158,24 @@ public actor CoreService {
     ) {
         let resolvedModels = CoreModelProviderFactory.resolveModelIdentifiers(config: config)
         let modelProvider = CoreModelProviderFactory.buildModelProvider(config: config, resolvedModels: resolvedModels)
+        let runtimeMemoryStore: any MemoryStore
+        let hybridMemoryStore: HybridMemoryStore?
+        if persistenceBuilder is InMemoryCorePersistenceBuilder {
+            hybridMemoryStore = nil
+            runtimeMemoryStore = InMemoryMemoryStore()
+        } else {
+            let store = HybridMemoryStore(config: config)
+            hybridMemoryStore = store
+            runtimeMemoryStore = store
+        }
         let runtime = RuntimeSystem(
             modelProvider: modelProvider,
-            defaultModel: modelProvider?.models.first ?? resolvedModels.first
+            defaultModel: modelProvider?.models.first ?? resolvedModels.first,
+            memoryStore: runtimeMemoryStore
         )
         self.runtime = runtime
+        self.memoryStore = runtimeMemoryStore
+        self.hybridMemoryStore = hybridMemoryStore
         self.store = persistenceBuilder.makeStore(config: config)
         self.openAIProviderCatalog = OpenAIProviderCatalogService()
         self.configPath = configPath
@@ -192,12 +208,21 @@ public actor CoreService {
         self.toolExecution = ToolExecutionService(
             workspaceRootURL: self.workspaceRootURL,
             runtime: self.runtime,
+            memoryStore: self.memoryStore,
             sessionStore: self.sessionStore,
             agentCatalogStore: self.agentCatalogStore,
             processRegistry: processRegistry,
             channelSessionStore: self.channelSessionStore
         )
         self.logger = Logger(label: "slopoverlord.core.visor")
+        if let hybridMemoryStore {
+            self.memoryOutboxIndexer = MemoryOutboxIndexer(
+                store: hybridMemoryStore,
+                logger: Logger(label: "slopoverlord.memory.outbox")
+            )
+        } else {
+            self.memoryOutboxIndexer = nil
+        }
         self.recoveryManager = RecoveryManager(store: self.store, runtime: self.runtime, logger: self.logger)
         self.currentConfig = config
         Task { [weak self] in
@@ -292,6 +317,7 @@ public actor CoreService {
         activeGatewayPlugins.removeAll()
 
         await visorScheduler?.stop()
+        await memoryOutboxIndexer?.stop()
     }
 
     private func seedTelegramPluginRecord(
@@ -4281,6 +4307,7 @@ public actor CoreService {
     private func waitForStartup() async {
         await recoveryManager.recoverIfNeeded()
         await startEventPersistence()
+        await memoryOutboxIndexer?.start()
     }
 
     /// Subscribes to runtime event stream and persists events in background.

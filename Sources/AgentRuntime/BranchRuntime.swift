@@ -4,6 +4,7 @@ import Protocols
 private struct BranchState: Sendable {
     var channelId: String
     var prompt: String
+    var scope: MemoryScope
     var recalledMemory: [MemoryRef]
     var workerId: String?
 }
@@ -21,14 +22,30 @@ public actor BranchRuntime {
     /// Creates branch context fork and emits spawn event.
     public func spawn(channelId: String, prompt: String) async -> String {
         let branchId = UUID().uuidString
-        let recalled = await memoryStore.recall(query: prompt, limit: 5)
+        let scope = MemoryScope.channel(channelId)
+        let recalled = await memoryStore.recall(
+            request: MemoryRecallRequest(
+                query: prompt,
+                limit: 8,
+                scope: scope
+            )
+        ).map(\.ref)
         let todos = TodoExtractor.extractCandidates(from: prompt)
         for todo in todos {
-            _ = await memoryStore.save(note: "[todo] \(todo)")
+            _ = await memoryStore.save(
+                entry: MemoryWriteRequest(
+                    note: "[todo] \(todo)",
+                    kind: .todo,
+                    memoryClass: .procedural,
+                    scope: scope,
+                    source: MemorySource(type: "branch.spawned", id: branchId)
+                )
+            )
         }
         branches[branchId] = BranchState(
             channelId: channelId,
             prompt: prompt,
+            scope: scope,
             recalledMemory: recalled,
             workerId: nil
         )
@@ -80,7 +97,28 @@ public actor BranchRuntime {
             return nil
         }
 
-        let saved = await memoryStore.save(note: summary)
+        let saved = await memoryStore.save(
+            entry: MemoryWriteRequest(
+                note: summary,
+                summary: "Branch conclusion summary",
+                kind: .decision,
+                memoryClass: .procedural,
+                scope: state.scope,
+                source: MemorySource(type: "branch.conclusion", id: branchId),
+                importance: 0.8,
+                confidence: 0.8
+            )
+        )
+        for recalled in state.recalledMemory {
+            _ = await memoryStore.link(
+                MemoryEdgeWriteRequest(
+                    fromMemoryId: saved.id,
+                    toMemoryId: recalled.id,
+                    relation: .derivedFrom,
+                    provenance: "branch.conclusion"
+                )
+            )
+        }
         let memoryRefs = state.recalledMemory + [saved]
         let conclusion = BranchConclusion(
             summary: summary,

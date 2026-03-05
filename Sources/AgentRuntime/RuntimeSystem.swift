@@ -57,7 +57,7 @@ public struct RecoveryArtifactState: Sendable, Equatable {
 public actor RuntimeSystem {
     public nonisolated let eventBus: EventBus
 
-    private let memoryStore: InMemoryMemoryStore
+    private let memoryStore: any MemoryStore
     private let channels: ChannelRuntime
     private let workers: WorkerRuntime
     private let branches: BranchRuntime
@@ -69,10 +69,11 @@ public actor RuntimeSystem {
     public init(
         modelProvider: (any ModelProviderPlugin)? = nil,
         defaultModel: String? = nil,
-        workerExecutor: (any WorkerExecutor)? = nil
+        workerExecutor: (any WorkerExecutor)? = nil,
+        memoryStore: (any MemoryStore)? = nil
     ) {
         let bus = EventBus()
-        let memory = InMemoryMemoryStore()
+        let memory = memoryStore ?? InMemoryMemoryStore()
         self.eventBus = bus
         self.memoryStore = memory
         self.channels = ChannelRuntime(eventBus: bus)

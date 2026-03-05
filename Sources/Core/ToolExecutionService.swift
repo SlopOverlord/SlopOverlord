@@ -5,6 +5,7 @@ import Protocols
 
 final class ToolExecutionService: @unchecked Sendable {
     private let runtime: RuntimeSystem
+    private let memoryStore: any MemoryStore
     private let sessionStore: AgentSessionFileStore
     private let agentCatalogStore: AgentCatalogFileStore
     private let processRegistry: SessionProcessRegistry
@@ -15,6 +16,7 @@ final class ToolExecutionService: @unchecked Sendable {
     init(
         workspaceRootURL: URL,
         runtime: RuntimeSystem,
+        memoryStore: any MemoryStore,
         sessionStore: AgentSessionFileStore,
         agentCatalogStore: AgentCatalogFileStore,
         processRegistry: SessionProcessRegistry,
@@ -23,6 +25,7 @@ final class ToolExecutionService: @unchecked Sendable {
     ) {
         self.workspaceRootURL = workspaceRootURL
         self.runtime = runtime
+        self.memoryStore = memoryStore
         self.sessionStore = sessionStore
         self.agentCatalogStore = agentCatalogStore
         self.processRegistry = processRegistry
@@ -81,7 +84,13 @@ final class ToolExecutionService: @unchecked Sendable {
             result = executeAgentsList()
         case "channel.history":
             result = await executeChannelHistory(request: request)
-        case "web.search", "web.fetch", "memory.get", "memory.search", "cron":
+        case "memory.get", "memory.recall":
+            result = await executeMemoryRecall(tool: toolID, request: request)
+        case "memory.search":
+            result = await executeMemorySearch(tool: toolID, request: request)
+        case "memory.save":
+            result = await executeMemorySave(tool: toolID, request: request)
+        case "web.search", "web.fetch", "cron":
             result = unsupportedAdapterResult(tool: toolID)
         default:
             result = failed(
@@ -542,6 +551,98 @@ final class ToolExecutionService: @unchecked Sendable {
         failed(tool: tool, code: "not_configured", message: "Tool adapter is not configured.", retryable: false)
     }
 
+    private func executeMemorySave(tool: String, request: ToolInvocationRequest) async -> ToolInvocationResult {
+        let args = request.arguments
+        let note = args["note"]?.asString ?? args["content"]?.asString ?? ""
+        let trimmedNote = note.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedNote.isEmpty else {
+            return failed(tool: tool, code: "invalid_arguments", message: "`note` is required.", retryable: false)
+        }
+
+        let summary = args["summary"]?.asString
+        let kind = args["kind"]?.asString.flatMap { MemoryKind(rawValue: $0.lowercased()) }
+        let memoryClass = args["class"]?.asString.flatMap { MemoryClass(rawValue: $0.lowercased()) }
+            ?? args["memory_class"]?.asString.flatMap { MemoryClass(rawValue: $0.lowercased()) }
+        let scope = parseScope(arguments: args)
+        let importance = args["importance"]?.asNumber
+        let confidence = args["confidence"]?.asNumber
+
+        let sourceType = args["source_type"]?.asString
+        let sourceId = args["source_id"]?.asString
+        let source = sourceType.map { MemorySource(type: $0, id: sourceId) }
+
+        var metadata: [String: JSONValue] = [:]
+        if let metadataObject = args["metadata"]?.asObject {
+            metadata = metadataObject
+        }
+
+        let ref = await memoryStore.save(
+            entry: MemoryWriteRequest(
+                note: trimmedNote,
+                summary: summary,
+                kind: kind,
+                memoryClass: memoryClass,
+                scope: scope,
+                source: source,
+                importance: importance,
+                confidence: confidence,
+                metadata: metadata
+            )
+        )
+
+        return success(
+            tool: tool,
+            data: .object([
+                "id": .string(ref.id),
+                "score": .number(ref.score),
+                "kind": .string(ref.kind?.rawValue ?? ""),
+                "class": .string(ref.memoryClass?.rawValue ?? "")
+            ])
+        )
+    }
+
+    private func executeMemoryRecall(tool: String, request: ToolInvocationRequest) async -> ToolInvocationResult {
+        let args = request.arguments
+        let query = args["query"]?.asString?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        guard !query.isEmpty else {
+            return failed(tool: tool, code: "invalid_arguments", message: "`query` is required.", retryable: false)
+        }
+
+        let limit = max(1, args["limit"]?.asInt ?? 8)
+        let scope = parseScope(arguments: args)
+        let hits = await memoryStore.recall(
+            request: MemoryRecallRequest(
+                query: query,
+                limit: limit,
+                scope: scope
+            )
+        )
+
+        let payload: [JSONValue] = hits.map { hit in
+            .object([
+                "id": .string(hit.ref.id),
+                "score": .number(hit.ref.score),
+                "note": .string(hit.note),
+                "summary": hit.summary.map(JSONValue.string) ?? .null,
+                "kind": .string(hit.ref.kind?.rawValue ?? ""),
+                "class": .string(hit.ref.memoryClass?.rawValue ?? "")
+            ])
+        }
+
+        return success(
+            tool: tool,
+            data: .object([
+                "query": .string(query),
+                "count": .number(Double(payload.count)),
+                "items": .array(payload)
+            ])
+        )
+    }
+
+    private func executeMemorySearch(tool: String, request: ToolInvocationRequest) async -> ToolInvocationResult {
+        await executeMemoryRecall(tool: tool, request: request)
+    }
+
     private func success(tool: String, data: JSONValue) -> ToolInvocationResult {
         ToolInvocationResult(tool: tool, ok: true, data: data)
     }
@@ -717,5 +818,29 @@ final class ToolExecutionService: @unchecked Sendable {
     private func optionalString(_ value: String?) -> String {
         let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         return trimmed.isEmpty ? "(none)" : trimmed
+    }
+
+    private func parseScope(arguments: [String: JSONValue]) -> MemoryScope? {
+        if let scopeObject = arguments["scope"]?.asObject {
+            let scopeType = scopeObject["type"]?.asString?.lowercased()
+            let scopeID = scopeObject["id"]?.asString?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            guard let scopeType, let type = MemoryScopeType(rawValue: scopeType), !scopeID.isEmpty else {
+                return nil
+            }
+            return MemoryScope(
+                type: type,
+                id: scopeID,
+                channelId: scopeObject["channel_id"]?.asString,
+                projectId: scopeObject["project_id"]?.asString,
+                agentId: scopeObject["agent_id"]?.asString
+            )
+        }
+
+        let scopeType = arguments["scope_type"]?.asString?.lowercased()
+        let scopeID = arguments["scope_id"]?.asString?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        guard let scopeType, let type = MemoryScopeType(rawValue: scopeType), !scopeID.isEmpty else {
+            return nil
+        }
+        return MemoryScope(type: type, id: scopeID)
     }
 }

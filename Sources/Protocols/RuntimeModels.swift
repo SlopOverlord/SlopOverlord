@@ -35,10 +35,71 @@ public struct ArtifactRef: Codable, Sendable, Equatable {
 public struct MemoryRef: Codable, Sendable, Equatable {
     public var id: String
     public var score: Double
+    public var kind: MemoryKind?
+    public var memoryClass: MemoryClass?
+    public var source: MemorySource?
+    public var createdAt: Date?
 
-    public init(id: String, score: Double) {
+    enum CodingKeys: String, CodingKey {
+        case id
+        case score
+        case kind
+        case memoryClass = "class"
+        case source
+        case createdAt
+    }
+
+    enum LegacyCodingKeys: String, CodingKey {
+        case memoryClass
+    }
+
+    public init(
+        id: String,
+        score: Double,
+        kind: MemoryKind? = nil,
+        memoryClass: MemoryClass? = nil,
+        source: MemorySource? = nil,
+        createdAt: Date? = nil
+    ) {
         self.id = id
         self.score = score
+        self.kind = kind
+        self.memoryClass = memoryClass
+        self.source = source
+        self.createdAt = createdAt
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(String.self, forKey: .id)
+        score = try container.decode(Double.self, forKey: .score)
+        kind = try container.decodeIfPresent(MemoryKind.self, forKey: .kind)
+        if let decodedMemoryClass = try container.decodeIfPresent(MemoryClass.self, forKey: .memoryClass) {
+            memoryClass = decodedMemoryClass
+        } else {
+            let legacyContainer = try decoder.container(keyedBy: LegacyCodingKeys.self)
+            memoryClass = try legacyContainer.decodeIfPresent(MemoryClass.self, forKey: .memoryClass)
+        }
+
+        if let decodedSource = try? container.decode(MemorySource.self, forKey: .source) {
+            source = decodedSource
+        } else if let legacySource = try? container.decode(String.self, forKey: .source) {
+            source = MemorySource(type: legacySource, id: nil)
+        } else {
+            source = nil
+        }
+
+        createdAt = try container.decodeIfPresent(Date.self, forKey: .createdAt)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(id, forKey: .id)
+        try container.encode(score, forKey: .score)
+        try container.encodeIfPresent(kind, forKey: .kind)
+        try container.encodeIfPresent(memoryClass, forKey: .memoryClass)
+        try container.encodeIfPresent(source, forKey: .source)
+        try container.encodeIfPresent(createdAt, forKey: .createdAt)
     }
 }
 
@@ -205,12 +266,45 @@ public struct MemoryBulletin: Codable, Sendable, Equatable {
     public var headline: String
     public var digest: String
     public var items: [String]
+    public var memoryRefs: [MemoryRef]
+    public var scope: MemoryScope?
 
-    public init(id: String = UUID().uuidString, generatedAt: Date = Date(), headline: String, digest: String, items: [String]) {
+    enum CodingKeys: String, CodingKey {
+        case id
+        case generatedAt
+        case headline
+        case digest
+        case items
+        case memoryRefs
+        case scope
+    }
+
+    public init(
+        id: String = UUID().uuidString,
+        generatedAt: Date = Date(),
+        headline: String,
+        digest: String,
+        items: [String],
+        memoryRefs: [MemoryRef] = [],
+        scope: MemoryScope? = nil
+    ) {
         self.id = id
         self.generatedAt = generatedAt
         self.headline = headline
         self.digest = digest
         self.items = items
+        self.memoryRefs = memoryRefs
+        self.scope = scope
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(String.self, forKey: .id)
+        generatedAt = try container.decode(Date.self, forKey: .generatedAt)
+        headline = try container.decode(String.self, forKey: .headline)
+        digest = try container.decode(String.self, forKey: .digest)
+        items = try container.decode([String].self, forKey: .items)
+        memoryRefs = try container.decodeIfPresent([MemoryRef].self, forKey: .memoryRefs) ?? []
+        scope = try container.decodeIfPresent(MemoryScope.self, forKey: .scope)
     }
 }

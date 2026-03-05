@@ -62,11 +62,100 @@ public struct CoreConfig: Codable, Sendable {
         }
     }
 
-    public struct Memory: Codable, Sendable {
-        public var backend: String
+    public struct Memory: Codable, Sendable, Equatable {
+        public struct Provider: Codable, Sendable, Equatable {
+            public enum Mode: String, Codable, Sendable, Equatable {
+                case local
+                case http
+                case mcp
+            }
 
-        public init(backend: String) {
+            public var mode: Mode
+            public var endpoint: String?
+            public var mcpServer: String?
+            public var timeoutMs: Int
+            public var apiKeyEnv: String?
+
+            public init(
+                mode: Mode = .local,
+                endpoint: String? = nil,
+                mcpServer: String? = nil,
+                timeoutMs: Int = 2_500,
+                apiKeyEnv: String? = nil
+            ) {
+                self.mode = mode
+                self.endpoint = endpoint
+                self.mcpServer = mcpServer
+                self.timeoutMs = timeoutMs
+                self.apiKeyEnv = apiKeyEnv
+            }
+        }
+
+        public struct Retrieval: Codable, Sendable, Equatable {
+            public var topK: Int
+            public var semanticWeight: Double
+            public var keywordWeight: Double
+            public var graphWeight: Double
+
+            public init(
+                topK: Int = 8,
+                semanticWeight: Double = 0.55,
+                keywordWeight: Double = 0.35,
+                graphWeight: Double = 0.10
+            ) {
+                self.topK = topK
+                self.semanticWeight = semanticWeight
+                self.keywordWeight = keywordWeight
+                self.graphWeight = graphWeight
+            }
+        }
+
+        public struct Retention: Codable, Sendable, Equatable {
+            public var episodicDays: Int
+            public var todoCompletedDays: Int
+            public var bulletinDays: Int
+
+            public init(
+                episodicDays: Int = 90,
+                todoCompletedDays: Int = 30,
+                bulletinDays: Int = 180
+            ) {
+                self.episodicDays = episodicDays
+                self.todoCompletedDays = todoCompletedDays
+                self.bulletinDays = bulletinDays
+            }
+        }
+
+        public var backend: String
+        public var provider: Provider
+        public var retrieval: Retrieval
+        public var retention: Retention
+
+        public init(
+            backend: String,
+            provider: Provider = Provider(),
+            retrieval: Retrieval = Retrieval(),
+            retention: Retention = Retention()
+        ) {
             self.backend = backend
+            self.provider = provider
+            self.retrieval = retrieval
+            self.retention = retention
+        }
+
+        private enum CodingKeys: String, CodingKey {
+            case backend
+            case provider
+            case retrieval
+            case retention
+        }
+
+        public init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            backend = try container.decode(String.self, forKey: .backend)
+            provider = try container.decodeIfPresent(Provider.self, forKey: .provider) ?? Provider()
+            retrieval = try container.decodeIfPresent(Retrieval.self, forKey: .retrieval) ?? Retrieval()
+            retention = try container.decodeIfPresent(Retention.self, forKey: .retention) ?? Retention()
         }
     }
 

@@ -56,15 +56,29 @@ enum ToolCatalog {
             id: "memory.get",
             domain: "memory",
             title: "Memory semantic search",
-            status: "adapter",
-            description: "Semantic memory retrieval via external adapter."
+            status: "fully_functional",
+            description: "Semantic memory retrieval via hybrid memory store."
+        ),
+        .init(
+            id: "memory.recall",
+            domain: "memory",
+            title: "Memory recall",
+            status: "fully_functional",
+            description: "Recall scoped memory using hybrid retrieval."
+        ),
+        .init(
+            id: "memory.save",
+            domain: "memory",
+            title: "Memory save",
+            status: "fully_functional",
+            description: "Persist memory entry with taxonomy and scope."
         ),
         .init(
             id: "memory.search",
             domain: "memory",
             title: "Memory file search",
-            status: "adapter",
-            description: "Search memory files via external adapter."
+            status: "fully_functional",
+            description: "Keyword search in memory via canonical local index."
         ),
         .init(
             id: "messages.send",
