@@ -1458,11 +1458,18 @@ body.mobile-menu-open {
 }
 
 .project-kanban-summary span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
   border: 1px solid var(--line);
   border-radius: 999px;
   padding: 3px 9px;
   font-size: 0.8rem;
   color: var(--muted);
+}
+
+.project-kanban-summary .material-symbols-rounded {
+  font-size: 14px;
 }
 
 .project-swarm-overview {
@@ -1696,6 +1703,30 @@ body.mobile-menu-open {
   background: rgba(14, 20, 32, 0.9);
 }
 
+.project-kanban-task--selected {
+  border-color: rgba(163, 118, 255, 0.85);
+  box-shadow: 0 0 0 1px rgba(163, 118, 255, 0.35);
+}
+
+.project-task-card-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.project-task-card-open {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 0.72rem;
+  color: var(--muted);
+}
+
+.project-task-card-open .material-symbols-rounded {
+  font-size: 14px;
+}
+
 .project-kanban-task h5 {
   margin: 0;
   font-size: 0.95rem;
@@ -1728,6 +1759,10 @@ body.mobile-menu-open {
   gap: 8px;
 }
 
+.project-task-meta .material-symbols-rounded {
+  font-size: 13px;
+}
+
 .project-priority-badge {
   border: 1px solid var(--line-strong);
   border-radius: 999px;
@@ -1752,6 +1787,9 @@ body.mobile-menu-open {
 }
 
 .project-task-age {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
   color: var(--muted);
   font-size: 0.75rem;
   margin-left: auto;
@@ -1774,6 +1812,203 @@ body.mobile-menu-open {
 .project-task-assignee-badge {
   border-color: rgba(59, 130, 246, 0.65);
   color: #93c5fd;
+}
+
+.project-task-claim-badge .material-symbols-rounded,
+.project-task-assignee-badge .material-symbols-rounded,
+.project-priority-badge .material-symbols-rounded {
+  font-size: 13px;
+}
+
+.project-task-detail-icon-button {
+  min-width: 34px;
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.project-task-detail-icon-button .material-symbols-rounded {
+  font-size: 18px;
+}
+
+.project-task-composer {
+  width: min(1020px, 94vw);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: linear-gradient(180deg, rgba(12, 17, 27, 0.96), rgba(8, 12, 19, 0.98));
+  color: var(--text);
+  box-shadow: 0 24px 58px rgba(0, 0, 0, 0.5);
+  padding: 14px 14px 12px;
+  display: grid;
+  gap: 12px;
+}
+
+.project-task-composer--fullscreen {
+  width: min(1360px, 98vw);
+  min-height: 88vh;
+  align-content: start;
+}
+
+.project-task-composer-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+}
+
+.project-task-composer-breadcrumbs {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+
+.project-task-composer-badge {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 3px 8px;
+  background: rgba(12, 17, 27, 0.9);
+  color: #c5cde0;
+}
+
+.project-task-composer-breadcrumbs .material-symbols-rounded {
+  font-size: 14px;
+}
+
+.project-task-composer-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.project-task-composer-save {
+  border: 1px solid var(--line);
+  background: rgba(12, 17, 27, 0.9);
+  color: var(--text);
+  border-radius: 9px;
+  min-height: 34px;
+  padding: 0 12px;
+  font-size: 0.82rem;
+}
+
+.project-task-composer-save:hover {
+  border-color: var(--line-strong);
+  background: rgba(14, 20, 32, 0.95);
+}
+
+.project-task-composer-editor {
+  display: grid;
+  gap: 8px;
+}
+
+.project-task-composer-title-input {
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  font-size: 2rem;
+  font-weight: 600;
+  line-height: 1.2;
+  padding: 0;
+  width: 100%;
+}
+
+.project-task-composer-title-input::placeholder {
+  color: var(--muted);
+}
+
+.project-task-composer-title-input:focus {
+  outline: none;
+}
+
+.project-task-composer-desc-input {
+  border: 0;
+  background: transparent;
+  color: #c2cadb;
+  font-size: 1.05rem;
+  line-height: 1.45;
+  padding: 0;
+  width: 100%;
+  resize: vertical;
+  min-height: 72px;
+}
+
+.project-task-composer-desc-input::placeholder {
+  color: var(--muted);
+}
+
+.project-task-composer-desc-input:focus {
+  outline: none;
+}
+
+.project-task-composer-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.project-task-composer-chip {
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  min-height: 34px;
+  padding: 0 10px;
+  background: rgba(11, 16, 25, 0.9);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: #c5cde0;
+}
+
+.project-task-composer-chip .material-symbols-rounded {
+  font-size: 17px;
+}
+
+.project-task-composer-chip select {
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  font-size: 0.92rem;
+  padding-right: 6px;
+}
+
+.project-task-composer-chip select:focus {
+  outline: none;
+}
+
+.project-task-composer-footer {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  border-top: 1px solid var(--line);
+  padding-top: 10px;
+}
+
+.project-task-composer-meta {
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 3px 9px;
+  font-size: 0.76rem;
+  color: var(--muted);
+  background: rgba(11, 16, 25, 0.85);
+}
+
+.project-task-detail-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 140;
+  background: rgba(4, 7, 12, 0.72);
+  display: grid;
+  place-items: center;
+  padding: 20px;
+}
+
+.project-task-detail-overlay--fullscreen {
+  background: rgba(8, 10, 14, 0.72);
 }
 
 .project-task-actions {

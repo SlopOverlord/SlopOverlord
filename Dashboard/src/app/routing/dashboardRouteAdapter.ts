@@ -31,6 +31,7 @@ export interface DashboardRoute {
   configSection: string | null;
   projectId: string | null;
   projectTab: ProjectTab | null;
+  projectTaskReference: string | null;
   agentId: string | null;
   agentTab: AgentTab | null;
 }
@@ -65,22 +66,55 @@ export function normalizeProjectTab(value: string): ProjectTab {
 }
 
 export function parseRouteFromPath(pathname: string): DashboardRoute {
-  const [sectionRaw = "", sectionArgRaw = "", sectionArg2Raw = ""] = pathname
+  const [sectionRaw = "", sectionArgRaw = "", sectionArg2Raw = "", sectionArg3Raw = ""] = pathname
     .split("/")
     .map((part) => part.trim())
     .filter(Boolean);
 
+  const sectionRawDecoded = decodePathSegment(sectionRaw);
+  const sectionRawLower = sectionRawDecoded.toLowerCase();
+  if (sectionRawLower === "tasks") {
+    return {
+      section: "projects",
+      configSection: null,
+      projectId: null,
+      projectTab: "tasks",
+      projectTaskReference: decodePathSegment(sectionArgRaw) || null,
+      agentId: null,
+      agentTab: null
+    };
+  }
+
   const section = normalizeTopLevelSection(sectionRaw);
   const sectionArg = decodePathSegment(sectionArgRaw);
-  const sectionArg2 = decodePathSegment(sectionArg2Raw).toLowerCase();
+  const sectionArg2 = decodePathSegment(sectionArg2Raw);
+  const sectionArg3 = decodePathSegment(sectionArg3Raw);
+
+  const sectionArgLower = sectionArg.toLowerCase();
+  const sectionArg2Lower = sectionArg2.toLowerCase();
+
+  const isDirectProjectTaskRoute = !TOP_LEVEL_SECTION_SET.has(sectionRaw) && sectionArgLower === "tasks";
+
+  if (isDirectProjectTaskRoute) {
+    return {
+      section: "projects",
+      configSection: null,
+      projectId: decodePathSegment(sectionRaw),
+      projectTab: "tasks",
+      projectTaskReference: sectionArg2 || null,
+      agentId: null,
+      agentTab: null
+    };
+  }
 
   const configSection = section === "config" && sectionArg ? sectionArg : null;
   const projectId = section === "projects" && sectionArg ? sectionArg : null;
-  const projectTab = section === "projects" && projectId ? normalizeProjectTab(sectionArg2) : null;
+  const projectTab = section === "projects" && projectId ? normalizeProjectTab(sectionArg2Lower) : null;
+  const projectTaskReference = section === "projects" && projectTab === "tasks" ? sectionArg3 || null : null;
   const agentId = section === "agents" && sectionArg ? sectionArg : null;
-  const agentTab = section === "agents" && agentId ? normalizeAgentTab(sectionArg2) : null;
+  const agentTab = section === "agents" && agentId ? normalizeAgentTab(sectionArg2Lower) : null;
 
-  return { section, configSection, projectId, projectTab, agentId, agentTab };
+  return { section, configSection, projectId, projectTab, projectTaskReference, agentId, agentTab };
 }
 
 export function buildPathFromRoute(route: DashboardRoute) {
@@ -90,10 +124,14 @@ export function buildPathFromRoute(route: DashboardRoute) {
     nextPathname = `${nextPathname}/${encodeURIComponent(route.configSection)}`;
   }
 
-  if (route.section === "projects" && route.projectId) {
-    nextPathname = `/projects/${encodeURIComponent(route.projectId)}`;
-    if (route.projectTab && route.projectTab !== DEFAULT_PROJECT_TAB) {
-      nextPathname = `${nextPathname}/${route.projectTab}`;
+  if (route.section === "projects") {
+    if (route.projectTab === "tasks" && route.projectTaskReference) {
+      nextPathname = `/tasks/${encodeURIComponent(route.projectTaskReference)}`;
+    } else if (route.projectId) {
+      nextPathname = `/projects/${encodeURIComponent(route.projectId)}`;
+      if (route.projectTab && route.projectTab !== DEFAULT_PROJECT_TAB) {
+        nextPathname = `${nextPathname}/${route.projectTab}`;
+      }
     }
   }
 

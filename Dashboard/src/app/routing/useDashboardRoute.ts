@@ -15,7 +15,7 @@ interface DashboardRouteController {
   route: DashboardRoute;
   setSection: (section: string) => void;
   setConfigSection: (sectionId: string | null) => void;
-  setProjectRoute: (projectId: string | null, projectTab?: string | null) => void;
+  setProjectRoute: (projectId: string | null, projectTab?: string | null, projectTaskReference?: string | null) => void;
   setAgentRoute: (agentId: string | null, agentTab?: string | null) => void;
 }
 
@@ -31,7 +31,7 @@ export function useDashboardRoute(): DashboardRouteController {
 
   useEffect(() => {
     pushRouteToHistory(route);
-  }, [route.agentId, route.agentTab, route.configSection, route.projectId, route.projectTab, route.section]);
+  }, [route.agentId, route.agentTab, route.configSection, route.projectId, route.projectTab, route.projectTaskReference, route.section]);
 
   const setSection = useCallback((section: string) => {
     const nextSection = normalizeTopLevelSection(String(section || "").trim());
@@ -48,19 +48,26 @@ export function useDashboardRoute(): DashboardRouteController {
     }));
   }, []);
 
-  const setProjectRoute = useCallback((projectId: string | null, projectTab: string | null = DEFAULT_PROJECT_TAB) => {
-    const normalizedProjectID = typeof projectId === "string" && projectId.trim().length > 0 ? projectId : null;
-    const normalizedProjectTab = normalizedProjectID
-      ? normalizeProjectTab(String(projectTab || DEFAULT_PROJECT_TAB).toLowerCase())
-      : null;
+  const setProjectRoute = useCallback(
+    (projectId: string | null, projectTab: string | null = DEFAULT_PROJECT_TAB, projectTaskReference: string | null = null) => {
+      const normalizedProjectID = typeof projectId === "string" && projectId.trim().length > 0 ? projectId : null;
+      const normalizedProjectTab = normalizedProjectID
+        ? normalizeProjectTab(String(projectTab || DEFAULT_PROJECT_TAB).toLowerCase())
+        : null;
+      const normalizedTaskReference = normalizedProjectID && normalizedProjectTab === "tasks"
+        ? String(projectTaskReference || "").trim() || null
+        : null;
 
-    setRoute((current) => ({
-      ...current,
-      section: "projects",
-      projectId: normalizedProjectID,
-      projectTab: normalizedProjectTab
-    }));
-  }, []);
+      setRoute((current) => ({
+        ...current,
+        section: "projects",
+        projectId: normalizedProjectID,
+        projectTab: normalizedProjectTab,
+        projectTaskReference: normalizedTaskReference
+      }));
+    },
+    []
+  );
 
   const setAgentRoute = useCallback((agentId: string | null, agentTab: string | null = DEFAULT_AGENT_TAB) => {
     const normalizedAgentID = typeof agentId === "string" && agentId.trim().length > 0 ? agentId : null;

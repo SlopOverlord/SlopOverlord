@@ -62,8 +62,12 @@ export function App() {
     setAgentRoute(agentId, agentTab);
   }
 
-  function onProjectRouteChange(projectId: string | null, projectTab: string | null = DEFAULT_PROJECT_TAB) {
-    setProjectRoute(projectId, projectTab);
+  function onProjectRouteChange(
+    projectId: string | null,
+    projectTab: string | null = DEFAULT_PROJECT_TAB,
+    projectTaskReference: string | null = null
+  ) {
+    setProjectRoute(projectId, projectTab, projectTaskReference);
   }
 
   const runtimeContent = (
@@ -98,6 +102,7 @@ export function App() {
           bulletins={runtime.bulletins}
           routeProjectId={route.projectId}
           routeProjectTab={route.projectTab}
+          routeProjectTaskReference={route.projectTaskReference}
           onRouteProjectChange={onProjectRouteChange}
         />
       )

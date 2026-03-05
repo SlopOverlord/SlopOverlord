@@ -135,6 +135,46 @@ function sortTasksByDate(tasks) {
   });
 }
 
+function buildTaskReference(projectId, taskId) {
+  const normalizedProjectId = String(projectId || "").trim();
+  const normalizedTaskId = String(taskId || "").trim();
+  if (!normalizedProjectId || !normalizedTaskId) {
+    return normalizedTaskId;
+  }
+  return `${normalizedProjectId}-${normalizedTaskId}`;
+}
+
+function resolveTaskByReference(projectId, tasks, taskReference) {
+  const normalizedReference = String(taskReference || "").trim();
+  if (!normalizedReference) {
+    return null;
+  }
+
+  const normalizedProjectId = String(projectId || "").trim();
+  const projectPrefix = normalizedProjectId ? `${normalizedProjectId}-` : "";
+  const taskList = Array.isArray(tasks) ? tasks : [];
+
+  const exact = taskList.find((task) => String(task?.id || "").trim() === normalizedReference);
+  if (exact) {
+    return exact;
+  }
+
+  const prefixed = taskList.find((task) => buildTaskReference(normalizedProjectId, task?.id) === normalizedReference);
+  if (prefixed) {
+    return prefixed;
+  }
+
+  if (projectPrefix && normalizedReference.startsWith(projectPrefix)) {
+    const plainTaskId = normalizedReference.slice(projectPrefix.length).trim();
+    if (!plainTaskId) {
+      return null;
+    }
+    return taskList.find((task) => String(task?.id || "").trim() === plainTaskId) || null;
+  }
+
+  return null;
+}
+
 function workersForProject(project, workers) {
   if (!project) {
     return [];
@@ -727,125 +767,6 @@ function ProjectTaskCreateModal({ isOpen, draft, onChange, onClose, onCreate, ac
   );
 }
 
-function ProjectTaskEditModal({
-  isOpen,
-  task,
-  draft,
-  onChange,
-  onClose,
-  onSave,
-  onDelete,
-  actors = [],
-  teams = []
-}) {
-  if (!isOpen || !task) {
-    return null;
-  }
-
-  return (
-    <div className="project-modal-overlay" onClick={onClose}>
-      <section className="project-modal" onClick={(event) => event.stopPropagation()}>
-        <div className="project-modal-head">
-          <h3>Edit Task · {task.id}</h3>
-          <button type="button" className="project-modal-close" aria-label="Close" onClick={onClose}>
-            ×
-          </button>
-        </div>
-
-        <form
-          className="project-task-form"
-          onSubmit={(event) => {
-            event.preventDefault();
-            onSave();
-          }}
-        >
-          <label>
-            Title
-            <input
-              value={draft.title}
-              onChange={(event) => onChange("title", event.target.value)}
-              placeholder="Task title..."
-              autoFocus
-            />
-          </label>
-
-          <label>
-            Description
-            <textarea
-              value={draft.description}
-              onChange={(event) => onChange("description", event.target.value)}
-              rows={4}
-              placeholder="Optional description..."
-            />
-          </label>
-
-          <div className="project-task-form-grid">
-            <label>
-              Priority
-              <select value={draft.priority} onChange={(event) => onChange("priority", event.target.value)}>
-                {TASK_PRIORITIES.map((priority) => (
-                  <option key={priority} value={priority}>
-                    {TASK_PRIORITY_LABELS[priority]}
-                  </option>
-                ))}
-              </select>
-            </label>
-
-            <label>
-              Status
-              <select value={draft.status} onChange={(event) => onChange("status", event.target.value)}>
-                {TASK_STATUSES.map((status) => (
-                  <option key={status.id} value={status.id}>
-                    {status.title}
-                  </option>
-                ))}
-              </select>
-            </label>
-          </div>
-
-          <div className="project-task-form-grid">
-            <label>
-              Assign Actor
-              <select value={draft.actorId || ""} onChange={(event) => onChange("actorId", event.target.value)}>
-                <option value="">Unassigned</option>
-                {actors.map((actor) => (
-                  <option key={actor.id} value={actor.id}>
-                    {actor.displayName} ({actor.id})
-                  </option>
-                ))}
-              </select>
-            </label>
-
-            <label>
-              Assign Team
-              <select value={draft.teamId || ""} onChange={(event) => onChange("teamId", event.target.value)}>
-                <option value="">Unassigned</option>
-                {teams.map((team) => (
-                  <option key={team.id} value={team.id}>
-                    {team.name} ({team.id})
-                  </option>
-                ))}
-              </select>
-            </label>
-          </div>
-
-          <div className="project-modal-actions">
-            <button type="button" className="danger" onClick={onDelete}>
-              Delete task
-            </button>
-            <button type="button" onClick={onClose}>
-              Cancel
-            </button>
-            <button type="submit" className="project-primary" disabled={!draft.title.trim()}>
-              Save
-            </button>
-          </div>
-        </form>
-      </section>
-    </div>
-  );
-}
-
 function AddChannelModal({ isOpen, projectChannels, availableChannels, draft, onChange, onClose, onAdd }) {
   const [channelSearch, setChannelSearch] = useState("");
   const [dropdownOpen, setDropdownOpen] = useState(false);
@@ -1001,6 +922,7 @@ export function ProjectsView({
   bulletins = [],
   routeProjectId = null,
   routeProjectTab = "overview",
+  routeProjectTaskReference = null,
   onRouteProjectChange = () => {}
 }) {
   const [projects, setProjects] = useState([]);
@@ -1019,11 +941,19 @@ export function ProjectsView({
   const [isAddChannelModalOpen, setIsAddChannelModalOpen] = useState(false);
   const [addChannelDraft, setAddChannelDraft] = useState({ title: "", channelId: "" });
   const [availableChannels, setAvailableChannels] = useState([]);
+  const [isTaskDetailFullscreen, setIsTaskDetailFullscreen] = useState(false);
 
-  const selectedProject = useMemo(
-    () => projects.find((project) => project.id === routeProjectId) || null,
-    [projects, routeProjectId]
-  );
+  const selectedProject = useMemo(() => {
+    if (routeProjectId) {
+      return projects.find((project) => project.id === routeProjectId) || null;
+    }
+    if (!routeProjectTaskReference) {
+      return null;
+    }
+    return (
+      projects.find((project) => resolveTaskByReference(project.id, project.tasks, routeProjectTaskReference)) || null
+    );
+  }, [projects, routeProjectId, routeProjectTaskReference]);
   const selectedTab = useMemo(() => {
     if (!selectedProject) {
       return "overview";
@@ -1031,6 +961,12 @@ export function ProjectsView({
     const candidate = String(routeProjectTab || "").trim().toLowerCase();
     return PROJECT_TAB_SET.has(candidate) ? candidate : "overview";
   }, [selectedProject, routeProjectTab]);
+  const selectedTask = useMemo(() => {
+    if (!selectedProject || selectedTab !== "tasks") {
+      return null;
+    }
+    return resolveTaskByReference(selectedProject.id, selectedProject.tasks, routeProjectTaskReference);
+  }, [selectedProject, selectedTab, routeProjectTaskReference]);
 
   useEffect(() => {
     loadProjects().catch(() => {
@@ -1088,6 +1024,62 @@ export function ProjectsView({
       setStatusText("Project not found.");
     }
   }, [isLoadingProjects, routeProjectId, selectedProject, onRouteProjectChange]);
+
+  useEffect(() => {
+    if (isLoadingProjects || routeProjectId || !routeProjectTaskReference) {
+      return;
+    }
+    if (!selectedProject) {
+      onRouteProjectChange(null, null, null);
+      setStatusText("Task not found.");
+      setIsTaskDetailFullscreen(false);
+      closeEditTaskModal();
+    }
+  }, [isLoadingProjects, routeProjectId, routeProjectTaskReference, selectedProject, onRouteProjectChange]);
+
+  useEffect(() => {
+    if (!selectedProject || selectedTab !== "tasks") {
+      setIsTaskDetailFullscreen(false);
+      return;
+    }
+    if (!routeProjectTaskReference) {
+      return;
+    }
+    if (!selectedTask) {
+      onRouteProjectChange(selectedProject.id, "tasks", null);
+      setStatusText("Task not found.");
+      setIsTaskDetailFullscreen(false);
+      closeEditTaskModal();
+    }
+  }, [selectedProject, selectedTab, routeProjectTaskReference, selectedTask, onRouteProjectChange]);
+
+  useEffect(() => {
+    if (!selectedTask) {
+      setEditingTask(null);
+      setEditDraft(emptyTaskDraft());
+      return;
+    }
+    const resolvedActorId = selectedTask.claimedActorId || selectedTask.actorId || "";
+    setEditingTask(selectedTask);
+    setEditDraft({
+      title: selectedTask.title,
+      description: selectedTask.description || "",
+      priority: selectedTask.priority,
+      status: selectedTask.status,
+      actorId: resolvedActorId,
+      teamId: selectedTask.teamId || ""
+    });
+  }, [
+    selectedTask?.id,
+    selectedTask?.updatedAt,
+    selectedTask?.title,
+    selectedTask?.description,
+    selectedTask?.priority,
+    selectedTask?.status,
+    selectedTask?.actorId,
+    selectedTask?.teamId,
+    selectedTask?.claimedActorId
+  ]);
 
   useEffect(() => {
     if (!selectedProject) {
@@ -1166,11 +1158,32 @@ export function ProjectsView({
   }
 
   function openProject(projectId, projectTab = "overview") {
-    onRouteProjectChange(projectId, projectTab);
+    closeEditTaskModal();
+    onRouteProjectChange(projectId, projectTab, null);
   }
 
   function closeProject() {
-    onRouteProjectChange(null, null);
+    closeEditTaskModal();
+    onRouteProjectChange(null, null, null);
+    setIsTaskDetailFullscreen(false);
+  }
+
+  function openTaskDetails(task) {
+    if (!selectedProject || !task) {
+      return;
+    }
+    openEditTaskModal(task);
+    const taskReference = String(task.id || "").trim();
+    onRouteProjectChange(selectedProject.id, "tasks", taskReference);
+  }
+
+  function closeTaskDetails() {
+    if (!selectedProject) {
+      return;
+    }
+    closeEditTaskModal();
+    onRouteProjectChange(selectedProject.id, "tasks", null);
+    setIsTaskDetailFullscreen(false);
   }
 
   function openCreateProjectModal() {
@@ -1321,15 +1334,34 @@ export function ProjectsView({
     setEditDraft((prev) => ({ ...prev, [field]: value }));
   }
 
+  function updateDetailAssignee(nextValue) {
+    const token = String(nextValue || "").trim();
+    if (!token) {
+      setEditDraft((prev) => ({ ...prev, actorId: "", teamId: "" }));
+      return;
+    }
+    if (token.startsWith("actor:")) {
+      const actorId = token.slice("actor:".length).trim();
+      setEditDraft((prev) => ({ ...prev, actorId, teamId: "" }));
+      return;
+    }
+    if (token.startsWith("team:")) {
+      const teamId = token.slice("team:".length).trim();
+      setEditDraft((prev) => ({ ...prev, actorId: "", teamId }));
+      return;
+    }
+  }
+
   async function saveTaskEdit() {
-    if (!selectedProject || !editingTask) {
+    const taskToUpdate = editingTask || selectedTask;
+    if (!selectedProject || !taskToUpdate) {
       return;
     }
     const title = String(editDraft.title || "").trim();
     if (!title) {
       return;
     }
-    const updated = await updateProjectTaskRequest(selectedProject.id, editingTask.id, {
+    const updated = await updateProjectTaskRequest(selectedProject.id, taskToUpdate.id, {
       title,
       description: String(editDraft.description || "").trim(),
       priority: editDraft.priority,
@@ -1342,7 +1374,7 @@ export function ProjectsView({
       return;
     }
     replaceProjectInState(updated);
-    closeEditTaskModal();
+    setEditingTask(taskToUpdate);
     setStatusText("Task updated.");
   }
 
@@ -1357,12 +1389,17 @@ export function ProjectsView({
     if (!selectedProject) {
       return;
     }
+    const deletedTaskId = String(editingTask.id || "").trim();
     const updated = await deleteProjectTaskRequest(selectedProject.id, editingTask.id);
     if (!updated) {
       setStatusText("Failed to delete task.");
       return;
     }
     replaceProjectInState(updated);
+    if (selectedTask && String(selectedTask.id || "").trim() === deletedTaskId) {
+      onRouteProjectChange(selectedProject.id, "tasks", null);
+      setIsTaskDetailFullscreen(false);
+    }
     closeEditTaskModal();
     setStatusText("Task deleted.");
   }
@@ -1692,6 +1729,140 @@ export function ProjectsView({
   function renderTasksTab(project) {
     const taskCounts = buildTaskCounts(project.tasks);
     const swarmGroups = buildSwarmGroups(project.tasks);
+    const selectedTaskId = selectedTask ? String(selectedTask.id || "").trim() : "";
+
+    const renderTaskDetail = (task, isFullscreen = false) => {
+      const taskReference = String(task.id || "").trim();
+      const statusTitle = TASK_STATUSES.find((status) => status.id === editDraft.status)?.title || editDraft.status;
+      const priorityTitle = TASK_PRIORITY_LABELS[editDraft.priority] || "Medium";
+      const assigneeToken = editDraft.actorId
+        ? `actor:${editDraft.actorId}`
+        : editDraft.teamId
+          ? `team:${editDraft.teamId}`
+          : "";
+      const assigneeLabel = editDraft.actorId || editDraft.teamId || "Unassigned";
+
+      return (
+        <article className={`project-task-composer ${isFullscreen ? "project-task-composer--fullscreen" : ""}`}>
+          <header className="project-task-composer-head">
+            <div className="project-task-composer-breadcrumbs">
+              <span className="project-task-composer-badge">{project.id}</span>
+              <span className="material-symbols-rounded" aria-hidden="true">
+                chevron_right
+              </span>
+              <span className="project-task-composer-badge">Task</span>
+            </div>
+
+            <div className="project-task-composer-actions">
+              <button
+                type="button"
+                className="project-task-composer-save"
+                onClick={saveTaskEdit}
+                disabled={!String(editDraft.title || "").trim()}
+              >
+                Save as draft
+              </button>
+              <button
+                type="button"
+                className="project-task-detail-icon-button"
+                onClick={() => setIsTaskDetailFullscreen((value) => !value)}
+                aria-label={isTaskDetailFullscreen ? "Exit fullscreen task card" : "Expand task card fullscreen"}
+                title={isTaskDetailFullscreen ? "Exit fullscreen" : "Fullscreen"}
+              >
+                <span className="material-symbols-rounded" aria-hidden="true">
+                  {isTaskDetailFullscreen ? "close_fullscreen" : "open_in_full"}
+                </span>
+              </button>
+              <button
+                type="button"
+                className="project-task-detail-icon-button"
+                onClick={closeTaskDetails}
+                aria-label="Close task detail"
+                title="Close task detail"
+              >
+                <span className="material-symbols-rounded" aria-hidden="true">
+                  close
+                </span>
+              </button>
+            </div>
+          </header>
+
+          <div className="project-task-composer-editor">
+            <input
+              className="project-task-composer-title-input"
+              value={editDraft.title}
+              onChange={(event) => updateEditDraft("title", event.target.value)}
+              placeholder="Task title..."
+              autoFocus
+            />
+            <textarea
+              className="project-task-composer-desc-input"
+              value={editDraft.description}
+              onChange={(event) => updateEditDraft("description", event.target.value)}
+              rows={2}
+              placeholder="Write a task note..."
+            />
+          </div>
+
+          <div className="project-task-composer-row">
+            <label className="project-task-composer-chip">
+              <span className="material-symbols-rounded" aria-hidden="true">
+                radio_button_unchecked
+              </span>
+              <select value={editDraft.status} onChange={(event) => updateEditDraft("status", event.target.value)} aria-label="Task status">
+                {TASK_STATUSES.map((status) => (
+                  <option key={status.id} value={status.id}>
+                    {status.title}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <label className="project-task-composer-chip">
+              <span className="material-symbols-rounded" aria-hidden="true">
+                flag
+              </span>
+              <select value={editDraft.priority} onChange={(event) => updateEditDraft("priority", event.target.value)} aria-label="Task priority">
+                {TASK_PRIORITIES.map((priority) => (
+                  <option key={priority} value={priority}>
+                    {TASK_PRIORITY_LABELS[priority]}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <label className="project-task-composer-chip">
+              <span className="material-symbols-rounded" aria-hidden="true">
+                person
+              </span>
+              <select value={assigneeToken} onChange={(event) => updateDetailAssignee(event.target.value)} aria-label="Task assignee">
+                <option value="">Unassigned</option>
+                {createModalActors.map((actor) => (
+                  <option key={`actor-${actor.id}`} value={`actor:${actor.id}`}>
+                    {actor.displayName}
+                  </option>
+                ))}
+                {createModalTeams.map((team) => (
+                  <option key={`team-${team.id}`} value={`team:${team.id}`}>
+                    {team.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </div>
+
+          <footer className="project-task-composer-footer">
+            <span className="project-task-composer-meta">/tasks/{taskReference}</span>
+            <span className="project-task-composer-meta">{statusTitle}</span>
+            <span className="project-task-composer-meta">{priorityTitle}</span>
+            <span className="project-task-composer-meta">{assigneeLabel}</span>
+            <button type="button" className="danger" onClick={deleteTaskFromModal}>
+              Delete task
+            </button>
+          </footer>
+        </article>
+      );
+    };
 
     const renderSwarmNode = (task, group, level = 0, visited = new Set()) => {
       const taskKey = task.swarmTaskId || `task:${task.id}`;
@@ -1707,7 +1878,7 @@ export function ProjectsView({
           <button
             type="button"
             className="project-swarm-node-main"
-            onClick={() => openEditTaskModal(task)}
+            onClick={() => openTaskDetails(task)}
             title={`Open task ${task.id}`}
           >
             <span className={`project-swarm-status project-swarm-status--${task.status}`}>{task.status}</span>
@@ -1730,8 +1901,18 @@ export function ProjectsView({
         <section className="project-pane project-kanban-pane">
           <div className="project-kanban-head">
             <div className="project-kanban-summary">
-              <span>{taskCounts.total} task{taskCounts.total === 1 ? "" : "s"}</span>
-              <span>{taskCounts.in_progress} in progress</span>
+              <span>
+                <span className="material-symbols-rounded" aria-hidden="true">
+                  list_alt
+                </span>
+                {taskCounts.total} task{taskCounts.total === 1 ? "" : "s"}
+              </span>
+              <span>
+                <span className="material-symbols-rounded" aria-hidden="true">
+                  pending_actions
+                </span>
+                {taskCounts.in_progress} in progress
+              </span>
             </div>
             <button type="button" className="project-primary" onClick={() => openCreateTaskModal("backlog")}>
               Create Task
@@ -1816,15 +1997,17 @@ export function ProjectsView({
                               <p className="project-task-assignee-badge">Swarm: {task.swarmId}</p>
                             ) : null}
                             <article
-                              className="project-kanban-task project-kanban-task--clickable"
+                              className={`project-kanban-task project-kanban-task--clickable ${
+                                selectedTaskId && selectedTaskId === String(task.id || "").trim() ? "project-kanban-task--selected" : ""
+                              }`}
                               role="button"
                               tabIndex={0}
                               draggable
-                              onClick={() => openEditTaskModal(task)}
+                              onClick={() => openTaskDetails(task)}
                               onKeyDown={(event) => {
                                 if (event.key === "Enter" || event.key === " ") {
                                   event.preventDefault();
-                                  openEditTaskModal(task);
+                                  openTaskDetails(task);
                                 }
                               }}
                               onDragStart={(event) => {
@@ -1832,36 +2015,103 @@ export function ProjectsView({
                                 event.dataTransfer.effectAllowed = "move";
                               }}
                             >
-                              <span className="project-task-id">#{task.id}</span>
+                              <div className="project-task-card-top">
+                                <span className="project-task-id">#{task.id}</span>
+                                <span className="project-task-card-open">
+                                  <span className="material-symbols-rounded" aria-hidden="true">
+                                    open_in_new
+                                  </span>
+                                  Open
+                                </span>
+                              </div>
                               <h5>{task.title}</h5>
                               {task.description ? <p>{task.description}</p> : null}
 
                               <div className="project-task-meta">
                                 <span className={`project-priority-badge ${task.priority}`}>
+                                  <span className="material-symbols-rounded" aria-hidden="true">
+                                    flag
+                                  </span>
                                   {TASK_PRIORITY_LABELS[task.priority] || "Medium"}
                                 </span>
-                                {task.swarmTaskId ? <span className="project-task-claim-badge">Swarm task: {task.swarmTaskId}</span> : null}
-                                {Number.isFinite(task.swarmDepth) ? <span className="project-task-assignee-badge">Depth: {task.swarmDepth}</span> : null}
-                                {task.swarmParentTaskId ? <span className="project-task-assignee-badge">Parent: {task.swarmParentTaskId}</span> : null}
+                                {task.swarmTaskId ? (
+                                  <span className="project-task-claim-badge">
+                                    <span className="material-symbols-rounded" aria-hidden="true">
+                                      route
+                                    </span>
+                                    Swarm task: {task.swarmTaskId}
+                                  </span>
+                                ) : null}
+                                {Number.isFinite(task.swarmDepth) ? (
+                                  <span className="project-task-assignee-badge">
+                                    <span className="material-symbols-rounded" aria-hidden="true">
+                                      account_tree
+                                    </span>
+                                    Depth: {task.swarmDepth}
+                                  </span>
+                                ) : null}
+                                {task.swarmParentTaskId ? (
+                                  <span className="project-task-assignee-badge">
+                                    <span className="material-symbols-rounded" aria-hidden="true">
+                                      call_split
+                                    </span>
+                                    Parent: {task.swarmParentTaskId}
+                                  </span>
+                                ) : null}
                                 {task.swarmDependencyIds.length > 0 ? (
-                                  <span className="project-task-assignee-badge">Deps: {task.swarmDependencyIds.join(", ")}</span>
+                                  <span className="project-task-assignee-badge">
+                                    <span className="material-symbols-rounded" aria-hidden="true">
+                                      link
+                                    </span>
+                                    Deps: {task.swarmDependencyIds.join(", ")}
+                                  </span>
                                 ) : null}
                                 {task.swarmActorPath.length > 0 ? (
-                                  <span className="project-task-assignee-badge">Path: {task.swarmActorPath.join(" -> ")}</span>
+                                  <span className="project-task-assignee-badge">
+                                    <span className="material-symbols-rounded" aria-hidden="true">
+                                      alt_route
+                                    </span>
+                                    Path: {task.swarmActorPath.join(" -> ")}
+                                  </span>
                                 ) : null}
                                 {task.claimedAgentId ? (
-                                  <span className="project-task-claim-badge">Agent: {task.claimedAgentId}</span>
+                                  <span className="project-task-claim-badge">
+                                    <span className="material-symbols-rounded" aria-hidden="true">
+                                      smart_toy
+                                    </span>
+                                    Agent: {task.claimedAgentId}
+                                  </span>
                                 ) : null}
                                 {!task.claimedAgentId && task.claimedActorId ? (
-                                  <span className="project-task-claim-badge">Actor: {task.claimedActorId}</span>
+                                  <span className="project-task-claim-badge">
+                                    <span className="material-symbols-rounded" aria-hidden="true">
+                                      person
+                                    </span>
+                                    Actor: {task.claimedActorId}
+                                  </span>
                                 ) : null}
                                 {!task.claimedAgentId && !task.claimedActorId && task.actorId ? (
-                                  <span className="project-task-assignee-badge">Assigned actor: {task.actorId}</span>
+                                  <span className="project-task-assignee-badge">
+                                    <span className="material-symbols-rounded" aria-hidden="true">
+                                      assignment_ind
+                                    </span>
+                                    Assigned actor: {task.actorId}
+                                  </span>
                                 ) : null}
                                 {!task.claimedAgentId && !task.claimedActorId && !task.actorId && task.teamId ? (
-                                  <span className="project-task-assignee-badge">Assigned team: {task.teamId}</span>
+                                  <span className="project-task-assignee-badge">
+                                    <span className="material-symbols-rounded" aria-hidden="true">
+                                      groups
+                                    </span>
+                                    Assigned team: {task.teamId}
+                                  </span>
                                 ) : null}
-                                <span className="project-task-age">{formatRelativeTime(task.createdAt)}</span>
+                                <span className="project-task-age">
+                                  <span className="material-symbols-rounded" aria-hidden="true">
+                                    schedule
+                                  </span>
+                                  {formatRelativeTime(task.createdAt)}
+                                </span>
                               </div>
 
                               <div className="project-task-actions" onClick={(e) => e.stopPropagation()}>
@@ -1891,6 +2141,12 @@ export function ProjectsView({
             })}
           </div>
         </section>
+
+        {selectedTask ? (
+          <div className={`project-task-detail-overlay ${isTaskDetailFullscreen ? "project-task-detail-overlay--fullscreen" : ""}`} onClick={closeTaskDetails}>
+            <div onClick={(event) => event.stopPropagation()}>{renderTaskDetail(selectedTask, isTaskDetailFullscreen)}</div>
+          </div>
+        ) : null}
       </section>
     );
   }
@@ -2165,18 +2421,6 @@ export function ProjectsView({
         onChange={updateTaskDraft}
         onClose={closeCreateTaskModal}
         onCreate={createTask}
-        actors={createModalActors}
-        teams={createModalTeams}
-      />
-
-      <ProjectTaskEditModal
-        isOpen={Boolean(editingTask)}
-        task={editingTask}
-        draft={editDraft}
-        onChange={updateEditDraft}
-        onClose={closeEditTaskModal}
-        onSave={saveTaskEdit}
-        onDelete={deleteTaskFromModal}
         actors={createModalActors}
         teams={createModalTeams}
       />
