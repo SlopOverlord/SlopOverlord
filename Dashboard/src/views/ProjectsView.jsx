@@ -2113,23 +2113,6 @@ export function ProjectsView({
                                   {formatRelativeTime(task.createdAt)}
                                 </span>
                               </div>
-
-                              <div className="project-task-actions" onClick={(e) => e.stopPropagation()}>
-                                <select
-                                  value={task.status}
-                                  onChange={(event) => moveTask(task.id, String(event.target.value))}
-                                  aria-label="Task status"
-                                >
-                                  {TASK_STATUSES.map((status) => (
-                                    <option key={status.id} value={status.id}>
-                                      {status.title}
-                                    </option>
-                                  ))}
-                                </select>
-                                <button type="button" className="danger" onClick={() => deleteTask(task.id)}>
-                                  Delete
-                                </button>
-                              </div>
                             </article>
                           </React.Fragment>
                         );

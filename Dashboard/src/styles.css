@@ -1363,6 +1363,7 @@ body.mobile-menu-open {
   border-radius: 12px;
   background: rgba(10, 13, 21, 0.66);
   padding: 12px;
+  min-width: 0;
 }
 
 .project-pane h4 {
@@ -1596,8 +1597,37 @@ body.mobile-menu-open {
 
 .project-kanban-board {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(260px, 1fr);
   gap: 10px;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding-bottom: 4px;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: thin;
+  scrollbar-color: var(--line-strong) transparent;
+}
+
+.project-kanban-board::-webkit-scrollbar {
+  height: 10px;
+}
+
+.project-kanban-board::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.project-kanban-board::-webkit-scrollbar-thumb {
+  background: rgba(138, 153, 180, 0.45);
+  border-radius: 999px;
+  border: 2px solid transparent;
+  background-clip: content-box;
+}
+
+.project-kanban-board:hover::-webkit-scrollbar-thumb {
+  background: rgba(163, 182, 214, 0.65);
 }
 
 .project-kanban-column {
@@ -2147,12 +2177,6 @@ body.mobile-menu-open {
   justify-content: flex-end;
   gap: 8px;
   margin-top: 4px;
-}
-
-@media (max-width: 1500px) {
-  .project-kanban-board {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
 }
 
 @media (max-width: 1000px) {
@@ -5130,10 +5154,6 @@ pre {
   .project-details-grid,
   .providers-list,
   .provider-modal-form {
-    grid-template-columns: 1fr;
-  }
-
-  .project-kanban-board {
     grid-template-columns: 1fr;
   }
 
