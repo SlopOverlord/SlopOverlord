@@ -1,8 +1,13 @@
 .build/
+.cache/
 .data/
 .DS_Store
 Dashboard/node_modules/
 Dashboard/dist/
+docs/node_modules/
+docs/.vitepress/cache/
+docs/.vitepress/dist/
+site/
 workspace/
 /core.sqlite
 /core.sqlite-*
