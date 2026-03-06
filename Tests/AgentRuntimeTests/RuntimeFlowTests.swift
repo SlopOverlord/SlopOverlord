@@ -214,31 +214,113 @@ private actor SequencedModelProvider: ModelProviderPlugin {
     let id: String = "sequenced"
     let models: [String] = ["mock-model"]
     private var queue: [String]
+    private(set) var requestedModels: [String] = []
+    private(set) var requestedReasoningEfforts: [ReasoningEffort?] = []
 
     init(outputs: [String]) {
         self.queue = outputs
     }
 
-    func complete(model: String, prompt: String, maxTokens: Int) async throws -> String {
+    func complete(
+        model: String,
+        prompt: String,
+        maxTokens: Int,
+        reasoningEffort: ReasoningEffort?
+    ) async throws -> String {
+        requestedModels.append(model)
+        requestedReasoningEfforts.append(reasoningEffort)
         if queue.isEmpty {
             return "No output."
         }
         return queue.removeFirst()
     }
+
+    func requestedModelsSnapshot() -> [String] {
+        requestedModels
+    }
+
+    func requestedReasoningEffortsSnapshot() -> [ReasoningEffort?] {
+        requestedReasoningEfforts
+    }
 }
 
-private actor PromptCapturingModelProvider: ModelProviderPlugin {
-    let id: String = "prompt-capturing"
-    let models: [String] = ["mock-model"]
+private actor PromptCapturingStore {
     private(set) var prompts: [String] = []
+    private(set) var requestedModels: [String] = []
+    private(set) var requestedReasoningEfforts: [ReasoningEffort?] = []
 
-    func complete(model: String, prompt: String, maxTokens: Int) async throws -> String {
+    func record(model: String, prompt: String, reasoningEffort: ReasoningEffort?) {
         prompts.append(prompt)
-        return "Captured."
+        requestedModels.append(model)
+        requestedReasoningEfforts.append(reasoningEffort)
     }
 
     func lastPrompt() -> String? {
         prompts.last
+    }
+
+    func requestedModelsSnapshot() -> [String] {
+        requestedModels
+    }
+
+    func requestedReasoningEffortsSnapshot() -> [ReasoningEffort?] {
+        requestedReasoningEfforts
+    }
+}
+
+private final class PromptCapturingModelProvider: ModelProviderPlugin, @unchecked Sendable {
+    let id: String = "prompt-capturing"
+    let models: [String]
+    private let streamOutput: String?
+    private let store = PromptCapturingStore()
+
+    init(models: [String] = ["mock-model"], streamOutput: String? = nil) {
+        self.models = models
+        self.streamOutput = streamOutput
+    }
+
+    func complete(
+        model: String,
+        prompt: String,
+        maxTokens: Int,
+        reasoningEffort: ReasoningEffort?
+    ) async throws -> String {
+        await store.record(model: model, prompt: prompt, reasoningEffort: reasoningEffort)
+        return "Captured."
+    }
+
+    func stream(
+        model: String,
+        prompt: String,
+        maxTokens: Int,
+        reasoningEffort: ReasoningEffort?
+    ) -> AsyncThrowingStream<String, any Error> {
+        let streamOutput = self.streamOutput
+        return AsyncThrowingStream { continuation in
+            let task = Task {
+                await store.record(model: model, prompt: prompt, reasoningEffort: reasoningEffort)
+                if let streamOutput {
+                    continuation.yield(streamOutput)
+                }
+                continuation.finish()
+            }
+
+            continuation.onTermination = { _ in
+                task.cancel()
+            }
+        }
+    }
+
+    func lastPrompt() async -> String? {
+        await store.lastPrompt()
+    }
+
+    func requestedModelsSnapshot() async -> [String] {
+        await store.requestedModelsSnapshot()
+    }
+
+    func requestedReasoningEffortsSnapshot() async -> [ReasoningEffort?] {
+        await store.requestedReasoningEffortsSnapshot()
     }
 }
 
@@ -272,6 +354,8 @@ func respondInlineAutoToolCallingLoop() async {
     let finalMessage = snapshot?.messages.last(where: { $0.userId == "system" })?.content ?? ""
     #expect(finalMessage == "Final answer after tool execution.")
     #expect(await invocationCounter.value() == 1)
+    #expect(await provider.requestedModelsSnapshot() == ["mock-model", "mock-model"])
+    #expect(await provider.requestedReasoningEffortsSnapshot() == [nil, nil])
 }
 
 @Test
@@ -298,6 +382,90 @@ func respondInlineIncludesBootstrapContextInPrompt() async {
     #expect(prompt.contains("[agent_session_context_bootstrap_v1]"))
     #expect(prompt.contains("Тебя зовут Серега"))
     #expect(prompt.contains("привет, как тебя зовут?"))
+}
+
+@Test
+func respondInlineUsesRequestModelInsteadOfDefaultModel() async {
+    let provider = PromptCapturingModelProvider(models: ["default-model", "reasoning-model"])
+    let system = RuntimeSystem(modelProvider: provider, defaultModel: "default-model")
+
+    _ = await system.postMessage(
+        channelId: "request-model",
+        request: ChannelMessageRequest(
+            userId: "dashboard",
+            content: "use the request model",
+            model: "reasoning-model"
+        )
+    )
+
+    #expect(await provider.requestedModelsSnapshot().last == "reasoning-model")
+}
+
+@Test
+func respondInlineForwardsReasoningEffortToStreamingRequests() async {
+    let provider = PromptCapturingModelProvider(models: ["reasoning-model"], streamOutput: "Streamed.")
+    let system = RuntimeSystem(modelProvider: provider, defaultModel: "reasoning-model")
+
+    _ = await system.postMessage(
+        channelId: "stream-reasoning",
+        request: ChannelMessageRequest(
+            userId: "dashboard",
+            content: "stream with effort",
+            model: "reasoning-model",
+            reasoningEffort: .high
+        )
+    )
+
+    #expect(await provider.requestedReasoningEffortsSnapshot().last == .high)
+}
+
+@Test
+func respondInlineForwardsReasoningEffortToFallbackCompletion() async {
+    let provider = PromptCapturingModelProvider(models: ["reasoning-model"])
+    let system = RuntimeSystem(modelProvider: provider, defaultModel: "reasoning-model")
+
+    _ = await system.postMessage(
+        channelId: "fallback-reasoning",
+        request: ChannelMessageRequest(
+            userId: "dashboard",
+            content: "fallback with effort",
+            model: "reasoning-model",
+            reasoningEffort: .low
+        )
+    )
+
+    #expect(await provider.requestedReasoningEffortsSnapshot().last == .low)
+}
+
+@Test
+func respondInlineReusesRequestModelAndReasoningEffortAcrossToolLoop() async {
+    let provider = SequencedModelProvider(
+        outputs: [
+            "{\"tool\":\"agents.list\",\"arguments\":{},\"reason\":\"need agents\"}",
+            "Final answer after tool execution."
+        ]
+    )
+    let system = RuntimeSystem(modelProvider: provider, defaultModel: "fallback-model")
+
+    _ = await system.postMessage(
+        channelId: "tool-loop-request-model",
+        request: ChannelMessageRequest(
+            userId: "u1",
+            content: "hello",
+            model: "mock-model",
+            reasoningEffort: .medium
+        ),
+        toolInvoker: { request in
+            ToolInvocationResult(
+                tool: request.tool,
+                ok: true,
+                data: .array([])
+            )
+        }
+    )
+
+    #expect(await provider.requestedModelsSnapshot() == ["mock-model", "mock-model"])
+    #expect(await provider.requestedReasoningEffortsSnapshot() == [.medium, .medium])
 }
 
 @Test

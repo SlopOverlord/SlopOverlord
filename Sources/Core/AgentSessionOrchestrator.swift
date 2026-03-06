@@ -20,6 +20,7 @@ actor AgentSessionOrchestrator {
     private let runtime: RuntimeSystem
     private let sessionStore: AgentSessionFileStore
     private let agentCatalogStore: AgentCatalogFileStore
+    private var availableModels: [ProviderModelOption]
     private let logger: Logger
     private var toolInvoker: ToolInvoker?
     private var responseChunkObserver: ResponseChunkObserver?
@@ -34,6 +35,7 @@ actor AgentSessionOrchestrator {
         runtime: RuntimeSystem,
         sessionStore: AgentSessionFileStore,
         agentCatalogStore: AgentCatalogFileStore,
+        availableModels: [ProviderModelOption],
         toolInvoker: ToolInvoker? = nil,
         responseChunkObserver: ResponseChunkObserver? = nil,
         logger: Logger = Logger(label: "slopoverlord.core.sessions")
@@ -41,6 +43,7 @@ actor AgentSessionOrchestrator {
         self.runtime = runtime
         self.sessionStore = sessionStore
         self.agentCatalogStore = agentCatalogStore
+        self.availableModels = availableModels
         self.toolInvoker = toolInvoker
         self.responseChunkObserver = responseChunkObserver
         self.logger = logger
@@ -49,6 +52,10 @@ actor AgentSessionOrchestrator {
     func updateAgentsRootURL(_ url: URL) {
         sessionStore.updateAgentsRootURL(url)
         agentCatalogStore.updateAgentsRootURL(url)
+    }
+
+    func updateAvailableModels(_ models: [ProviderModelOption]) {
+        availableModels = models
     }
 
     func updateToolInvoker(_ toolInvoker: ToolInvoker?) {
@@ -110,6 +117,22 @@ actor AgentSessionOrchestrator {
         } catch {
             throw OrchestratorError.storageFailure
         }
+
+        let agentConfig: AgentConfigDetail
+        do {
+            agentConfig = try agentCatalogStore.getAgentConfig(agentID: agentID, availableModels: availableModels)
+        } catch {
+            throw OrchestratorError.storageFailure
+        }
+
+        let selectedModel = agentConfig.selectedModel.trimmingCharacters(in: .whitespacesAndNewlines)
+        let selectedModelCapabilities = Set(
+            agentConfig.availableModels
+                .first(where: { $0.id == selectedModel })?
+                .capabilities
+                .map { $0.lowercased() } ?? []
+        )
+        let reasoningEffort = selectedModelCapabilities.contains("reasoning") ? request.reasoningEffort : nil
 
         let content = request.content.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !content.isEmpty || !request.attachments.isEmpty else {
@@ -235,7 +258,12 @@ actor AgentSessionOrchestrator {
         let messageContent = content.isEmpty ? "User attached files." : content
         let routeDecision = await runtime.postMessage(
             channelId: channelID,
-            request: ChannelMessageRequest(userId: request.userId, content: messageContent),
+            request: ChannelMessageRequest(
+                userId: request.userId,
+                content: messageContent,
+                model: selectedModel.isEmpty ? nil : selectedModel,
+                reasoningEffort: reasoningEffort
+            ),
             onResponseChunk: { [weak self] partialText in
                 guard let self else {
                     return false

@@ -299,6 +299,43 @@ func channelMessageRequestDecodesWithoutOptionalTopicId() throws {
     #expect(request.userId == "user-123")
     #expect(request.content == "Hello world")
     #expect(request.topicId == nil)
+    #expect(request.model == nil)
+    #expect(request.reasoningEffort == nil)
+}
+
+@Test
+func channelMessageRequestDecodesWithReasoningFields() throws {
+    let json = """
+    {
+        "userId": "user-123",
+        "content": "Hello world",
+        "model": "openai:o4-mini",
+        "reasoningEffort": "high"
+    }
+    """.data(using: .utf8)!
+
+    let request = try JSONDecoder().decode(ChannelMessageRequest.self, from: json)
+
+    #expect(request.userId == "user-123")
+    #expect(request.model == "openai:o4-mini")
+    #expect(request.reasoningEffort == .high)
+}
+
+@Test
+func agentSessionPostMessageRequestRoundTripsReasoningEffort() throws {
+    let request = AgentSessionPostMessageRequest(
+        userId: "dashboard",
+        content: "Think harder",
+        attachments: [],
+        spawnSubSession: false,
+        reasoningEffort: .medium
+    )
+
+    let encoded = try JSONEncoder().encode(request)
+    let decoded = try JSONDecoder().decode(AgentSessionPostMessageRequest.self, from: encoded)
+
+    #expect(decoded.userId == "dashboard")
+    #expect(decoded.reasoningEffort == .medium)
 }
 
 @Test

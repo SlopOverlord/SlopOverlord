@@ -1,5 +1,6 @@
 import AnyLanguageModel
 import Foundation
+import Protocols
 
 /// Bridges SlopOverlord `ModelProviderPlugin` protocol to AnyLanguageModel backends.
 public struct AnyLanguageModelProviderPlugin: ModelProviderPlugin {
@@ -56,7 +57,12 @@ public struct AnyLanguageModelProviderPlugin: ModelProviderPlugin {
     }
 
     /// Executes single-turn completion with the backend resolved from the model prefix.
-    public func complete(model: String, prompt: String, maxTokens: Int) async throws -> String {
+    public func complete(
+        model: String,
+        prompt: String,
+        maxTokens: Int,
+        reasoningEffort: ReasoningEffort? = nil
+    ) async throws -> String {
         switch try backend(for: model) {
         case .openAI(let settings):
             let resolvedModel = normalizeModelName(model, removing: "openai:")
@@ -66,6 +72,7 @@ public struct AnyLanguageModelProviderPlugin: ModelProviderPlugin {
                     model: resolvedModel,
                     prompt: prompt,
                     maxTokens: maxTokens,
+                    reasoningEffort: reasoningEffort,
                     apiVariant: settings.apiVariant
                 )
             } catch {
@@ -75,6 +82,7 @@ public struct AnyLanguageModelProviderPlugin: ModelProviderPlugin {
                         model: resolvedModel,
                         prompt: prompt,
                         maxTokens: maxTokens,
+                        reasoningEffort: reasoningEffort,
                         apiVariant: .responses
                     )
                 }
@@ -100,7 +108,12 @@ public struct AnyLanguageModelProviderPlugin: ModelProviderPlugin {
     }
 
     /// Streams single-turn completion snapshots, yielding progressively built text.
-    public func stream(model: String, prompt: String, maxTokens: Int) -> AsyncThrowingStream<String, any Error> {
+    public func stream(
+        model: String,
+        prompt: String,
+        maxTokens: Int,
+        reasoningEffort: ReasoningEffort? = nil
+    ) -> AsyncThrowingStream<String, any Error> {
         AsyncThrowingStream { continuation in
             let task = Task {
                 do {
@@ -113,6 +126,7 @@ public struct AnyLanguageModelProviderPlugin: ModelProviderPlugin {
                                 model: resolvedModel,
                                 prompt: prompt,
                                 maxTokens: maxTokens,
+                                reasoningEffort: reasoningEffort,
                                 apiVariant: settings.apiVariant,
                                 continuation: continuation
                             )
@@ -125,6 +139,7 @@ public struct AnyLanguageModelProviderPlugin: ModelProviderPlugin {
                                         model: resolvedModel,
                                         prompt: prompt,
                                         maxTokens: maxTokens,
+                                        reasoningEffort: reasoningEffort,
                                         apiVariant: .responses,
                                         continuation: continuation
                                     )
@@ -159,7 +174,12 @@ public struct AnyLanguageModelProviderPlugin: ModelProviderPlugin {
                                 continuation.yield(aggregated)
                             }
                         } else {
-                            let completion = try await complete(model: model, prompt: prompt, maxTokens: maxTokens)
+                            let completion = try await complete(
+                                model: model,
+                                prompt: prompt,
+                                maxTokens: maxTokens,
+                                reasoningEffort: reasoningEffort
+                            )
                             try await yieldSimulatedStream(from: completion, continuation: continuation)
                         }
                         continuation.finish()
@@ -180,6 +200,7 @@ public struct AnyLanguageModelProviderPlugin: ModelProviderPlugin {
         model: String,
         prompt: String,
         maxTokens: Int,
+        reasoningEffort: ReasoningEffort?,
         apiVariant: OpenAILanguageModel.APIVariant
     ) async throws -> String {
         let session = LanguageModelSession(
@@ -191,7 +212,7 @@ public struct AnyLanguageModelProviderPlugin: ModelProviderPlugin {
             ),
             instructions: resolvedInstructions
         )
-        let options = GenerationOptions(maximumResponseTokens: maxTokens)
+        let options = openAIGenerationOptions(maxTokens: maxTokens, reasoningEffort: reasoningEffort)
         let response: LanguageModelSession.Response<String> = try await session.respond(
             to: Prompt(prompt),
             generating: String.self,
@@ -205,6 +226,7 @@ public struct AnyLanguageModelProviderPlugin: ModelProviderPlugin {
         model: String,
         prompt: String,
         maxTokens: Int,
+        reasoningEffort: ReasoningEffort?,
         apiVariant: OpenAILanguageModel.APIVariant,
         continuation: AsyncThrowingStream<String, any Error>.Continuation
     ) async throws {
@@ -218,7 +240,7 @@ public struct AnyLanguageModelProviderPlugin: ModelProviderPlugin {
                 ),
                 instructions: resolvedInstructions
             )
-            let options = GenerationOptions(maximumResponseTokens: maxTokens)
+            let options = openAIGenerationOptions(maxTokens: maxTokens, reasoningEffort: reasoningEffort)
             let stream = session.streamResponse(to: Prompt(prompt), options: options)
             var aggregated = ""
             for try await snapshot in stream {
@@ -238,9 +260,38 @@ public struct AnyLanguageModelProviderPlugin: ModelProviderPlugin {
             model: model,
             prompt: prompt,
             maxTokens: maxTokens,
+            reasoningEffort: reasoningEffort,
             apiVariant: apiVariant
         )
         try await yieldSimulatedStream(from: completion, continuation: continuation)
+    }
+
+    private func openAIGenerationOptions(maxTokens: Int, reasoningEffort: ReasoningEffort?) -> GenerationOptions {
+        var options = GenerationOptions(maximumResponseTokens: maxTokens)
+        guard let reasoningEffort = mapReasoningEffort(reasoningEffort) else {
+            return options
+        }
+
+        options[custom: OpenAILanguageModel.self] = .init(
+            reasoningEffort: reasoningEffort,
+            reasoning: .init(effort: reasoningEffort)
+        )
+        return options
+    }
+
+    private func mapReasoningEffort(
+        _ effort: ReasoningEffort?
+    ) -> OpenAILanguageModel.CustomGenerationOptions.ReasoningEffort? {
+        switch effort {
+        case .low:
+            return .low
+        case .medium:
+            return .medium
+        case .high:
+            return .high
+        case nil:
+            return nil
+        }
     }
 
     private func shouldRetryOpenAIWithResponses(

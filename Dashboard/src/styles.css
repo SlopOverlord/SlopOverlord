@@ -2763,6 +2763,18 @@ body.agent-chat-no-page-scroll .page {
   padding: 10px 12px;
   display: grid;
   gap: 10px;
+  animation: agent-chat-technical-expand 0.2s ease-out;
+}
+
+@keyframes agent-chat-technical-expand {
+  from {
+    opacity: 0;
+    transform: translateY(-8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 .agent-chat-expandable {
@@ -3132,6 +3144,36 @@ body.agent-chat-no-page-scroll .page {
 
 .agent-chat-mode-button .material-symbols-rounded {
   font-size: 18px;
+}
+
+.agent-chat-reasoning-select {
+  min-width: auto;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 4px 10px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--muted);
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.agent-chat-reasoning-select select {
+  width: auto;
+  min-width: 88px;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  padding: 0;
+  font-size: 0.84rem;
+  text-transform: none;
+  letter-spacing: normal;
+}
+
+.agent-chat-reasoning-select select:focus {
+  outline: none;
 }
 
 .agent-chat-icon-button {

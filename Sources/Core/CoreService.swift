@@ -200,10 +200,12 @@ public actor CoreService {
         }
         let orchestratorCatalogStore = AgentCatalogFileStore(agentsRootURL: self.agentsRootURL)
         let orchestratorSessionStore = AgentSessionFileStore(agentsRootURL: self.agentsRootURL)
+        let initialAvailableAgentModels = Self.availableAgentModels(config: config)
         self.sessionOrchestrator = AgentSessionOrchestrator(
             runtime: self.runtime,
             sessionStore: orchestratorSessionStore,
-            agentCatalogStore: orchestratorCatalogStore
+            agentCatalogStore: orchestratorCatalogStore,
+            availableModels: initialAvailableAgentModels
         )
         let toolsStore = AgentToolsFileStore(agentsRootURL: self.agentsRootURL)
         self.toolsAuthorization = ToolAuthorizationService(store: toolsStore)
@@ -1979,6 +1981,7 @@ public actor CoreService {
         let modelProvider = CoreModelProviderFactory.buildModelProvider(config: config, resolvedModels: resolvedModels)
         let defaultModel = modelProvider?.models.first ?? resolvedModels.first
         await runtime.updateModelProvider(modelProvider: modelProvider, defaultModel: defaultModel)
+        await sessionOrchestrator.updateAvailableModels(Self.availableAgentModels(config: config))
 
         if previousChannels.telegram != config.channels.telegram {
             await reloadTelegramPlugin(newConfig: config.channels.telegram)
@@ -4414,10 +4417,14 @@ public actor CoreService {
     }
 
     private func availableAgentModels() -> [ProviderModelOption] {
+        Self.availableAgentModels(config: currentConfig)
+    }
+
+    private static func availableAgentModels(config: CoreConfig) -> [ProviderModelOption] {
         var seen: Set<String> = []
         var options: [ProviderModelOption] = []
 
-        let candidates = CoreModelProviderFactory.resolveModelIdentifiers(config: currentConfig) + currentConfig.models.map(\.model)
+        let candidates = CoreModelProviderFactory.resolveModelIdentifiers(config: config) + config.models.map(\.model)
         for raw in candidates {
             let value = raw.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !value.isEmpty else {
@@ -4425,15 +4432,50 @@ public actor CoreService {
             }
 
             if seen.insert(value).inserted {
-                options.append(.init(id: value, title: value))
+                options.append(Self.providerModelOption(for: value))
             }
         }
 
         if options.isEmpty {
-            options.append(.init(id: "openai:gpt-4.1-mini", title: "openai:gpt-4.1-mini"))
+            options.append(Self.providerModelOption(for: "openai:gpt-4.1-mini"))
         }
 
         return options
+    }
+
+    private static func providerModelOption(for identifier: String) -> ProviderModelOption {
+        let trimmed = identifier.trimmingCharacters(in: .whitespacesAndNewlines)
+        let modelID: String
+        if let separatorIndex = trimmed.firstIndex(of: ":") {
+            modelID = String(trimmed[trimmed.index(after: separatorIndex)...])
+        } else {
+            modelID = trimmed
+        }
+
+        let lowered = modelID.lowercased()
+        var capabilities: [String] = []
+        var contextWindow: String?
+
+        if lowered.hasPrefix("gpt-4.1") {
+            capabilities.append("tools")
+            contextWindow = "1.0M"
+        } else if lowered.hasPrefix("gpt-4o") {
+            capabilities.append("tools")
+            contextWindow = "128K"
+        } else if lowered.hasPrefix("o4") || lowered.hasPrefix("o3") {
+            capabilities.append(contentsOf: ["reasoning", "tools"])
+            contextWindow = "200K"
+        } else if lowered.hasPrefix("o1") {
+            capabilities.append(contentsOf: ["reasoning", "tools"])
+            contextWindow = "128K"
+        }
+
+        return ProviderModelOption(
+            id: trimmed,
+            title: trimmed,
+            contextWindow: contextWindow,
+            capabilities: capabilities
+        )
     }
 
     private func mapAgentStorageError(_ error: Error) -> AgentStorageError {

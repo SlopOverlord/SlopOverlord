@@ -55,16 +55,36 @@ public protocol MemoryPlugin: Sendable {
 public protocol ModelProviderPlugin: Sendable {
     var id: String { get }
     var models: [String] { get }
-    func complete(model: String, prompt: String, maxTokens: Int) async throws -> String
-    func stream(model: String, prompt: String, maxTokens: Int) -> AsyncThrowingStream<String, any Error>
+    func complete(
+        model: String,
+        prompt: String,
+        maxTokens: Int,
+        reasoningEffort: ReasoningEffort?
+    ) async throws -> String
+    func stream(
+        model: String,
+        prompt: String,
+        maxTokens: Int,
+        reasoningEffort: ReasoningEffort?
+    ) -> AsyncThrowingStream<String, any Error>
 }
 
 public extension ModelProviderPlugin {
-    func stream(model: String, prompt: String, maxTokens: Int) -> AsyncThrowingStream<String, any Error> {
+    func stream(
+        model: String,
+        prompt: String,
+        maxTokens: Int,
+        reasoningEffort: ReasoningEffort? = nil
+    ) -> AsyncThrowingStream<String, any Error> {
         AsyncThrowingStream { continuation in
             let task = Task {
                 do {
-                    let text = try await complete(model: model, prompt: prompt, maxTokens: maxTokens)
+                    let text = try await complete(
+                        model: model,
+                        prompt: prompt,
+                        maxTokens: maxTokens,
+                        reasoningEffort: reasoningEffort
+                    )
                     continuation.yield(text)
                     continuation.finish()
                 } catch {

@@ -4,11 +4,21 @@ public struct ChannelMessageRequest: Codable, Sendable {
     public var userId: String
     public var content: String
     public var topicId: String?
+    public var model: String?
+    public var reasoningEffort: ReasoningEffort?
 
-    public init(userId: String, content: String, topicId: String? = nil) {
+    public init(
+        userId: String,
+        content: String,
+        topicId: String? = nil,
+        model: String? = nil,
+        reasoningEffort: ReasoningEffort? = nil
+    ) {
         self.userId = userId
         self.content = content
         self.topicId = topicId
+        self.model = model
+        self.reasoningEffort = reasoningEffort
     }
 }
 
@@ -984,22 +994,31 @@ public struct AgentAttachmentUpload: Codable, Sendable {
     }
 }
 
+public enum ReasoningEffort: String, Codable, Sendable, Equatable, CaseIterable {
+    case low
+    case medium
+    case high
+}
+
 public struct AgentSessionPostMessageRequest: Codable, Sendable {
     public var userId: String
     public var content: String
     public var attachments: [AgentAttachmentUpload]
     public var spawnSubSession: Bool
+    public var reasoningEffort: ReasoningEffort?
 
     public init(
         userId: String,
         content: String,
         attachments: [AgentAttachmentUpload] = [],
-        spawnSubSession: Bool = false
+        spawnSubSession: Bool = false,
+        reasoningEffort: ReasoningEffort? = nil
     ) {
         self.userId = userId
         self.content = content
         self.attachments = attachments
         self.spawnSubSession = spawnSubSession
+        self.reasoningEffort = reasoningEffort
     }
 }
 

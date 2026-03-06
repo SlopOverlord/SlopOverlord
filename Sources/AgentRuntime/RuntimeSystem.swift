@@ -125,6 +125,8 @@ public actor RuntimeSystem {
             await respondInline(
                 channelId: channelId,
                 userMessage: request.content,
+                model: request.model,
+                reasoningEffort: request.reasoningEffort,
                 onResponseChunk: onResponseChunk,
                 toolInvoker: toolInvoker
             )
@@ -181,10 +183,15 @@ public actor RuntimeSystem {
     private func respondInline(
         channelId: String,
         userMessage: String,
+        model: String?,
+        reasoningEffort: ReasoningEffort?,
         onResponseChunk: (@Sendable (String) async -> Bool)?,
         toolInvoker: (@Sendable (ToolInvocationRequest) async -> ToolInvocationResult)?
     ) async {
-        guard let modelProvider, let defaultModel else {
+        let normalizedModel = model?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let activeModel = (normalizedModel?.isEmpty == false ? normalizedModel : nil) ?? defaultModel
+
+        guard let modelProvider, let activeModel else {
             let fallback = "Responded inline"
             if let onResponseChunk {
                 _ = await onResponseChunk(fallback)
@@ -206,7 +213,12 @@ public actor RuntimeSystem {
 
                 for _ in 0..<maxToolSteps {
                     var latest = ""
-                    let stream = modelProvider.stream(model: defaultModel, prompt: currentPrompt, maxTokens: 1024)
+                    let stream = modelProvider.stream(
+                        model: activeModel,
+                        prompt: currentPrompt,
+                        maxTokens: 1024,
+                        reasoningEffort: reasoningEffort
+                    )
                     for try await partial in stream {
                         latest = partial
                         if let onResponseChunk {
@@ -222,9 +234,10 @@ public actor RuntimeSystem {
 
                     if latest.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                         latest = try await modelProvider.complete(
-                            model: defaultModel,
+                            model: activeModel,
                             prompt: currentPrompt,
-                            maxTokens: 1024
+                            maxTokens: 1024,
+                            reasoningEffort: reasoningEffort
                         )
                         if let onResponseChunk {
                             let shouldContinue = await onResponseChunk(latest)
@@ -276,7 +289,12 @@ public actor RuntimeSystem {
             }
 
             var latest = ""
-            let stream = modelProvider.stream(model: defaultModel, prompt: contextualPrompt, maxTokens: 1024)
+            let stream = modelProvider.stream(
+                model: activeModel,
+                prompt: contextualPrompt,
+                maxTokens: 1024,
+                reasoningEffort: reasoningEffort
+            )
             for try await partial in stream {
                 latest = partial
                 if let onResponseChunk {
@@ -292,9 +310,10 @@ public actor RuntimeSystem {
 
             if latest.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 latest = try await modelProvider.complete(
-                    model: defaultModel,
+                    model: activeModel,
                     prompt: contextualPrompt,
-                    maxTokens: 1024
+                    maxTokens: 1024,
+                    reasoningEffort: reasoningEffort
                 )
                 if let onResponseChunk {
                     _ = await onResponseChunk(latest)
@@ -422,7 +441,8 @@ public actor RuntimeSystem {
         return try? await modelProvider.complete(
             model: defaultModel,
             prompt: prompt,
-            maxTokens: maxTokens
+            maxTokens: maxTokens,
+            reasoningEffort: nil
         )
     }
 

@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   createAgentSession,
   deleteAgentSession,
+  fetchAgentConfig,
   fetchAgentTasks,
   fetchProjects,
   fetchAgentSession,
@@ -16,6 +17,7 @@ const INLINE_ATTACHMENT_MAX_BYTES = 2 * 1024 * 1024;
 const TASK_TAG_PATTERN = /#([A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?)/g;
 const TASK_TAG_REMOVE_PATTERN = /(^|\s)#([A-Za-z0-9][A-Za-z0-9._-]*)(\s?)$/;
 const TASK_TAG_QUERY_VALUE_PATTERN = /^[A-Za-z0-9._-]*$/;
+const DEFAULT_REASONING_EFFORT = "medium";
 
 function normalizeTaskReference(value) {
   return String(value || "").trim();
@@ -365,7 +367,7 @@ function buildTechnicalRecord(eventItem, index) {
 
   if (eventItem?.type === "run_status" && eventItem.runStatus) {
     const stage = String(eventItem.runStatus.stage || "").toLowerCase();
-    if (stage === "responding") {
+    if (stage === "responding" || stage === "done") {
       return null;
     }
 
@@ -772,12 +774,16 @@ function AgentChatEvents({
             if (timelineItem.kind === "technical" && timelineItem.record) {
               const record = timelineItem.record;
               const isExpanded = Boolean(expandedRecordIds[record.id]);
+              const isLatestActive =
+                latestRunStatus &&
+                record.isActive &&
+                record.id.includes(latestRunStatus.id || "");
 
               return (
                 <div key={timelineItem.id || `tech-${index}`} className="agent-chat-tech-entry">
                   <button
                     type="button"
-                    className={`agent-chat-tech-trigger ${isExpanded ? "expanded" : ""} ${record.isActive ? "shimmer" : ""}`}
+                    className={`agent-chat-tech-trigger ${isExpanded ? "expanded" : ""} ${isLatestActive ? "shimmer" : ""}`}
                     onClick={() => onToggleRecord(record.id)}
                     aria-expanded={isExpanded}
                   >
@@ -923,6 +929,9 @@ function AgentChatComposer({
   textareaRef,
   replyTarget,
   onCancelReply,
+  supportsReasoningEffort,
+  reasoningEffort,
+  onReasoningEffortChange,
   availableTasks = [],
   onTaskTagClick,
   onTaskTagHoverStart,
@@ -1245,12 +1254,21 @@ function AgentChatComposer({
             />
 
             <div className="agent-chat-compose-right">
-              <button type="button" className="agent-chat-mode-button" disabled={isSending}>
-                Auto
-                <span className="material-symbols-rounded" aria-hidden="true">
-                  expand_more
-                </span>
-              </button>
+              {supportsReasoningEffort ? (
+                <label className="agent-chat-reasoning-select">
+                  <span>Reasoning</span>
+                  <select
+                    value={reasoningEffort}
+                    onChange={(event) => onReasoningEffortChange(event.target.value)}
+                    disabled={isSending}
+                    aria-label="Reasoning effort"
+                  >
+                    <option value="low">Low</option>
+                    <option value="medium">Medium</option>
+                    <option value="high">High</option>
+                  </select>
+                </label>
+              ) : null}
 
               <button
                 type="button"
@@ -1293,6 +1311,8 @@ export function AgentChatTab({ agentId }) {
   const [sessions, setSessions] = useState([]);
   const [activeSessionId, setActiveSessionId] = useState(null);
   const [activeSession, setActiveSession] = useState(null);
+  const [selectedModel, setSelectedModel] = useState("");
+  const [availableModels, setAvailableModels] = useState([]);
   const [isLoadingSessions, setIsLoadingSessions] = useState(true);
   const [isLoadingSession, setIsLoadingSession] = useState(false);
   const [isSending, setIsSending] = useState(false);
@@ -1303,6 +1323,7 @@ export function AgentChatTab({ agentId }) {
   const [optimisticUserEvent, setOptimisticUserEvent] = useState(null);
   const [optimisticAssistantText, setOptimisticAssistantText] = useState("");
   const [replyTarget, setReplyTarget] = useState(null);
+  const [reasoningEffort, setReasoningEffort] = useState(DEFAULT_REASONING_EFFORT);
   const [expandedRecordIds, setExpandedRecordIds] = useState({});
   const [knownTaskRecords, setKnownTaskRecords] = useState([]);
   const [taskPreview, setTaskPreview] = useState(null);
@@ -1312,6 +1333,14 @@ export function AgentChatTab({ agentId }) {
   const streamCleanupRef = useRef(() => {});
   const taskRecordCacheRef = useRef(new Map());
   const taskRecordInflightRef = useRef(new Map());
+  const activeModelOption = useMemo(
+    () => availableModels.find((model) => String(model?.id || "").trim() === selectedModel) || null,
+    [availableModels, selectedModel]
+  );
+  const supportsReasoningEffort = useMemo(() => {
+    const capabilities = Array.isArray(activeModelOption?.capabilities) ? activeModelOption.capabilities : [];
+    return capabilities.some((capability) => String(capability || "").toLowerCase() === "reasoning");
+  }, [activeModelOption]);
 
   useEffect(() => {
     document.body.classList.add("agent-chat-no-page-scroll");
@@ -1460,6 +1489,10 @@ export function AgentChatTab({ agentId }) {
   }, [agentId]);
 
   useEffect(() => {
+    setReasoningEffort(DEFAULT_REASONING_EFFORT);
+  }, [agentId, selectedModel]);
+
+  useEffect(() => {
     let isCancelled = false;
 
     async function bootstrap() {
@@ -1472,6 +1505,9 @@ export function AgentChatTab({ agentId }) {
       setOptimisticAssistantText("");
       setReplyTarget(null);
       setExpandedRecordIds({});
+      setSelectedModel("");
+      setAvailableModels([]);
+      setReasoningEffort(DEFAULT_REASONING_EFFORT);
       setIsSending(false);
       streamCleanupRef.current?.();
       streamCleanupRef.current = () => {};
@@ -1479,16 +1515,21 @@ export function AgentChatTab({ agentId }) {
       runStateRef.current.sessionId = null;
       runStateRef.current.abortController = null;
 
-      const response = await fetchAgentSessions(agentId);
+      const [sessionsResponse, configResponse] = await Promise.all([fetchAgentSessions(agentId), fetchAgentConfig(agentId)]);
       if (isCancelled) {
         return;
       }
 
-      const nextSessions = Array.isArray(response) ? sortSessionsByUpdate(response) : [];
+      if (configResponse && typeof configResponse === "object") {
+        setSelectedModel(String(configResponse.selectedModel || "").trim());
+        setAvailableModels(Array.isArray(configResponse.availableModels) ? configResponse.availableModels : []);
+      }
+
+      const nextSessions = Array.isArray(sessionsResponse) ? sortSessionsByUpdate(sessionsResponse) : [];
       setSessions(nextSessions);
       setIsLoadingSessions(false);
 
-      if (!Array.isArray(response)) {
+      if (!Array.isArray(sessionsResponse)) {
         setStatusText("Failed to load sessions.");
         return;
       }
@@ -1818,7 +1859,8 @@ export function AgentChatTab({ agentId }) {
           userId: "dashboard",
           content: contentForSend,
           attachments: uploads,
-          spawnSubSession: false
+          spawnSubSession: false,
+          reasoningEffort: supportsReasoningEffort ? reasoningEffort : undefined
         },
         { signal: runStateRef.current.abortController.signal }
       );
@@ -1956,7 +1998,7 @@ export function AgentChatTab({ agentId }) {
     normalizedStreamedAssistantText === String(latestPersistedAssistantText || "").trim();
   const shouldRenderStreamMessage =
     (isSending || latestRunStatus?.stage === "responding") &&
-    (normalizedStreamedAssistantText.length > 0 || isSending) &&
+    normalizedStreamedAssistantText.length > 0 &&
     !hasDuplicatedPersistedAssistant;
   const timelineItems = [];
   for (let index = 0; index < events.length; index += 1) {
@@ -2114,6 +2156,9 @@ export function AgentChatTab({ agentId }) {
               textareaRef={composeInputRef}
               replyTarget={replyTarget}
               onCancelReply={() => setReplyTarget(null)}
+              supportsReasoningEffort={supportsReasoningEffort}
+              reasoningEffort={reasoningEffort}
+              onReasoningEffortChange={setReasoningEffort}
               availableTasks={knownTaskRecords}
               onTaskTagClick={openTaskReference}
               onTaskTagHoverStart={handleTaskTagHoverStart}
