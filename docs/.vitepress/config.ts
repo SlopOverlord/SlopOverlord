@@ -12,6 +12,7 @@ export default defineConfig({
   themeConfig: {
     logo: "/so_logo.svg",
     nav: [
+      { text: "Guides", link: "/guides/build-from-terminal" },
       { text: "Specs", link: "/specs/protocol-v1" },
       { text: "ADR", link: "/adr/0001-runtime-architecture" },
       { text: "Dashboard", link: "/dashboard-style" }
@@ -22,6 +23,14 @@ export default defineConfig({
         items: [
           { text: "Home", link: "/" },
           { text: "Dashboard Style", link: "/dashboard-style" }
+        ]
+      },
+      {
+        text: "Guides",
+        items: [
+          { text: "Build From Terminal", link: "/guides/build-from-terminal" },
+          { text: "Build With Docker", link: "/guides/build-with-docker" },
+          { text: "Development Workflow", link: "/guides/development-workflow" }
         ]
       },
       {

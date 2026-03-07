@@ -17,6 +17,8 @@ hero:
       link: /adr/0001-runtime-architecture
 
 features:
+  - title: Build Guides
+    details: Step-by-step docs explain how to run Sloppy from the terminal, how to use Docker Compose, and what checks to run before opening a PR.
   - title: Runtime Specs
     details: Protocol, runtime model, plugin contracts, PRD, and gap analysis stay published directly from the repository Markdown files.
   - title: Dashboard Palette
