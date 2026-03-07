@@ -2085,86 +2085,109 @@ export function AgentChatTab({ agentId }) {
         addFiles(event.dataTransfer?.files);
       }}
     >
-      <div className="agent-chat-main-head">
-        <div className="agent-chat-session-controls">
-          <select
-            className="agent-chat-session-select"
-            value={activeSessionId || ""}
-            onChange={(event) => openSession(event.target.value)}
-            disabled={isLoadingSessions || isSending || sessions.length === 0}
+      <div className="agent-chat-sidebar">
+        <div className="agent-chat-sidebar-header">
+          <h3>Sessions</h3>
+          <button
+            type="button"
+            className="agent-chat-icon-button"
+            onClick={() => createSession()}
+            disabled={isSending}
+            title="New session"
           >
-            {sessions.length === 0 ? (
-              <option value="">{isLoadingSessions ? "Loading sessions..." : "No sessions"}</option>
-            ) : null}
-            {sessions.map((session) => (
-              <option key={session.id} value={session.id}>
-                {getSessionDisplayLabel(session)}
-              </option>
-            ))}
-          </select>
-          <button type="button" className="agent-chat-icon-button" onClick={() => createSession()} disabled={isSending} title="New session">
             <span className="material-symbols-rounded" aria-hidden="true">
               add
             </span>
           </button>
         </div>
-        <div className="agent-chat-actions">
-          <button
-            type="button"
-            className="agent-chat-icon-button danger"
-            onClick={handleDeleteActiveSession}
-            disabled={!activeSessionId || isSending}
-            title="Delete session"
-          >
-            <span className="material-symbols-rounded" aria-hidden="true">
-              delete
-            </span>
-          </button>
+        <div className="agent-chat-session-list">
+          {sessions.length === 0 ? (
+            <p className="placeholder-text" style={{ padding: "0 12px" }}>
+              {isLoadingSessions ? "Loading sessions..." : "No sessions"}
+            </p>
+          ) : null}
+          {sessions.map((session) => (
+            <button
+              key={session.id}
+              type="button"
+              className={`agent-chat-session-item ${session.id === activeSessionId ? "active" : ""}`}
+              onClick={() => openSession(session.id)}
+              disabled={isLoadingSessions || isSending}
+            >
+              <div className="agent-chat-session-title">
+                {getSessionDisplayLabel(session)}
+              </div>
+              <div className="agent-chat-session-meta">
+                {session.updatedAt ? new Date(session.updatedAt).toLocaleDateString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }) : "No date"}
+              </div>
+            </button>
+          ))}
         </div>
       </div>
 
-      <div className="agent-chat-workspace">
-        <div className="agent-chat-thread">
-          <AgentChatEvents
-            isLoadingSession={isLoadingSession}
-            isSending={isSending}
-            timelineItems={timelineItems}
-            latestRunStatus={latestRunStatus}
-            expandedRecordIds={expandedRecordIds}
-            onToggleRecord={toggleExpandedRecord}
-            onReplyToMessage={handleReplyToMessage}
-            onCopyMessage={handleCopyMessage}
-            onOpenSession={openSession}
-            onTaskTagClick={openTaskReference}
-            onTaskTagHoverStart={handleTaskTagHoverStart}
-            onTaskTagHoverEnd={handleTaskTagHoverEnd}
-          />
+      <div className="agent-chat-main-area">
+        <div className="agent-chat-main-head">
+          <div className="agent-chat-head-title">
+            {activeSession ? getSessionDisplayLabel(activeSession) : "Select a session"}
+          </div>
+          <div className="agent-chat-actions">
+            <button
+              type="button"
+              className="agent-chat-icon-button danger"
+              onClick={handleDeleteActiveSession}
+              disabled={!activeSessionId || isSending}
+              title="Delete session"
+            >
+              <span className="material-symbols-rounded" aria-hidden="true">
+                delete
+              </span>
+            </button>
+          </div>
+        </div>
 
-          <div className="agent-chat-compose-sticky-wrap">
-            <AgentChatComposer
-              agentId={agentId}
-              inputText={inputText}
-              onInputTextChange={setInputText}
+        <div className="agent-chat-workspace">
+          <div className="agent-chat-thread">
+            <AgentChatEvents
+              isLoadingSession={isLoadingSession}
               isSending={isSending}
-              onSend={handleSend}
-              onStop={handleStop}
-              pendingFiles={pendingFiles}
-              onRemovePendingFile={removePendingFile}
-              onAddFiles={addFiles}
-              fileInputRef={fileInputRef}
-              textareaRef={composeInputRef}
-              replyTarget={replyTarget}
-              onCancelReply={() => setReplyTarget(null)}
-              supportsReasoningEffort={supportsReasoningEffort}
-              reasoningEffort={reasoningEffort}
-              onReasoningEffortChange={setReasoningEffort}
-              availableTasks={knownTaskRecords}
+              timelineItems={timelineItems}
+              latestRunStatus={latestRunStatus}
+              expandedRecordIds={expandedRecordIds}
+              onToggleRecord={toggleExpandedRecord}
+              onReplyToMessage={handleReplyToMessage}
+              onCopyMessage={handleCopyMessage}
+              onOpenSession={openSession}
               onTaskTagClick={openTaskReference}
               onTaskTagHoverStart={handleTaskTagHoverStart}
               onTaskTagHoverEnd={handleTaskTagHoverEnd}
             />
 
-            <p className="agent-chat-status-line placeholder-text">{statusText}</p>
+            <div className="agent-chat-compose-sticky-wrap">
+              <AgentChatComposer
+                agentId={agentId}
+                inputText={inputText}
+                onInputTextChange={setInputText}
+                isSending={isSending}
+                onSend={handleSend}
+                onStop={handleStop}
+                pendingFiles={pendingFiles}
+                onRemovePendingFile={removePendingFile}
+                onAddFiles={addFiles}
+                fileInputRef={fileInputRef}
+                textareaRef={composeInputRef}
+                replyTarget={replyTarget}
+                onCancelReply={() => setReplyTarget(null)}
+                supportsReasoningEffort={supportsReasoningEffort}
+                reasoningEffort={reasoningEffort}
+                onReasoningEffortChange={setReasoningEffort}
+                availableTasks={knownTaskRecords}
+                onTaskTagClick={openTaskReference}
+                onTaskTagHoverStart={handleTaskTagHoverStart}
+                onTaskTagHoverEnd={handleTaskTagHoverEnd}
+              />
+
+              <p className="agent-chat-status-line placeholder-text">{statusText}</p>
+            </div>
           </div>
         </div>
       </div>
