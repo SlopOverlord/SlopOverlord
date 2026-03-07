@@ -216,10 +216,10 @@ export function LogsView({ coreApi }: LogsViewProps) {
             <p className="placeholder-text">System file logs (JSONL).</p>
           </div>
           <div className="logs-actions">
-            <button type="button" onClick={() => loadLogs()} disabled={isLoading}>
+            <button type="button" className="hover-levitate" onClick={() => loadLogs()} disabled={isLoading}>
               Refresh
             </button>
-            <button type="button" onClick={exportVisible} disabled={visibleEntries.length === 0}>
+            <button type="button" className="hover-levitate" onClick={exportVisible} disabled={visibleEntries.length === 0}>
               Export visible
             </button>
           </div>

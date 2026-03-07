@@ -657,7 +657,7 @@ function ProjectCreateModal({ isOpen, draft, onChange, onClose, onCreate, actors
             <button type="button" onClick={onClose}>
               Cancel
             </button>
-            <button type="submit" className="project-primary" disabled={!draft.displayName.trim()}>
+            <button type="submit" className="project-primary hover-levitate" disabled={!draft.displayName.trim()}>
               Create Project
             </button>
           </div>
@@ -757,7 +757,7 @@ function ProjectTaskCreateModal({ isOpen, draft, onChange, onClose, onCreate, ac
             <button type="button" onClick={onClose}>
               Cancel
             </button>
-            <button type="submit" className="project-primary" disabled={!draft.title.trim()}>
+            <button type="submit" className="project-primary hover-levitate" disabled={!draft.title.trim()}>
               Create
             </button>
           </div>
@@ -897,7 +897,7 @@ function AddChannelModal({ isOpen, projectChannels, availableChannels, draft, on
             <button type="button" onClick={onClose}>
               Cancel
             </button>
-            <button type="submit" className="project-primary" disabled={!draft.channelId.trim()}>
+            <button type="submit" className="project-primary hover-levitate" disabled={!draft.channelId.trim()}>
               Add Channel
             </button>
           </div>
@@ -923,7 +923,7 @@ export function ProjectsView({
   routeProjectId = null,
   routeProjectTab = "overview",
   routeProjectTaskReference = null,
-  onRouteProjectChange = () => {}
+  onRouteProjectChange = () => { }
 }) {
   const [projects, setProjects] = useState([]);
   const [isLoadingProjects, setIsLoadingProjects] = useState(true);
@@ -988,15 +988,15 @@ export function ProjectsView({
       }
       const nodes = Array.isArray(raw.nodes)
         ? raw.nodes.map((n) => ({
-            id: String(n?.id ?? ""),
-            displayName: String(n?.displayName ?? n?.id ?? "")
-          }))
+          id: String(n?.id ?? ""),
+          displayName: String(n?.displayName ?? n?.id ?? "")
+        }))
         : [];
       const teamList = Array.isArray(raw.teams)
         ? raw.teams.map((t) => ({
-            id: String(t?.id ?? ""),
-            name: String(t?.name ?? t?.id ?? "")
-          }))
+          id: String(t?.id ?? ""),
+          name: String(t?.name ?? t?.id ?? "")
+        }))
         : [];
       setCreateModalActors(nodes);
       setCreateModalTeams(teamList);
@@ -1914,7 +1914,7 @@ export function ProjectsView({
                 {taskCounts.in_progress} in progress
               </span>
             </div>
-            <button type="button" className="project-primary" onClick={() => openCreateTaskModal("backlog")}>
+            <button type="button" className="project-primary hover-levitate" onClick={() => openCreateTaskModal("backlog")}>
               Create Task
             </button>
           </div>
@@ -1997,9 +1997,8 @@ export function ProjectsView({
                               <p className="project-task-assignee-badge">Swarm: {task.swarmId}</p>
                             ) : null}
                             <article
-                              className={`project-kanban-task project-kanban-task--clickable ${
-                                selectedTaskId && selectedTaskId === String(task.id || "").trim() ? "project-kanban-task--selected" : ""
-                              }`}
+                              className={`project-kanban-task project-kanban-task--clickable hover-levitate ${selectedTaskId && selectedTaskId === String(task.id || "").trim() ? "project-kanban-task--selected" : ""
+                                }`}
                               role="button"
                               tabIndex={0}
                               draggable
@@ -2272,7 +2271,7 @@ export function ProjectsView({
             </label>
 
             <div className="project-settings-actions">
-              <button type="submit" className="project-primary">
+              <button type="submit" className="project-primary hover-levitate">
                 Save Name
               </button>
               <button type="button" className="danger" onClick={() => deleteProject(project.id)}>
@@ -2376,7 +2375,7 @@ export function ProjectsView({
       {projects.length > 0 && (
         <header className="agents-index-head">
           <h2>Projects</h2>
-          <button type="button" className="agents-create-inline" onClick={openCreateProjectModal}>
+          <button type="button" className="agents-create-inline hover-levitate" onClick={openCreateProjectModal}>
             New Project
           </button>
         </header>

@@ -56,7 +56,7 @@ function SkillCard({
   onUninstall: () => void;
 }) {
   return (
-    <div className="skill-card">
+    <div className="skill-card hover-levitate">
       <div className="skill-card-header">
         <h4 className="skill-name">{skill.name}</h4>
         <span className="skill-owner">{skill.owner}/{skill.repo}</span>
@@ -104,7 +104,7 @@ function InstalledSkillCard({
   onUninstall: () => void;
 }) {
   return (
-    <div className="skill-card">
+    <div className="skill-card hover-levitate">
       <div className="skill-card-header">
         <h4 className="skill-name">{skill.name}</h4>
         <span className="skill-owner">{skill.owner}/{skill.repo}</span>

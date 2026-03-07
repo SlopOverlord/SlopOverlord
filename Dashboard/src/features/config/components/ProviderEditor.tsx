@@ -79,7 +79,7 @@ export function ProviderEditor({
             <button
               key={provider.id}
               type="button"
-              className={`provider-card provider-list-item ${configured ? "configured" : ""}`}
+              className={`provider-card provider-list-item hover-levitate ${configured ? "configured" : ""}`}
               onClick={() => onOpenProviderModal(provider.id)}
             >
               <span className="provider-list-icon material-symbols-rounded" aria-hidden="true">
@@ -181,47 +181,47 @@ export function ProviderEditor({
       ) : null}
       {providerModalMeta && providerForm && providerModelMenuOpen && filteredProviderModels.length > 0 && providerModelMenuRect
         ? createPortal(
-            <div
-              ref={providerModelMenuRef}
-              className="provider-model-picker-menu provider-model-picker-menu-floating"
-              style={{
-                top: `${providerModelMenuRect.top}px`,
-                left: `${providerModelMenuRect.left}px`,
-                width: `${providerModelMenuRect.width}px`
-              }}
-            >
-              <div className="provider-model-picker-group">{providerModalMeta.title}</div>
-              <div className="provider-model-options" style={{ maxHeight: `${providerModelMenuRect.maxHeight}px` }}>
-                {filteredProviderModels.map((model) => (
-                  <button
-                    key={model.id}
-                    type="button"
-                    className={`provider-model-option ${providerForm.model === model.id ? "active" : ""}`}
-                    onMouseDown={(event) => event.preventDefault()}
-                    onClick={() => {
-                      onUpdateProviderForm("model", model.id);
-                      onSetProviderModelMenuOpen(false);
-                      onSetProviderModelMenuRect(null);
-                    }}
-                  >
-                    <div className="provider-model-option-main">
-                      <strong>{model.title || model.id}</strong>
-                      {model.contextWindow ? <span className="provider-model-context">{model.contextWindow}</span> : null}
+          <div
+            ref={providerModelMenuRef}
+            className="provider-model-picker-menu provider-model-picker-menu-floating"
+            style={{
+              top: `${providerModelMenuRect.top}px`,
+              left: `${providerModelMenuRect.left}px`,
+              width: `${providerModelMenuRect.width}px`
+            }}
+          >
+            <div className="provider-model-picker-group">{providerModalMeta.title}</div>
+            <div className="provider-model-options" style={{ maxHeight: `${providerModelMenuRect.maxHeight}px` }}>
+              {filteredProviderModels.map((model) => (
+                <button
+                  key={model.id}
+                  type="button"
+                  className={`provider-model-option ${providerForm.model === model.id ? "active" : ""}`}
+                  onMouseDown={(event) => event.preventDefault()}
+                  onClick={() => {
+                    onUpdateProviderForm("model", model.id);
+                    onSetProviderModelMenuOpen(false);
+                    onSetProviderModelMenuRect(null);
+                  }}
+                >
+                  <div className="provider-model-option-main">
+                    <strong>{model.title || model.id}</strong>
+                    {model.contextWindow ? <span className="provider-model-context">{model.contextWindow}</span> : null}
+                  </div>
+                  <span>{model.id}</span>
+                  {Array.isArray(model.capabilities) && model.capabilities.length > 0 ? (
+                    <div className="provider-model-capabilities">
+                      {model.capabilities.map((capability) => (
+                        <span key={`${model.id}-${capability}`}>{capability}</span>
+                      ))}
                     </div>
-                    <span>{model.id}</span>
-                    {Array.isArray(model.capabilities) && model.capabilities.length > 0 ? (
-                      <div className="provider-model-capabilities">
-                        {model.capabilities.map((capability) => (
-                          <span key={`${model.id}-${capability}`}>{capability}</span>
-                        ))}
-                      </div>
-                    ) : null}
-                  </button>
-                ))}
-              </div>
-            </div>,
-            document.body
-          )
+                  ) : null}
+                </button>
+              ))}
+            </div>
+          </div>,
+          document.body
+        )
         : null}
     </div>
   );

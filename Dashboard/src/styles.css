@@ -337,8 +337,7 @@ body.mobile-menu-open {
   border: 1px solid var(--line);
   border-radius: 0;
   padding: 10px;
-  background: rgba(9, 12, 18, 0.98);
-  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.4);
+  background: var(--surface-2);
   display: grid;
   gap: 10px;
 }
@@ -385,7 +384,7 @@ body.mobile-menu-open {
 .actor-link-menu-actions button.active {
   color: var(--text);
   border-color: var(--accent);
-  background: rgba(162, 119, 255, 0.18);
+  background: var(--surface);
 }
 
 .actor-link-menu-footer {
@@ -400,16 +399,15 @@ body.mobile-menu-open {
   color: #fecaca;
 }
 
-/* Node selection popup — same shell as link menu */
+/* Node selection popup same shell as link menu */
 .actor-node-menu {
   position: absolute;
   z-index: 8;
   width: 240px;
   border: 1px solid var(--line);
-  border-radius: 0;
+  border-radius: 0px;
   padding: 10px;
-  background: rgba(9, 12, 18, 0.98);
-  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.4);
+  background: var(--surface-2);
   display: grid;
   gap: 10px;
 }
@@ -536,7 +534,6 @@ body.mobile-menu-open {
   border-radius: 0;
   padding: 18px;
   background: var(--surface-2);
-  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.55);
   display: grid;
   gap: 14px;
 }
@@ -1210,12 +1207,6 @@ body.mobile-menu-open {
   color: var(--text);
 }
 
-.project-primary:hover {
-  border-color: var(--line-strong);
-  background-color: var(--accent-opacity-bg);
-  color: #000;
-}
-
 .project-board-list {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -1255,14 +1246,15 @@ body.mobile-menu-open {
 
 .project-board-card--clickable {
   cursor: pointer;
-  transition: border-color 120ms ease, background-color 120ms ease, transform 120ms ease;
+  transition: border-color 120ms ease, background-color 120ms ease, transform 120ms ease, box-shadow 120ms ease;
 }
 
 .project-board-card--clickable:hover,
 .project-board-card--clickable:focus-visible {
   border-color: var(--line-strong);
   background: var(--surface-2);
-  transform: translateY(-1px);
+  transform: translate(-4px, -4px);
+  box-shadow: 4px 4px 0px var(--accent);
 }
 
 .project-board-card-head {
@@ -2129,11 +2121,10 @@ body.mobile-menu-open {
   width: min(860px, 96vw);
   border: 1px solid var(--line);
   border-radius: 0;
-  background: #090d14;
+  background: var(--surface-2);
   padding: 18px;
   display: grid;
   gap: 14px;
-  box-shadow: 0 24px 58px rgba(0, 0, 0, 0.5);
 }
 
 .project-modal-head {
@@ -2240,6 +2231,10 @@ body.mobile-menu-open {
   font-size: 0.86rem;
 }
 
+.agents-create-inline:hover {
+  border-color: var(--line-strong);
+}
+
 .agents-empty-stage {
   min-height: 420px;
   display: flex;
@@ -2318,6 +2313,8 @@ body.mobile-menu-open {
 .agent-list-item-card:focus-visible {
   border-color: var(--accent);
   outline: none;
+  transform: translate(-4px, -4px);
+  box-shadow: 4px 4px 0px var(--accent);
 }
 
 .agent-list-icon {
@@ -2846,7 +2843,7 @@ body.agent-chat-no-page-scroll .page {
 }
 
 .agent-chat-technical-body {
-  background: var(--surface-2);
+  background: var(--surface-3);
   border-radius: 0;
   padding: 10px 12px;
   display: grid;
@@ -2967,7 +2964,7 @@ body.agent-chat-no-page-scroll .page {
 .agent-chat-message-body p {
   margin: 0;
   white-space: pre-wrap;
-  font-size: 1.06rem;
+  font-size: 0.85rem;
   line-height: 1.45;
 }
 
@@ -3893,6 +3890,14 @@ body.agent-chat-no-page-scroll .page {
   gap: 8px;
 }
 
+.logs-actions button {
+  transition: color 120ms ease;
+}
+
+.logs-actions button:hover:not(:disabled) {
+  border-color: var(--line-strong);
+}
+
 .logs-toolbar {
   display: flex;
   flex-wrap: wrap;
@@ -4309,6 +4314,7 @@ body.agent-chat-no-page-scroll .page {
 
 .settings-main-actions button {
   min-width: 82px;
+  transition: border-color 120ms ease, background-color 120ms ease, color 120ms ease, opacity 120ms ease;
 }
 
 .settings-main-actions button:nth-child(2),
@@ -5000,6 +5006,23 @@ body.agent-chat-no-page-scroll .page {
   grid-template-columns: 52px minmax(0, 1fr) auto;
   align-items: center;
   gap: 16px;
+  position: relative;
+  height: auto;
+  min-height: 52px;
+  border-radius: 0;
+  border: 1px solid var(--line);
+  background: var(--surface-2);
+  display: grid;
+  align-items: center;
+  justify-content: start;
+  cursor: pointer;
+  padding: 16px;
+  text-align: left;
+}
+
+.provider-list-item:hover {
+  border-color: var(--line-strong);
+  background: var(--surface-3);
 }
 
 .provider-list-icon {
@@ -5314,8 +5337,6 @@ pre {
   margin-top: 8px;
   padding: 10px;
   border-radius: 0;
-  border: 1px solid var(--line);
-  background: #0a0d13;
   max-height: 200px;
   overflow: auto;
   white-space: pre-wrap;
@@ -5815,11 +5836,11 @@ pre {
   display: flex;
   flex-direction: column;
   gap: 10px;
-  transition: border-color 0.2s, transform 0.1s;
 }
 
 .skill-card:hover {
   border-color: var(--line-strong);
+  background: var(--surface-2);
 }
 
 .skill-card-header {
@@ -6321,12 +6342,15 @@ pre {
   color: var(--text);
 }
 
-/* Mobile Responsiveness for dashboard */
-@media (max-width: 1200px) {
-  .dashboard-charts-grid {
-    grid-template-columns: repeat(2, 1fr);
-  }
+.hover-levitate {
+  transition: transform 120ms ease, box-shadow 120ms ease, border-color 120ms ease, background-color 120ms ease !important;
 }
+
+.hover-levitate:hover:not(:disabled) {
+  transform: translate(-4px, -4px) !important;
+  box-shadow: 4px 4px 0px var(--accent) !important;
+}
+
 
 @media (max-width: 768px) {
   .dashboard-charts-grid {

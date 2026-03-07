@@ -430,7 +430,7 @@ function AgentsIndexSection({
             <button
               key={agent.id}
               type="button"
-              className="agent-list-item-card"
+              className="agent-list-item-card hover-levitate"
               onClick={() => onSelectAgent(agent.id)}
             >
               <span className="agent-list-icon material-symbols-rounded" aria-hidden="true">
@@ -661,7 +661,7 @@ export function AgentsView({ routeAgentId = null, routeTab = "overview", onRoute
         <header className="agents-index-head">
           <h2>Agents</h2>
           {agents.length > 0 && !isLoadingAgents ? (
-            <button type="button" className="agents-create-inline" onClick={openCreateModal}>
+            <button type="button" className="agents-create-inline hover-levitate" onClick={openCreateModal}>
               Create Agent
             </button>
           ) : null}
