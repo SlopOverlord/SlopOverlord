@@ -73,17 +73,14 @@ export function App() {
 
   const runtimeContent = (
     <RuntimeOverviewView
-      title={route.section === "chats" ? "Chats" : "Overview"}
-      text={runtime.text}
-      onTextChange={runtime.setText}
-      onSend={runtime.sendMessage}
-      messages={runtime.messages}
-      tasks={runtime.tasks}
-      artifactId={runtime.artifactId}
-      onArtifactIdChange={runtime.setArtifactId}
-      onLoadArtifact={runtime.loadArtifact}
-      artifactContent={runtime.artifactContent}
+      workers={runtime.workers}
       events={runtime.events}
+      onNavigateToProject={(projectId: string) => {
+        setSection("projects");
+        if (projectId) {
+          onProjectRouteChange(projectId, DEFAULT_PROJECT_TAB, null);
+        }
+      }}
     />
   );
 
