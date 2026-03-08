@@ -4,6 +4,10 @@ import Testing
 @testable import Core
 @testable import Protocols
 
+#if canImport(SQLite3)
+import SQLite3
+#endif
+
 @Test
 func postChannelMessageEndpoint() async throws {
     let service = CoreService(config: .default)
@@ -96,6 +100,19 @@ func projectCrudEndpoints() async throws {
     let updated = try decoder.decode(ProjectRecord.self, from: updateResponse.body)
     #expect(updated.name == "Platform Board v2")
 
+    let updateMembersBody = try JSONEncoder().encode(
+        ProjectUpdateRequest(actors: ["actor:builder", "actor:qa"], teams: ["team:platform"])
+    )
+    let updateMembersResponse = await router.handle(
+        method: "PATCH",
+        path: "/v1/projects/\(created.id)",
+        body: updateMembersBody
+    )
+    #expect(updateMembersResponse.status == 200)
+    let updatedMembers = try decoder.decode(ProjectRecord.self, from: updateMembersResponse.body)
+    #expect(updatedMembers.actors == ["actor:builder", "actor:qa"])
+    #expect(updatedMembers.teams == ["team:platform"])
+
     let createTaskBody = try JSONEncoder().encode(
         ProjectTaskCreateRequest(
             title: "Wire API",
@@ -183,6 +200,79 @@ func projectCrudEndpoints() async throws {
     let fetchDeletedResponse = await router.handle(method: "GET", path: "/v1/projects/\(created.id)", body: nil)
     #expect(fetchDeletedResponse.status == 404)
 }
+
+#if canImport(SQLite3)
+@Test
+func projectMembersMigrateFromLegacyDashboardProjectsSchema() async throws {
+    let sqlitePath = FileManager.default.temporaryDirectory
+        .appendingPathComponent("core-project-legacy-\(UUID().uuidString).sqlite")
+        .path
+
+    var db: OpaquePointer?
+    #expect(sqlite3_open(sqlitePath, &db) == SQLITE_OK)
+    defer {
+        if let db {
+            sqlite3_close(db)
+        }
+    }
+
+    let formatter = ISO8601DateFormatter()
+    let now = formatter.string(from: Date())
+    let legacySchema =
+        """
+        CREATE TABLE dashboard_projects (
+            id TEXT PRIMARY KEY,
+            name TEXT NOT NULL,
+            description TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        );
+        """
+    #expect(sqlite3_exec(db, legacySchema, nil, nil, nil) == SQLITE_OK)
+
+    let insertSQL =
+        """
+        INSERT INTO dashboard_projects(id, name, description, created_at, updated_at)
+        VALUES('legacy-project', 'Legacy Project', 'Project from pre-members schema', '\(now)', '\(now)');
+        """
+    #expect(sqlite3_exec(db, insertSQL, nil, nil, nil) == SQLITE_OK)
+
+    sqlite3_close(db)
+    db = nil
+
+    var config = CoreConfig.default
+    config.sqlitePath = sqlitePath
+
+    let service = CoreService(config: config)
+    let router = CoreRouter(service: service)
+
+    let body = try JSONEncoder().encode(
+        ProjectUpdateRequest(actors: ["actor:builder"], teams: ["team:ops"])
+    )
+    let updateResponse = await router.handle(
+        method: "PATCH",
+        path: "/v1/projects/legacy-project",
+        body: body
+    )
+    #expect(updateResponse.status == 200)
+
+    let decoder = JSONDecoder()
+    decoder.dateDecodingStrategy = .iso8601
+
+    let updated = try decoder.decode(ProjectRecord.self, from: updateResponse.body)
+    #expect(updated.actors == ["actor:builder"])
+    #expect(updated.teams == ["team:ops"])
+
+    let restartedService = CoreService(config: config)
+    let restartedRouter = CoreRouter(service: restartedService)
+    let fetchResponse = await restartedRouter.handle(method: "GET", path: "/v1/projects/legacy-project", body: nil)
+    #expect(fetchResponse.status == 200)
+
+    let fetched = try decoder.decode(ProjectRecord.self, from: fetchResponse.body)
+    #expect(fetched.actors == ["actor:builder"])
+    #expect(fetched.teams == ["team:ops"])
+}
+#endif
 
 @Test
 func projectCreateCreatesWorkspaceDirectory() async throws {
@@ -921,6 +1011,207 @@ func agentTasksEndpointReturnsClaimedProjectTasks() async throws {
     let records = try decoder.decode([AgentTaskRecord].self, from: tasksResponse.body)
     #expect(records.contains(where: { $0.task.id == taskID }))
     #expect(records.contains(where: { $0.task.claimedAgentId == "agent-claim" }))
+}
+
+@Test
+func agentMemoriesEndpointsListAndGraphRecords() async throws {
+    let workspaceName = "workspace-agent-memories-\(UUID().uuidString)"
+    let sqlitePath = FileManager.default.temporaryDirectory
+        .appendingPathComponent("core-agent-memories-\(UUID().uuidString).sqlite")
+        .path
+
+    var config = CoreConfig.default
+    config.workspace = .init(name: workspaceName, basePath: FileManager.default.temporaryDirectory.path)
+    config.sqlitePath = sqlitePath
+
+    let service = CoreService(config: config)
+    let router = CoreRouter(service: service)
+    let memoryStore = HybridMemoryStore(config: config)
+
+    let createBody = try JSONEncoder().encode(
+        AgentCreateRequest(
+            id: "agent-memory",
+            displayName: "Agent Memory",
+            role: "Stores memory records"
+        )
+    )
+    let createResponse = await router.handle(method: "POST", path: "/v1/agents", body: createBody)
+    #expect(createResponse.status == 201)
+
+    let persistentRef = await memoryStore.save(
+        entry: MemoryWriteRequest(
+            note: "Retain system architecture decisions.",
+            summary: "Persistent system fact",
+            kind: .fact,
+            memoryClass: .semantic,
+            scope: .agent("agent-memory")
+        )
+    )
+    let temporaryRef = await memoryStore.save(
+        entry: MemoryWriteRequest(
+            note: "Yesterday deploy note for rollback context.",
+            summary: "Short lived deploy context",
+            kind: .event,
+            memoryClass: .episodic,
+            scope: .agent("agent-memory")
+        )
+    )
+    let todoRef = await memoryStore.save(
+        entry: MemoryWriteRequest(
+            note: "[todo] follow up with release checklist",
+            summary: "Todo item",
+            kind: .todo,
+            memoryClass: .procedural,
+            scope: .channel("agent:agent-memory:session:s1")
+        )
+    )
+    let neighborRef = await memoryStore.save(
+        entry: MemoryWriteRequest(
+            note: "Dependency decision context for architecture review.",
+            summary: "Graph neighbor",
+            kind: .decision,
+            memoryClass: .procedural,
+            scope: .agent("agent-memory")
+        )
+    )
+    _ = await memoryStore.save(
+        entry: MemoryWriteRequest(
+            note: "Foreign memory should stay hidden.",
+            summary: "Other agent",
+            kind: .fact,
+            memoryClass: .semantic,
+            scope: .agent("other-agent")
+        )
+    )
+    #expect(
+        await memoryStore.link(
+            MemoryEdgeWriteRequest(
+                fromMemoryId: persistentRef.id,
+                toMemoryId: neighborRef.id,
+                relation: .derivedFrom,
+                provenance: "tests"
+            )
+        ) == true
+    )
+
+    let decoder = JSONDecoder()
+    decoder.dateDecodingStrategy = .iso8601
+
+    let listResponse = await router.handle(
+        method: "GET",
+        path: "/v1/agents/agent-memory/memories?limit=1&offset=1",
+        body: nil
+    )
+    #expect(listResponse.status == 200)
+    let listPage = try decoder.decode(AgentMemoryListResponse.self, from: listResponse.body)
+    #expect(listPage.total == 4)
+    #expect(listPage.limit == 1)
+    #expect(listPage.offset == 1)
+    #expect(listPage.items.count == 1)
+
+    let summarySearchResponse = await router.handle(
+        method: "GET",
+        path: "/v1/agents/agent-memory/memories?search=Persistent&filter=persistent",
+        body: nil
+    )
+    #expect(summarySearchResponse.status == 200)
+    let summarySearch = try decoder.decode(AgentMemoryListResponse.self, from: summarySearchResponse.body)
+    #expect(summarySearch.items.count == 1)
+    #expect(summarySearch.items.first?.id == persistentRef.id)
+    #expect(summarySearch.items.first?.derivedCategory == .persistent)
+
+    let noteSearchResponse = await router.handle(
+        method: "GET",
+        path: "/v1/agents/agent-memory/memories?search=rollback&filter=temporary",
+        body: nil
+    )
+    #expect(noteSearchResponse.status == 200)
+    let noteSearch = try decoder.decode(AgentMemoryListResponse.self, from: noteSearchResponse.body)
+    #expect(noteSearch.items.map(\.id) == [temporaryRef.id])
+
+    let idSearchResponse = await router.handle(
+        method: "GET",
+        path: "/v1/agents/agent-memory/memories?search=\(todoRef.id)&filter=todo",
+        body: nil
+    )
+    #expect(idSearchResponse.status == 200)
+    let idSearch = try decoder.decode(AgentMemoryListResponse.self, from: idSearchResponse.body)
+    #expect(idSearch.items.map(\.id) == [todoRef.id])
+    #expect(idSearch.items.first?.scope.type == .channel)
+
+    let graphResponse = await router.handle(
+        method: "GET",
+        path: "/v1/agents/agent-memory/memories/graph?search=Persistent&filter=persistent",
+        body: nil
+    )
+    #expect(graphResponse.status == 200)
+    let graph = try decoder.decode(AgentMemoryGraphResponse.self, from: graphResponse.body)
+    #expect(graph.seedIds == [persistentRef.id])
+    #expect(graph.nodes.contains(where: { $0.id == persistentRef.id }))
+    #expect(graph.nodes.contains(where: { $0.id == neighborRef.id }))
+    #expect(graph.nodes.allSatisfy { $0.scope.agentId == "agent-memory" || $0.scope.channelId?.hasPrefix("agent:agent-memory:session:") == true })
+    #expect(graph.edges.count == 1)
+    #expect(graph.edges.first?.fromMemoryId == persistentRef.id)
+    #expect(graph.edges.first?.toMemoryId == neighborRef.id)
+    #expect(graph.truncated == false)
+}
+
+@Test
+func agentMemoriesEndpointsValidateAgentAndTruncation() async throws {
+    let workspaceName = "workspace-agent-memories-validate-\(UUID().uuidString)"
+    let sqlitePath = FileManager.default.temporaryDirectory
+        .appendingPathComponent("core-agent-memories-validate-\(UUID().uuidString).sqlite")
+        .path
+
+    var config = CoreConfig.default
+    config.workspace = .init(name: workspaceName, basePath: FileManager.default.temporaryDirectory.path)
+    config.sqlitePath = sqlitePath
+
+    let service = CoreService(config: config)
+    let router = CoreRouter(service: service)
+    let memoryStore = HybridMemoryStore(config: config)
+
+    let invalidResponse = await router.handle(method: "GET", path: "/v1/agents/invalid!/memories", body: nil)
+    #expect(invalidResponse.status == 400)
+
+    let missingResponse = await router.handle(method: "GET", path: "/v1/agents/missing-agent/memories/graph", body: nil)
+    #expect(missingResponse.status == 404)
+
+    let createBody = try JSONEncoder().encode(
+        AgentCreateRequest(
+            id: "agent-memory-truncate",
+            displayName: "Agent Memory Truncate",
+            role: "Tests graph caps"
+        )
+    )
+    let createResponse = await router.handle(method: "POST", path: "/v1/agents", body: createBody)
+    #expect(createResponse.status == 201)
+
+    for index in 0..<51 {
+        _ = await memoryStore.save(
+            entry: MemoryWriteRequest(
+                note: "Persistent memory \(index)",
+                summary: "Seed \(index)",
+                kind: .fact,
+                memoryClass: .semantic,
+                scope: .agent("agent-memory-truncate")
+            )
+        )
+    }
+
+    let decoder = JSONDecoder()
+    decoder.dateDecodingStrategy = .iso8601
+
+    let graphResponse = await router.handle(
+        method: "GET",
+        path: "/v1/agents/agent-memory-truncate/memories/graph?filter=all",
+        body: nil
+    )
+    #expect(graphResponse.status == 200)
+    let graph = try decoder.decode(AgentMemoryGraphResponse.self, from: graphResponse.body)
+    #expect(graph.seedIds.count == 50)
+    #expect(graph.nodes.count == 50)
+    #expect(graph.truncated == true)
 }
 
 @Test

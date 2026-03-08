@@ -35,6 +35,30 @@ func decodeLegacyStringModelsAndPlugins() throws {
 }
 
 @Test
+func missingVisorConfigFallsBackToDefaults() throws {
+    let json =
+        """
+        {
+          "listen": { "host": "0.0.0.0", "port": 25101 },
+          "auth": { "token": "dev-token" },
+          "models": [],
+          "memory": { "backend": "sqlite-local-vectors" },
+          "nodes": ["local"],
+          "gateways": [],
+          "plugins": [],
+          "sqlitePath": "core.sqlite"
+        }
+        """
+
+    let decoded = try JSONDecoder().decode(CoreConfig.self, from: Data(json.utf8))
+
+    #expect(decoded.visor.scheduler.enabled)
+    #expect(decoded.visor.scheduler.intervalSeconds == 300)
+    #expect(decoded.visor.scheduler.jitterSeconds == 60)
+    #expect(decoded.visor.bootstrapBulletin)
+}
+
+@Test
 func resolvedWorkspaceAndSQLiteURLsForRelativePath() {
     var config = CoreConfig.default
     config.workspace = .init(name: "bot-runtime", basePath: ".")

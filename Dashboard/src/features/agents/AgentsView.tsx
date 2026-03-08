@@ -11,6 +11,7 @@ import { AgentConfigTab } from "./components/AgentConfigTab";
 import { AgentToolsTab } from "./components/AgentToolsTab";
 import { AgentSkillsTab } from "./components/AgentSkillsTab";
 import { AgentCronTab } from "./components/AgentCronTab";
+import { AgentMemoriesTab } from "./components/AgentMemoriesTab";
 import { Breadcrumbs } from "../../components/Breadcrumbs/Breadcrumbs";
 
 const AGENT_TABS = [
@@ -601,12 +602,7 @@ export function AgentsView({ routeAgentId = null, routeTab = "overview", onRoute
     }
 
     if (tab === "memories") {
-      return (
-        <AgentPlaceholderTab
-          title="Memories"
-          description="Memory timeline and storage controls for this agent."
-        />
-      );
+      return <AgentMemoriesTab agentId={agent.id} />;
     }
 
     if (tab === "tasks") {

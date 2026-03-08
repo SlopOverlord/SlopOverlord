@@ -33,8 +33,8 @@ export function ProjectSettingsTab({
 
     useEffect(() => {
         if (project) {
-            setSelectedActorIds(parseListInput(project.actors || ""));
-            setSelectedTeamIds(parseListInput(project.teams || ""));
+            setSelectedActorIds(parseListInput(project.actors));
+            setSelectedTeamIds(parseListInput(project.teams));
         }
     }, [project?.id, project?.actors, project?.teams]);
 

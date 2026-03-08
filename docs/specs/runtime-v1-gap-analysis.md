@@ -39,10 +39,9 @@ High-level status:
 - Implemented: threshold logic `80/85/95`, events, summary-apply flow.
 - Gap: no real async job queue/backpressure; summary is applied immediately via simplified path.
 - Evidence: `Sources/AgentRuntime/Compactor.swift`.
-5. `Visor`: `Partial`
-- Implemented: bulletin generation, memory publish, channel digest.
-- Gap: no periodic scheduler loop; generation is on-demand (boot/task events).
-- Evidence: `Sources/AgentRuntime/Visor.swift`, `Sources/Core/CoreService.swift`, `Sources/Core/CoreMain.swift`.
+5. `Visor`: `Done`
+- Implemented: bulletin generation, memory publish, channel digest, periodic scheduler loop, and boot-time bulletin control via config/CLI override.
+- Evidence: `Sources/AgentRuntime/Visor.swift`, `Sources/Core/CoreService.swift`, `Sources/Core/VisorScheduler.swift`, `Sources/Core/CoreMain.swift`.
 
 ### 2. Protocol and types
 1. New protocol types in `Protocols`: `Done`
@@ -95,8 +94,8 @@ All requested endpoints are implemented: `Done`
 - Core flow exists, but execution semantics are simplified.
 6. Compactor thresholds + background jobs: `Partial`
 - Threshold logic exists; production-grade background scheduling is missing.
-7. Visor bulletin pipeline: `Partial`
-- Pipeline exists without periodic scheduler.
+7. Visor bulletin pipeline: `Done`
+- Pipeline includes periodic scheduling plus manual trigger paths.
 8. Dashboard slice (chat/tasks/artifacts/feed): `Partial`
 - Chat/artifacts/bulletins/workers are visible.
 - Gap: activity feed is not full event feed; branch/worker timeline granularity is limited.
@@ -116,8 +115,8 @@ All requested endpoints are implemented: `Done`
 - Covered in tests.
 3. Compactor 80/85/95 behavior: `Done`
 - Covered in tests for threshold transitions.
-4. Periodic visor bulletin + memory + digest: `Partial`
-- Memory+digest exists, periodic scheduling missing.
+4. Periodic visor bulletin + memory + digest: `Done`
+- Memory persistence, digest delivery, and periodic scheduling are covered.
 5. Token regression limit test: `Not started`
 - No dedicated regression tests for payload/token envelope size.
 6. Recovery after restart (channels/tasks/events/artifacts): `Partial`
@@ -137,10 +136,9 @@ All requested endpoints are implemented: `Done`
 ## Priority Gaps
 
 ### P0 (before marking v1 complete)
-1. Implement real periodic scheduler for visor bulletins.
-2. Wire token usage persistence (`persistTokenUsage`) into runtime event flow and add reporting endpoint/test.
-3. Add explicit token/payload regression test with concrete threshold and failure condition.
-4. Implement runtime recovery path for channels/tasks/events/artifacts after Core restart, with acceptance test.
+1. Wire token usage persistence (`persistTokenUsage`) into runtime event flow and add reporting endpoint/test.
+2. Add explicit token/payload regression test with concrete threshold and failure condition.
+3. Implement runtime recovery path for channels/tasks/events/artifacts after Core restart, with acceptance test.
 
 ### P1
 1. Replace simplified worker execution with pluggable execution backends/tools abstraction for runtime workers.
@@ -156,4 +154,3 @@ All requested endpoints are implemented: `Done`
 2. `TokenUsageCollector` integration in `CoreService.startEventPersistence`.
 3. `GET /v1/events` or `GET /v1/channels/{id}/events` for feed-grade timeline.
 4. `RecoveryManager` to rebuild channel snapshots from persisted events.
-

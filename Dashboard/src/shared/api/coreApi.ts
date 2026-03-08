@@ -13,6 +13,13 @@ interface ChannelEventsQuery {
   after?: string;
 }
 
+interface AgentMemoryQuery {
+  search?: string;
+  filter?: string;
+  limit?: number;
+  offset?: number;
+}
+
 interface AgentSessionStreamHandlers {
   onUpdate?: (update: AnyRecord) => void;
   onOpen?: () => void;
@@ -45,6 +52,8 @@ export interface CoreApi {
   fetchAgents: () => Promise<AnyRecord[] | null>;
   fetchAgent: (agentId: string) => Promise<AnyRecord | null>;
   fetchAgentTasks: (agentId: string) => Promise<AnyRecord[] | null>;
+  fetchAgentMemories: (agentId: string, query?: AgentMemoryQuery) => Promise<AnyRecord | null>;
+  fetchAgentMemoryGraph: (agentId: string, query?: Pick<AgentMemoryQuery, "search" | "filter">) => Promise<AnyRecord | null>;
   createAgent: (payload: AnyRecord) => Promise<AnyRecord | null>;
   fetchActorsBoard: () => Promise<AnyRecord | null>;
   updateActorsBoard: (payload: AnyRecord) => Promise<AnyRecord | null>;
@@ -375,6 +384,50 @@ export function createCoreApi(): CoreApi {
         path: `/v1/agents/${encodeURIComponent(agentId)}/tasks`
       });
       if (!response.ok || !Array.isArray(response.data)) {
+        return null;
+      }
+      return response.data;
+    },
+
+    fetchAgentMemories: async (agentId, query = {}) => {
+      const params = new URLSearchParams();
+      if (typeof query.search === "string" && query.search.trim().length > 0) {
+        params.set("search", query.search.trim());
+      }
+      if (typeof query.filter === "string" && query.filter.trim().length > 0) {
+        params.set("filter", query.filter.trim());
+      }
+      if (Number.isFinite(query.limit)) {
+        params.set("limit", String(query.limit));
+      }
+      if (Number.isFinite(query.offset)) {
+        params.set("offset", String(query.offset));
+      }
+
+      const queryString = params.toString();
+      const response = await requestJson<AnyRecord>({
+        path: `/v1/agents/${encodeURIComponent(agentId)}/memories${queryString ? `?${queryString}` : ""}`
+      });
+      if (!response.ok) {
+        return null;
+      }
+      return response.data;
+    },
+
+    fetchAgentMemoryGraph: async (agentId, query = {}) => {
+      const params = new URLSearchParams();
+      if (typeof query.search === "string" && query.search.trim().length > 0) {
+        params.set("search", query.search.trim());
+      }
+      if (typeof query.filter === "string" && query.filter.trim().length > 0) {
+        params.set("filter", query.filter.trim());
+      }
+
+      const queryString = params.toString();
+      const response = await requestJson<AnyRecord>({
+        path: `/v1/agents/${encodeURIComponent(agentId)}/memories/graph${queryString ? `?${queryString}` : ""}`
+      });
+      if (!response.ok) {
         return null;
       }
       return response.data;

@@ -142,6 +142,31 @@ public struct MemoryHit: Codable, Sendable, Equatable {
     }
 }
 
+public struct MemoryEdgeRecord: Codable, Sendable, Equatable {
+    public var fromMemoryId: String
+    public var toMemoryId: String
+    public var relation: MemoryEdgeRelation
+    public var weight: Double
+    public var provenance: String?
+    public var createdAt: Date
+
+    public init(
+        fromMemoryId: String,
+        toMemoryId: String,
+        relation: MemoryEdgeRelation,
+        weight: Double = 1.0,
+        provenance: String? = nil,
+        createdAt: Date = Date()
+    ) {
+        self.fromMemoryId = fromMemoryId
+        self.toMemoryId = toMemoryId
+        self.relation = relation
+        self.weight = weight
+        self.provenance = provenance
+        self.createdAt = createdAt
+    }
+}
+
 public enum MemoryEdgeRelation: String, Codable, Sendable, CaseIterable {
     case supports
     case contradicts

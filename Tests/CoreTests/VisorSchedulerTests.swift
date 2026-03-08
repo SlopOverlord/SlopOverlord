@@ -25,15 +25,50 @@ func visorSchedulerGeneratesBulletinAndDigestGoesToChannel() async throws {
 
 @Test
 func visorSchedulerStartStopLifecycle() async throws {
-    let (router, service) = try makeSchedulerTestRouter()
+    let (_, service) = try makeSchedulerTestRouter()
 
     // Bootstrap should start the scheduler
     await service.bootstrapChannelPlugins()
+    #expect(await service.visorSchedulerRunning())
 
     // Verify scheduler can be started multiple times without error
     await service.bootstrapChannelPlugins()
+    #expect(await service.visorSchedulerRunning())
 
     // Shutdown should stop the scheduler without error
+    await service.shutdownChannelPlugins()
+    #expect(!(await service.visorSchedulerRunning()))
+}
+
+@Test
+func visorSchedulerRespectsDisabledConfig() async throws {
+    var config = CoreConfig.default
+    config.visor.scheduler.enabled = false
+
+    let (_, service) = try makeSchedulerTestRouter(config: config)
+
+    await service.bootstrapChannelPlugins()
+    #expect(!(await service.visorSchedulerRunning()))
+    #expect((await service.getBulletins()).isEmpty)
+
+    await service.shutdownChannelPlugins()
+}
+
+@Test
+func visorSchedulerAutoGeneratesBulletinFromConfiguredInterval() async throws {
+    var config = CoreConfig.default
+    config.visor.scheduler.enabled = true
+    config.visor.scheduler.intervalSeconds = 1
+    config.visor.scheduler.jitterSeconds = 0
+
+    let (_, service) = try makeSchedulerTestRouter(config: config)
+
+    await service.bootstrapChannelPlugins()
+    #expect(await service.visorSchedulerRunning())
+
+    let generated = await waitForBulletins(service: service, minimumCount: 1, timeoutNanoseconds: 2_500_000_000)
+    #expect(generated)
+
     await service.shutdownChannelPlugins()
 }
 
@@ -67,7 +102,7 @@ func visorSchedulerOverlapProtection() async throws {
     let logger = Logger(label: "test.visorscheduler")
 
     let scheduler = VisorScheduler(
-        config: VisorSchedulerConfig(interval: .seconds(1), jitter: .seconds(0), autoStart: false),
+        config: VisorSchedulerConfig(interval: .seconds(1), jitter: .seconds(0)),
         logger: logger
     ) {
         guard await state.enter() else { return }
@@ -102,7 +137,7 @@ func visorSchedulerCancelSafety() async throws {
     let counter = CallCounter()
 
     let scheduler = VisorScheduler(
-        config: VisorSchedulerConfig(interval: .seconds(1), jitter: .seconds(0), autoStart: false),
+        config: VisorSchedulerConfig(interval: .seconds(1), jitter: .seconds(0)),
         logger: logger
     ) {
         await counter.increment()
@@ -128,13 +163,13 @@ func visorSchedulerCancelSafety() async throws {
 
 // MARK: - Helpers
 
-private func makeSchedulerTestRouter() throws -> (CoreRouter, CoreService) {
-    let sqlitePath = FileManager.default.temporaryDirectory
-        .appendingPathComponent("core-scheduler-\(UUID().uuidString).sqlite")
-        .path
-
-    var config = CoreConfig.default
-    config.sqlitePath = sqlitePath
+private func makeSchedulerTestRouter(config: CoreConfig = .default) throws -> (CoreRouter, CoreService) {
+    var config = config
+    if config.sqlitePath == CoreConfig.defaultSQLiteFileName {
+        config.sqlitePath = FileManager.default.temporaryDirectory
+            .appendingPathComponent("core-scheduler-\(UUID().uuidString).sqlite")
+            .path
+    }
 
     let service = CoreService(config: config)
     let router = CoreRouter(service: service)
@@ -153,4 +188,19 @@ private func createProject(router: CoreRouter, projectID: String, channelId: Str
 
     let response = await router.handle(method: "POST", path: "/v1/projects", body: body)
     #expect(response.status == 201)
+}
+
+private func waitForBulletins(
+    service: CoreService,
+    minimumCount: Int,
+    timeoutNanoseconds: UInt64
+) async -> Bool {
+    let deadline = ContinuousClock.now + .nanoseconds(Int64(timeoutNanoseconds))
+    while ContinuousClock.now < deadline {
+        if await service.getBulletins().count >= minimumCount {
+            return true
+        }
+        try? await Task.sleep(nanoseconds: 100_000_000)
+    }
+    return await service.getBulletins().count >= minimumCount
 }
