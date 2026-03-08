@@ -82,6 +82,7 @@ swift run Core
 Notes:
 
 - On first start, Sloppy creates a workspace layout and a default `sloppy.json` config if one does not exist.
+- Visor scheduling is configured through `sloppy.json` under `visor.scheduler`, and `visor.bootstrapBulletin` controls the immediate boot-time bulletin by default.
 - OpenAI-backed model flows require `OPENAI_API_KEY`.
 - Ollama-backed flows use the local Ollama endpoint by default.
 

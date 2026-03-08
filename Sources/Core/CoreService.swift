@@ -322,17 +322,19 @@ public actor CoreService {
             }
         }
 
-        // Initialize and start periodic visor scheduler
+        // Initialize periodic visor scheduler from config.
         if visorScheduler == nil {
             visorScheduler = VisorScheduler(
-                config: VisorSchedulerConfig.default,
+                config: buildVisorSchedulerConfig(),
                 logger: logger
             ) { [weak self] in
                 guard let self else { return }
                 _ = await self.triggerVisorBulletin()
             }
         }
-        await visorScheduler?.start()
+        if currentConfig.visor.scheduler.enabled {
+            await visorScheduler?.start()
+        }
         
         if cronRunner == nil {
             cronRunner = CronRunner(store: self.store, runtime: self.runtime, logger: self.logger)
@@ -466,6 +468,10 @@ public actor CoreService {
         return bulletin
     }
 
+    func visorSchedulerRunning() async -> Bool {
+        await visorScheduler?.running() ?? false
+    }
+
     private func buildProjectTaskSummary() async -> String? {
         let projects = await store.listProjects()
         let activeStatuses = Set(["pending_approval", "backlog", "ready", "in_progress"])
@@ -481,6 +487,14 @@ public actor CoreService {
             lines.append("Project \(project.name): \(taskEntries.joined(separator: ", "))")
         }
         return lines.isEmpty ? nil : "Active tasks: " + lines.joined(separator: "; ")
+    }
+
+    private func buildVisorSchedulerConfig() -> VisorSchedulerConfig {
+        let scheduler = currentConfig.visor.scheduler
+        return VisorSchedulerConfig(
+            interval: .seconds(max(1, scheduler.intervalSeconds)),
+            jitter: .seconds(max(0, scheduler.jitterSeconds))
+        )
     }
 
     private func enrichMessageWithTaskReferences(_ content: String) async -> String {

@@ -8,17 +8,13 @@ public struct VisorSchedulerConfig: Sendable {
     public var interval: Duration
     /// Random jitter to add to each interval (0..<jitter).
     public var jitter: Duration
-    /// Whether the scheduler should start automatically on boot.
-    public var autoStart: Bool
 
     public init(
         interval: Duration = .seconds(300),
-        jitter: Duration = .seconds(60),
-        autoStart: Bool = true
+        jitter: Duration = .seconds(60)
     ) {
         self.interval = interval
         self.jitter = jitter
-        self.autoStart = autoStart
     }
 
     /// Default configuration: 5 minute interval with 1 minute jitter.
@@ -130,15 +126,9 @@ public actor VisorScheduler {
         defer { isBulletinGenerationInProgress = false }
 
         logger.info("Generating periodic visor bulletin")
-
-        do {
-            await bulletinGenerator()
-            logger.info("Periodic visor bulletin generated successfully")
-            return true
-        } catch {
-            logger.error("Failed to generate periodic visor bulletin: \(error)")
-            return false
-        }
+        await bulletinGenerator()
+        logger.info("Periodic visor bulletin generated successfully")
+        return true
     }
 
     private func markStopped() {

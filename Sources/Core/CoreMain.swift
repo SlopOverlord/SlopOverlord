@@ -19,8 +19,8 @@ struct CoreMain: AsyncParsableCommand {
     @Option(name: [.short, .long], help: "Path to JSON config file")
     var configPath: String?
 
-    @Flag(name: .long, inversion: .prefixedNo, help: "Generates an immediate visor bulletin after boot")
-    var bootstrapBulletin: Bool = true
+    @Flag(name: .long, inversion: .prefixedNo, help: "Overrides config and controls the immediate visor bulletin after boot")
+    var bootstrapBulletin: Bool?
 
     @Flag(name: .long, help: "Runs demo request on startup")
     var runDemoRequest: Bool = false
@@ -107,7 +107,7 @@ struct CoreMain: AsyncParsableCommand {
                 }
             }
 
-            if bootstrapBulletin {
+            if shouldBootstrapVisorBulletin(cliOverride: bootstrapBulletin, config: config) {
                 let bulletin = await service.triggerVisorBulletin()
                 logger.info("Visor bulletin generated: \(bulletin.headline)")
             }
@@ -130,6 +130,10 @@ struct CoreMain: AsyncParsableCommand {
             throw error
         }
     }
+}
+
+func shouldBootstrapVisorBulletin(cliOverride: Bool?, config: CoreConfig) -> Bool {
+    cliOverride ?? config.visor.bootstrapBulletin
 }
 
 @available(macOS 15.0, *)

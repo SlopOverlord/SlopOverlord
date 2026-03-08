@@ -224,6 +224,35 @@ public struct CoreConfig: Codable, Sendable {
         }
     }
 
+    public struct Visor: Codable, Sendable, Equatable {
+        public struct Scheduler: Codable, Sendable, Equatable {
+            public var enabled: Bool
+            public var intervalSeconds: Int
+            public var jitterSeconds: Int
+
+            public init(
+                enabled: Bool = true,
+                intervalSeconds: Int = 300,
+                jitterSeconds: Int = 60
+            ) {
+                self.enabled = enabled
+                self.intervalSeconds = intervalSeconds
+                self.jitterSeconds = jitterSeconds
+            }
+        }
+
+        public var scheduler: Scheduler
+        public var bootstrapBulletin: Bool
+
+        public init(
+            scheduler: Scheduler = Scheduler(),
+            bootstrapBulletin: Bool = true
+        ) {
+            self.scheduler = scheduler
+            self.bootstrapBulletin = bootstrapBulletin
+        }
+    }
+
     public var listen: Listen
     public var workspace: Workspace
     public var auth: Auth
@@ -233,6 +262,7 @@ public struct CoreConfig: Codable, Sendable {
     public var gateways: [String]
     public var plugins: [PluginConfig]
     public var channels: ChannelConfig
+    public var visor: Visor
     public var sqlitePath: String
 
     public init(
@@ -245,6 +275,7 @@ public struct CoreConfig: Codable, Sendable {
         gateways: [String],
         plugins: [PluginConfig],
         channels: ChannelConfig = ChannelConfig(),
+        visor: Visor = Visor(),
         sqlitePath: String
     ) {
         self.listen = listen
@@ -256,6 +287,7 @@ public struct CoreConfig: Codable, Sendable {
         self.gateways = gateways
         self.plugins = plugins
         self.channels = channels
+        self.visor = visor
         self.sqlitePath = sqlitePath
     }
 
@@ -283,6 +315,7 @@ public struct CoreConfig: Codable, Sendable {
             gateways: [],
             plugins: [],
             channels: .init(),
+            visor: .init(),
             sqlitePath: CoreConfig.defaultSQLiteFileName
         )
     }
@@ -350,6 +383,7 @@ public struct CoreConfig: Codable, Sendable {
         case gateways
         case plugins
         case channels
+        case visor
         case sqlitePath
     }
 
@@ -363,6 +397,7 @@ public struct CoreConfig: Codable, Sendable {
         nodes = try container.decodeIfPresent([String].self, forKey: .nodes) ?? []
         gateways = try container.decodeIfPresent([String].self, forKey: .gateways) ?? []
         channels = try container.decodeIfPresent(ChannelConfig.self, forKey: .channels) ?? .init()
+        visor = try container.decodeIfPresent(Visor.self, forKey: .visor) ?? .init()
         sqlitePath = try container.decode(String.self, forKey: .sqlitePath)
         if sqlitePath == CoreConfig.legacyDefaultSQLitePath {
             sqlitePath = CoreConfig.defaultSQLiteFileName
