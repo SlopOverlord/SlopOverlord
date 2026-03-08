@@ -17,6 +17,7 @@ func toolsStoreAutoCreatesDefaultPolicy() throws {
     #expect(policy.version == 1)
     #expect(policy.defaultPolicy == .allow)
     #expect(policy.tools.isEmpty)
+    #expect(ToolCatalog.knownToolIDs.contains("browser"))
 
     let toolsFile = agentDirectory.appendingPathComponent("tools/tools.json")
     #expect(FileManager.default.fileExists(atPath: toolsFile.path))
@@ -75,4 +76,27 @@ func authorizationHotReloadsPolicyByModificationDate() async throws {
     let decision = try await auth.authorize(agentID: "agent-3", toolID: "agents.list")
     #expect(decision.allowed == false)
     #expect(decision.error?.code == "tool_forbidden")
+}
+
+@Test
+func toolsStoreAcceptsBrowserOverrides() throws {
+    let root = FileManager.default.temporaryDirectory
+        .appendingPathComponent("tools-store-browser-\(UUID().uuidString)", isDirectory: true)
+    let agentsRoot = root.appendingPathComponent("agents", isDirectory: true)
+    let agentDirectory = agentsRoot.appendingPathComponent("agent-browser", isDirectory: true)
+    try FileManager.default.createDirectory(at: agentDirectory, withIntermediateDirectories: true)
+
+    let store = AgentToolsFileStore(agentsRootURL: agentsRoot)
+    let updated = try store.updatePolicy(
+        agentID: "agent-browser",
+        request: AgentToolsUpdateRequest(
+            version: 1,
+            defaultPolicy: .allow,
+            tools: ["browser": true],
+            guardrails: .init()
+        ),
+        knownToolIDs: ToolCatalog.knownToolIDs
+    )
+
+    #expect(updated.tools["browser"] == true)
 }

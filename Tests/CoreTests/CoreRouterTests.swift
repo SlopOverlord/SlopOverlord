@@ -546,6 +546,9 @@ func getConfigEndpoint() async throws {
 
     let config = try JSONDecoder().decode(CoreConfig.self, from: response.body)
     #expect(config.listen.port == 25101)
+    #expect(config.browser.browserPath == "/usr/bin/chromium")
+    #expect(config.browser.headless == true)
+    #expect(config.browser.allowJavaScriptEvaluation == false)
 }
 
 @Test
@@ -674,6 +677,14 @@ func putConfigEndpoint() async throws {
         schedule: .init(frequency: .daily, time: "18:00"),
         conflictStrategy: .remoteWins
     )
+    config.browser = .init(
+        browserPath: "/opt/chromium",
+        headless: false,
+        allowJavaScriptEvaluation: true,
+        profiles: [
+            .init(id: "work", title: "Work", userDataDir: ".profiles/work")
+        ]
+    )
 
     let payload = try JSONEncoder().encode(config)
     let response = await router.handle(method: "PUT", path: "/v1/config", body: payload)
@@ -684,6 +695,10 @@ func putConfigEndpoint() async throws {
     #expect(updated.gitSync.enabled == true)
     #expect(updated.gitSync.repository == "acme/workspace-sync")
     #expect(updated.gitSync.branch == "sync/main")
+    #expect(updated.browser.browserPath == "/opt/chromium")
+    #expect(updated.browser.headless == false)
+    #expect(updated.browser.allowJavaScriptEvaluation == true)
+    #expect(updated.browser.profiles.map(\.id) == ["work"])
 }
 
 @Test

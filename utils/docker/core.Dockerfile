@@ -27,7 +27,7 @@ RUN --mount=type=cache,id=sloppy-swiftpm,target=/root/.swiftpm \
     cp -R "$RESOURCE_DIR"/. "/artifacts/$(basename "$RESOURCE_DIR")"; \
     fi
 
-FROM ubuntu:22.04
+FROM ubuntu:22.04 AS runtime-base
 ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
@@ -49,5 +49,32 @@ COPY --from=builder /usr/lib/swift /usr/lib/swift
 COPY --from=builder /artifacts/sloppy-core /usr/bin/sloppy-core
 COPY --from=builder /artifacts/Sloppy_Core.resources /usr/bin/Sloppy_Core.resources
 COPY --from=builder /artifacts/Sloppy_Core.bundle /usr/bin/Sloppy_Core.bundle
+
+FROM runtime-base AS runtime-default
+
+FROM runtime-base AS runtime-full
+ARG CHROME_DEB_URL=https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    wget \
+    gnupg \
+    fonts-liberation \
+    xdg-utils \
+    libasound2 \
+    libatk-bridge2.0-0 \
+    libatk1.0-0 \
+    libcups2 \
+    libdrm2 \
+    libgbm1 \
+    libgtk-3-0 \
+    libnspr4 \
+    libnss3 \
+    libu2f-udev \
+    libvulkan1 \
+    && wget -O /tmp/google-chrome.deb "${CHROME_DEB_URL}" \
+    && apt-get install -y /tmp/google-chrome.deb \
+    && ln -sf /usr/bin/google-chrome-stable /usr/bin/chromium \
+    && rm -f /tmp/google-chrome.deb \
+    && rm -rf /var/lib/apt/lists/*
+
 EXPOSE 25101
 CMD ["/usr/bin/sloppy-core"]

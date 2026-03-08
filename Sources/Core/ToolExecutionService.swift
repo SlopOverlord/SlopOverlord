@@ -12,11 +12,13 @@ final class ToolExecutionService: @unchecked Sendable {
     private let channelSessionStore: ChannelSessionFileStore
     private let store: any PersistenceStore
     private let searchProviderService: SearchProviderService
+    private let browserService: BrowserRuntimeService
     private let logger: Logger
     private var workspaceRootURL: URL
 
     init(
         workspaceRootURL: URL,
+        browserConfig: CoreConfig.Browser,
         runtime: RuntimeSystem,
         memoryStore: any MemoryStore,
         sessionStore: AgentSessionFileStore,
@@ -36,19 +38,27 @@ final class ToolExecutionService: @unchecked Sendable {
         self.channelSessionStore = channelSessionStore
         self.store = store
         self.searchProviderService = searchProviderService
+        self.browserService = BrowserRuntimeService(
+            browserConfig: browserConfig,
+            workspaceRootURL: workspaceRootURL,
+            logger: Logger(label: "sloppy.core.browser")
+        )
         self.logger = logger
     }
 
-    func updateWorkspaceRootURL(_ url: URL) {
+    func updateConfiguration(workspaceRootURL url: URL, browserConfig: CoreConfig.Browser) async {
         self.workspaceRootURL = url
+        await browserService.updateConfiguration(browserConfig: browserConfig, workspaceRootURL: url)
     }
 
     func cleanupSessionProcesses(_ sessionID: String) async {
         await processRegistry.cleanup(sessionID: sessionID)
+        await browserService.cleanupSession(sessionID)
     }
 
     func shutdown() async {
         await processRegistry.shutdown()
+        await browserService.shutdown()
     }
 
     func activeProcessCount(sessionID: String) async -> Int {
@@ -76,6 +86,8 @@ final class ToolExecutionService: @unchecked Sendable {
             result = await executeRuntimeExec(request: request, policy: policy)
         case "runtime.process":
             result = await executeRuntimeProcess(sessionID: sessionID, request: request, policy: policy)
+        case "browser":
+            result = await browserService.invoke(sessionID: sessionID, request: request)
         case "sessions.spawn":
             result = await executeSessionsSpawn(agentID: agentID, request: request)
         case "sessions.list":

@@ -3,6 +3,7 @@ services:
     build:
       context: ../..
       dockerfile: utils/docker/core.Dockerfile
+      target: ${CORE_IMAGE_TARGET:-runtime-default}
       args:
         SWIFT_BUILD_CONFIGURATION: ${SWIFT_BUILD_CONFIGURATION:-release}
     env_file:

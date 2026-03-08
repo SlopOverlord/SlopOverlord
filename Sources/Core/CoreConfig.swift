@@ -386,6 +386,74 @@ public struct CoreConfig: Codable, Sendable {
         }
     }
 
+    public struct Browser: Codable, Sendable, Equatable {
+        public struct Profile: Codable, Sendable, Equatable {
+            public var id: String
+            public var title: String
+            public var userDataDir: String
+            public var profileDirectory: String
+
+            public init(
+                id: String,
+                title: String,
+                userDataDir: String,
+                profileDirectory: String = "Default"
+            ) {
+                self.id = id
+                self.title = title
+                self.userDataDir = userDataDir
+                self.profileDirectory = profileDirectory
+            }
+
+            private enum CodingKeys: String, CodingKey {
+                case id
+                case title
+                case userDataDir
+                case profileDirectory
+            }
+
+            public init(from decoder: Decoder) throws {
+                let container = try decoder.container(keyedBy: CodingKeys.self)
+                id = try container.decode(String.self, forKey: .id)
+                title = try container.decode(String.self, forKey: .title)
+                userDataDir = try container.decode(String.self, forKey: .userDataDir)
+                profileDirectory = try container.decodeIfPresent(String.self, forKey: .profileDirectory) ?? "Default"
+            }
+        }
+
+        public var browserPath: String
+        public var headless: Bool
+        public var allowJavaScriptEvaluation: Bool
+        public var profiles: [Profile]
+
+        public init(
+            browserPath: String = "/usr/bin/chromium",
+            headless: Bool = true,
+            allowJavaScriptEvaluation: Bool = false,
+            profiles: [Profile] = []
+        ) {
+            self.browserPath = browserPath
+            self.headless = headless
+            self.allowJavaScriptEvaluation = allowJavaScriptEvaluation
+            self.profiles = profiles
+        }
+
+        private enum CodingKeys: String, CodingKey {
+            case browserPath
+            case headless
+            case allowJavaScriptEvaluation
+            case profiles
+        }
+
+        public init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            browserPath = try container.decodeIfPresent(String.self, forKey: .browserPath) ?? "/usr/bin/chromium"
+            headless = try container.decodeIfPresent(Bool.self, forKey: .headless) ?? true
+            allowJavaScriptEvaluation = try container.decodeIfPresent(Bool.self, forKey: .allowJavaScriptEvaluation) ?? false
+            profiles = try container.decodeIfPresent([Profile].self, forKey: .profiles) ?? []
+        }
+    }
+
     public struct Visor: Codable, Sendable, Equatable {
         public struct Scheduler: Codable, Sendable, Equatable {
             public var enabled: Bool
@@ -424,6 +492,7 @@ public struct CoreConfig: Codable, Sendable {
     public var gateways: [String]
     public var plugins: [PluginConfig]
     public var channels: ChannelConfig
+    public var browser: Browser
     public var gitSync: GitSync
     public var searchTools: SearchTools
     public var visor: Visor
@@ -439,6 +508,7 @@ public struct CoreConfig: Codable, Sendable {
         gateways: [String],
         plugins: [PluginConfig],
         channels: ChannelConfig = ChannelConfig(),
+        browser: Browser = Browser(),
         gitSync: GitSync = GitSync(),
         searchTools: SearchTools = SearchTools(),
         visor: Visor = Visor(),
@@ -453,6 +523,7 @@ public struct CoreConfig: Codable, Sendable {
         self.gateways = gateways
         self.plugins = plugins
         self.channels = channels
+        self.browser = browser
         self.gitSync = gitSync
         self.searchTools = searchTools
         self.visor = visor
@@ -483,6 +554,7 @@ public struct CoreConfig: Codable, Sendable {
             gateways: [],
             plugins: [],
             channels: .init(),
+            browser: .init(),
             gitSync: .init(),
             searchTools: .init(),
             visor: .init(),
@@ -553,6 +625,7 @@ public struct CoreConfig: Codable, Sendable {
         case gateways
         case plugins
         case channels
+        case browser
         case gitSync
         case searchTools
         case visor
@@ -569,6 +642,7 @@ public struct CoreConfig: Codable, Sendable {
         nodes = try container.decodeIfPresent([String].self, forKey: .nodes) ?? []
         gateways = try container.decodeIfPresent([String].self, forKey: .gateways) ?? []
         channels = try container.decodeIfPresent(ChannelConfig.self, forKey: .channels) ?? .init()
+        browser = try container.decodeIfPresent(Browser.self, forKey: .browser) ?? .init()
         gitSync = try container.decodeIfPresent(GitSync.self, forKey: .gitSync) ?? .init()
         searchTools = try container.decodeIfPresent(SearchTools.self, forKey: .searchTools) ?? .init()
         visor = try container.decodeIfPresent(Visor.self, forKey: .visor) ?? .init()
@@ -640,6 +714,14 @@ public struct CoreConfig: Codable, Sendable {
 
         return resolvedWorkspaceRootURL(currentDirectory: currentDirectory)
             .appendingPathComponent(sqlitePath)
+    }
+
+    public func resolvedBrowserUserDataDir(
+        _ rawPath: String,
+        currentDirectory: String = FileManager.default.currentDirectoryPath
+    ) -> URL {
+        let cwd = URL(fileURLWithPath: currentDirectory, isDirectory: true)
+        return Self.resolvePath(rawPath, currentDirectory: cwd)
     }
 
     private static func resolvePath(_ rawPath: String, currentDirectory: URL) -> URL {

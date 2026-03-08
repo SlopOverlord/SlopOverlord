@@ -4750,6 +4750,16 @@ body.agent-chat-no-page-scroll .page {
   color: var(--accent);
 }
 
+.entry-list-item strong,
+.entry-list-item small {
+  display: block;
+}
+
+.entry-list-item small {
+  margin-top: 4px;
+  color: var(--muted);
+}
+
 .entry-editor-card {
   border: 1px solid var(--line);
   border-radius: 0;
@@ -4766,6 +4776,22 @@ body.agent-chat-no-page-scroll .page {
 
 .entry-editor-head h3 {
   margin: 0;
+}
+
+.entry-inline-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.entry-inline-actions button {
+  min-width: auto;
+  padding: 5px 12px;
+}
+
+.entry-stack {
+  display: grid;
+  gap: 12px;
+  margin-top: 12px;
 }
 
 .entry-editor-block {

@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { fetchOpenAIModels, fetchOpenAIProviderStatus, fetchRuntimeConfig, fetchSearchProviderStatus, updateRuntimeConfig } from "../../api";
+import { BrowserEditor } from "./components/BrowserEditor";
 import { NodeHostEditor } from "./components/NodeHostEditor";
 import { PluginEditor } from "./components/PluginEditor";
 import { ProviderEditor } from "./components/ProviderEditor";
@@ -96,6 +97,15 @@ function emptyPlugin() {
   };
 }
 
+function emptyBrowserProfile() {
+  return {
+    id: "",
+    title: "",
+    userDataDir: "",
+    profileDirectory: "Default"
+  };
+}
+
 const EMPTY_CONFIG = {
   listen: { host: "0.0.0.0", port: 25101 },
   workspace: { name: "workspace", basePath: "~" },
@@ -136,6 +146,12 @@ const EMPTY_CONFIG = {
         apiKey: ""
       }
     }
+  },
+  browser: {
+    browserPath: "/usr/bin/chromium",
+    headless: true,
+    allowJavaScriptEvaluation: false,
+    profiles: []
   },
   gitSync: {
     enabled: false,
@@ -303,6 +319,18 @@ function normalizeConfig(config) {
     normalized.memory.retention.bulletinDays
   );
   normalized.sqlitePath = config?.sqlitePath || normalized.sqlitePath;
+  normalized.browser.browserPath = String(config?.browser?.browserPath || normalized.browser.browserPath);
+  normalized.browser.headless = config?.browser?.headless ?? normalized.browser.headless;
+  normalized.browser.allowJavaScriptEvaluation =
+    config?.browser?.allowJavaScriptEvaluation ?? normalized.browser.allowJavaScriptEvaluation;
+  normalized.browser.profiles = Array.isArray(config?.browser?.profiles)
+    ? config.browser.profiles.map((profile) => ({
+      id: String(profile?.id || ""),
+      title: String(profile?.title || ""),
+      userDataDir: String(profile?.userDataDir || ""),
+      profileDirectory: String(profile?.profileDirectory || "Default")
+    }))
+    : [];
   normalized.gitSync.enabled = Boolean(config?.gitSync?.enabled);
   normalized.gitSync.authToken = String(config?.gitSync?.authToken || "");
   normalized.gitSync.repository = String(config?.gitSync?.repository || "");
@@ -343,7 +371,7 @@ function normalizeConfig(config) {
       }
     };
   } else {
-  normalized.channels = { telegram: null };
+    normalized.channels = { telegram: null };
   }
 
   normalized.searchTools.activeProvider =
@@ -915,6 +943,15 @@ export function ConfigView({ sectionId = "providers", onSectionChange = null }) 
           draftConfig={draftConfig}
           searchProviderStatus={searchProviderStatus}
           mutateDraft={mutateDraft}
+        />
+      );
+    }
+    if (selectedSettings === "browser") {
+      return (
+        <BrowserEditor
+          draftConfig={draftConfig}
+          mutateDraft={mutateDraft}
+          emptyBrowserProfile={emptyBrowserProfile}
         />
       );
     }

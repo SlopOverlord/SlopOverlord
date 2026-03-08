@@ -117,7 +117,10 @@ struct CoreMain: AsyncParsableCommand {
                 logger.info("Sloppy Core foreground server mode is active")
                 defer {
                     try? server.shutdown()
-                    Task { await service.shutdownChannelPlugins() }
+                    Task {
+                        await service.shutdown()
+                        await service.shutdownChannelPlugins()
+                    }
                 }
                 try server.waitUntilClosed()
             }

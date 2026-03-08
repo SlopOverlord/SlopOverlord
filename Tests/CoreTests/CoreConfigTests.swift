@@ -56,6 +56,10 @@ func missingVisorConfigFallsBackToDefaults() throws {
     #expect(decoded.visor.scheduler.intervalSeconds == 300)
     #expect(decoded.visor.scheduler.jitterSeconds == 60)
     #expect(decoded.visor.bootstrapBulletin)
+    #expect(decoded.browser.browserPath == "/usr/bin/chromium")
+    #expect(decoded.browser.headless == true)
+    #expect(decoded.browser.allowJavaScriptEvaluation == false)
+    #expect(decoded.browser.profiles.isEmpty)
 }
 
 @Test
@@ -307,4 +311,73 @@ func searchToolsDecodeWhenPresent() throws {
     #expect(decoded.searchTools.activeProvider == .brave)
     #expect(decoded.searchTools.providers.brave.apiKey == "brave-config-key")
     #expect(decoded.searchTools.providers.perplexity.apiKey == "pplx-config-key")
+}
+
+@Test
+func browserSettingsDecodeWhenPresent() throws {
+    let json =
+        """
+        {
+          "listen": { "host": "0.0.0.0", "port": 25101 },
+          "workspace": { "name": "workspace", "basePath": "~" },
+          "auth": { "token": "dev-token" },
+          "models": [],
+          "memory": { "backend": "sqlite-local-vectors" },
+          "nodes": ["local"],
+          "gateways": [],
+          "plugins": [],
+          "channels": { "telegram": null },
+          "browser": {
+            "browserPath": "/custom/chromium",
+            "headless": false,
+            "allowJavaScriptEvaluation": true,
+            "profiles": [
+              {
+                "id": "work",
+                "title": "Work",
+                "userDataDir": "~/.config/chromium-work"
+              },
+              {
+                "id": "personal",
+                "title": "Personal",
+                "userDataDir": "~/.config/chromium-personal",
+                "profileDirectory": "Profile 2"
+              }
+            ]
+          },
+          "sqlitePath": "core.sqlite"
+        }
+        """
+
+    let decoded = try JSONDecoder().decode(CoreConfig.self, from: Data(json.utf8))
+    #expect(decoded.browser.browserPath == "/custom/chromium")
+    #expect(decoded.browser.headless == false)
+    #expect(decoded.browser.allowJavaScriptEvaluation == true)
+    #expect(decoded.browser.profiles.count == 2)
+    #expect(decoded.browser.profiles[0].profileDirectory == "Default")
+    #expect(decoded.browser.profiles[1].profileDirectory == "Profile 2")
+}
+
+@Test
+func browserSettingsRoundTripEncodeDecode() throws {
+    var config = CoreConfig.default
+    config.browser = .init(
+        browserPath: "/usr/local/bin/chromium",
+        headless: false,
+        allowJavaScriptEvaluation: true,
+        profiles: [
+            .init(id: "work", title: "Work", userDataDir: ".profiles/work"),
+            .init(id: "qa", title: "QA", userDataDir: ".profiles/qa", profileDirectory: "Profile 1")
+        ]
+    )
+
+    let encoder = JSONEncoder()
+    let data = try encoder.encode(config)
+    let decoded = try JSONDecoder().decode(CoreConfig.self, from: data)
+
+    #expect(decoded.browser.browserPath == "/usr/local/bin/chromium")
+    #expect(decoded.browser.headless == false)
+    #expect(decoded.browser.allowJavaScriptEvaluation == true)
+    #expect(decoded.browser.profiles.map(\.id) == ["work", "qa"])
+    #expect(decoded.browser.profiles.map(\.profileDirectory) == ["Default", "Profile 1"])
 }

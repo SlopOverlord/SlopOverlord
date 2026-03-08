@@ -12,6 +12,7 @@ This guide covers the containerized workflow for running Sloppy with Docker Comp
 The Docker assets live in `utils/docker/`:
 
 - `utils/docker/core.Dockerfile` builds the `Core` executable in a Swift 6.2 image and packages it into an Ubuntu runtime image.
+  It now exposes two runtime targets: `runtime-default` (no browser) and `runtime-full` (Chromium-capable).
 - `utils/docker/dashboard.Dockerfile` runs the React dashboard in a Node 20 container.
 - `utils/docker/docker-compose.yml` starts the `core` and `dashboard` services together.
 - `utils/docker/scripts/` contains thin wrappers around the Compose commands.
@@ -33,6 +34,12 @@ From the repository root:
 docker compose -f utils/docker/docker-compose.yml build
 ```
 
+Build the browser-enabled runtime:
+
+```bash
+CORE_IMAGE_TARGET=runtime-full docker compose -f utils/docker/docker-compose.yml build core
+```
+
 Wrapper script:
 
 ```bash
@@ -43,6 +50,12 @@ Wrapper script:
 
 ```bash
 docker compose -f utils/docker/docker-compose.yml up
+```
+
+Start the browser-enabled stack:
+
+```bash
+CORE_IMAGE_TARGET=runtime-full docker compose -f utils/docker/docker-compose.yml up
 ```
 
 Wrapper script:
@@ -104,6 +117,8 @@ PERPLEXITY_API_KEY=your_key_here
 - Installs `libsqlite3-dev`
 - Builds the `Core` product
 - Copies the binary and processed resources into a smaller Ubuntu runtime image
+- `runtime-default` keeps the current lightweight runtime without a browser
+- `runtime-full` downloads Google Chrome stable, exposes it as `/usr/bin/chromium`, and includes the extra system libraries required for browser automation
 
 ### Dashboard image
 

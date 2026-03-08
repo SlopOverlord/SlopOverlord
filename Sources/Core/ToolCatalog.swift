@@ -39,6 +39,13 @@ enum ToolCatalog {
             description: "Fetch URL content via external adapter."
         ),
         .init(
+            id: "browser",
+            domain: "browser",
+            title: "Chromium browser",
+            status: "fully_functional",
+            description: "Drive Chromium via navigate, snapshot, click, type, press, wait, screenshot, evaluate, and close actions."
+        ),
+        .init(
             id: "runtime.exec",
             domain: "runtime",
             title: "Exec command",

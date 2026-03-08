@@ -273,6 +273,7 @@ public actor CoreService {
         let processRegistry = SessionProcessRegistry()
         self.toolExecution = ToolExecutionService(
             workspaceRootURL: self.workspaceRootURL,
+            browserConfig: config.browser,
             runtime: self.runtime,
             memoryStore: self.memoryStore,
             sessionStore: self.sessionStore,
@@ -955,6 +956,10 @@ public actor CoreService {
         } catch {
             throw mapAgentStorageError(error)
         }
+    }
+
+    public func shutdown() async {
+        await toolExecution.shutdown()
     }
 
     /// Returns one persisted agent by id.
@@ -2388,7 +2393,7 @@ public actor CoreService {
         actorBoardStore.updateWorkspaceRootURL(workspaceRootURL)
         await sessionOrchestrator.updateAgentsRootURL(agentsRootURL)
         await toolsAuthorization.updateAgentsRootURL(agentsRootURL)
-        toolExecution.updateWorkspaceRootURL(workspaceRootURL)
+        await toolExecution.updateConfiguration(workspaceRootURL: workspaceRootURL, browserConfig: config.browser)
         systemLogStore.updateWorkspaceRootURL(workspaceRootURL)
         await searchProviderService.updateConfig(config.searchTools)
         let resolvedModels = CoreModelProviderFactory.resolveModelIdentifiers(config: config)
