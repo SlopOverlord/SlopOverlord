@@ -117,6 +117,7 @@ private enum ErrorCode {
     static let agentNotFound = "agent_not_found"
     static let agentCreateFailed = "agent_create_failed"
     static let agentsListFailed = "agents_list_failed"
+    static let agentMemoryReadFailed = "agent_memory_read_failed"
     static let invalidSessionId = "invalid_session_id"
     static let invalidSessionPayload = "invalid_session_payload"
     static let sessionNotFound = "session_not_found"
@@ -450,6 +451,60 @@ public actor CoreRouter {
                 return Self.json(status: HTTPStatus.notFound, payload: ["error": ErrorCode.agentNotFound])
             } catch {
                 return Self.json(status: HTTPStatus.internalServerError, payload: ["error": ErrorCode.agentNotFound])
+            }
+        }
+
+        add(.get, "/v1/agents/:agentId/memories") { request in
+            let agentId = request.pathParam("agentId") ?? ""
+            let search = request.queryParam("search")
+            let rawFilter = request.queryParam("filter")?.lowercased() ?? AgentMemoryFilter.all.rawValue
+            guard let filter = AgentMemoryFilter(rawValue: rawFilter) else {
+                return Self.json(status: HTTPStatus.badRequest, payload: ["error": ErrorCode.invalidBody])
+            }
+
+            let parsedLimit = Int(request.queryParam("limit") ?? "") ?? 20
+            let limit = max(1, min(parsedLimit, 100))
+            let offset = max(0, Int(request.queryParam("offset") ?? "") ?? 0)
+
+            do {
+                let response = try await service.listAgentMemories(
+                    agentID: agentId,
+                    search: search,
+                    filter: filter,
+                    limit: limit,
+                    offset: offset
+                )
+                return Self.encodable(status: HTTPStatus.ok, payload: response)
+            } catch CoreService.AgentStorageError.invalidID {
+                return Self.json(status: HTTPStatus.badRequest, payload: ["error": ErrorCode.invalidAgentId])
+            } catch CoreService.AgentStorageError.notFound {
+                return Self.json(status: HTTPStatus.notFound, payload: ["error": ErrorCode.agentNotFound])
+            } catch {
+                return Self.json(status: HTTPStatus.internalServerError, payload: ["error": ErrorCode.agentMemoryReadFailed])
+            }
+        }
+
+        add(.get, "/v1/agents/:agentId/memories/graph") { request in
+            let agentId = request.pathParam("agentId") ?? ""
+            let search = request.queryParam("search")
+            let rawFilter = request.queryParam("filter")?.lowercased() ?? AgentMemoryFilter.all.rawValue
+            guard let filter = AgentMemoryFilter(rawValue: rawFilter) else {
+                return Self.json(status: HTTPStatus.badRequest, payload: ["error": ErrorCode.invalidBody])
+            }
+
+            do {
+                let response = try await service.agentMemoryGraph(
+                    agentID: agentId,
+                    search: search,
+                    filter: filter
+                )
+                return Self.encodable(status: HTTPStatus.ok, payload: response)
+            } catch CoreService.AgentStorageError.invalidID {
+                return Self.json(status: HTTPStatus.badRequest, payload: ["error": ErrorCode.invalidAgentId])
+            } catch CoreService.AgentStorageError.notFound {
+                return Self.json(status: HTTPStatus.notFound, payload: ["error": ErrorCode.agentNotFound])
+            } catch {
+                return Self.json(status: HTTPStatus.internalServerError, payload: ["error": ErrorCode.agentMemoryReadFailed])
             }
         }
 

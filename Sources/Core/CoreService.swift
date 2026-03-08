@@ -41,6 +41,8 @@ public struct AgentSessionStreamUpdate: Codable, Sendable {
 
 public actor CoreService {
     private static let heartbeatSuccessToken = "SLOPPY_ACTION_OK"
+    private static let agentMemoryGraphSeedLimit = 50
+    private static let agentMemoryGraphNeighborLimit = 150
 
     public enum AgentStorageError: Error {
         case invalidID
@@ -924,6 +926,105 @@ public actor CoreService {
         return records.sorted { left, right in
             left.task.updatedAt > right.task.updatedAt
         }
+    }
+
+    public func listAgentMemories(
+        agentID: String,
+        search: String?,
+        filter: AgentMemoryFilter,
+        limit: Int,
+        offset: Int
+    ) async throws -> AgentMemoryListResponse {
+        guard let normalizedID = normalizedAgentID(agentID) else {
+            throw AgentStorageError.invalidID
+        }
+        _ = try getAgent(id: normalizedID)
+
+        let boundedLimit = max(1, min(limit, 100))
+        let boundedOffset = max(0, offset)
+        let entries = await matchingAgentMemoryEntries(agentID: normalizedID, search: search, filter: filter)
+        let page = Array(entries.dropFirst(boundedOffset).prefix(boundedLimit))
+
+        return AgentMemoryListResponse(
+            agentId: normalizedID,
+            items: page.map { makeAgentMemoryItem(from: $0) },
+            total: entries.count,
+            limit: boundedLimit,
+            offset: boundedOffset
+        )
+    }
+
+    public func agentMemoryGraph(
+        agentID: String,
+        search: String?,
+        filter: AgentMemoryFilter
+    ) async throws -> AgentMemoryGraphResponse {
+        guard let normalizedID = normalizedAgentID(agentID) else {
+            throw AgentStorageError.invalidID
+        }
+        _ = try getAgent(id: normalizedID)
+
+        let allEntries = await allAgentMemoryEntries(agentID: normalizedID)
+        let matchingEntries = filterAgentMemoryEntries(allEntries, search: search, filter: filter)
+        let seedEntries = Array(matchingEntries.prefix(Self.agentMemoryGraphSeedLimit))
+        let seedIDs = seedEntries.map(\.id)
+        var truncated = matchingEntries.count > Self.agentMemoryGraphSeedLimit
+
+        guard !seedIDs.isEmpty else {
+            return AgentMemoryGraphResponse(
+                agentId: normalizedID,
+                nodes: [],
+                edges: [],
+                seedIds: [],
+                truncated: false
+            )
+        }
+
+        let edgeRecords = await memoryStore.edges(for: seedIDs)
+        let entriesByID = Dictionary(uniqueKeysWithValues: allEntries.map { ($0.id, $0) })
+        var neighborIDs: [String] = []
+        var seenNeighborIDs = Set<String>()
+        let seedIDSet = Set(seedIDs)
+
+        for edge in edgeRecords {
+            for candidateID in [edge.fromMemoryId, edge.toMemoryId] {
+                guard !seedIDSet.contains(candidateID),
+                      entriesByID[candidateID] != nil,
+                      seenNeighborIDs.insert(candidateID).inserted
+                else {
+                    continue
+                }
+                neighborIDs.append(candidateID)
+            }
+        }
+
+        if neighborIDs.count > Self.agentMemoryGraphNeighborLimit {
+            neighborIDs = Array(neighborIDs.prefix(Self.agentMemoryGraphNeighborLimit))
+            truncated = true
+        }
+
+        let includedNodeIDs = Set(seedIDs + neighborIDs)
+        let includedNodes = seedEntries + neighborIDs.compactMap { entriesByID[$0] }
+        let filteredEdges = edgeRecords
+            .filter { includedNodeIDs.contains($0.fromMemoryId) && includedNodeIDs.contains($0.toMemoryId) }
+            .map {
+                AgentMemoryEdgeRecord(
+                    fromMemoryId: $0.fromMemoryId,
+                    toMemoryId: $0.toMemoryId,
+                    relation: $0.relation,
+                    weight: $0.weight,
+                    provenance: $0.provenance,
+                    createdAt: $0.createdAt
+                )
+            }
+
+        return AgentMemoryGraphResponse(
+            agentId: normalizedID,
+            nodes: includedNodes.map { makeAgentMemoryItem(from: $0) },
+            edges: filteredEdges,
+            seedIds: seedIDs,
+            truncated: truncated
+        )
     }
 
     /// Creates an agent and provisions `/workspace/agents/<agent_id>` directory.
@@ -4914,6 +5015,105 @@ public actor CoreService {
         }
 
         return trimmed
+    }
+
+    private func allAgentMemoryEntries(agentID: String) async -> [MemoryEntry] {
+        let entries = await memoryStore.entries(filter: .default)
+        return entries
+            .filter { belongsToAgentMemory($0, agentID: agentID) }
+            .sorted { left, right in
+                if left.createdAt == right.createdAt {
+                    return left.id.localizedCaseInsensitiveCompare(right.id) == .orderedAscending
+                }
+                return left.createdAt > right.createdAt
+            }
+    }
+
+    private func matchingAgentMemoryEntries(
+        agentID: String,
+        search: String?,
+        filter: AgentMemoryFilter
+    ) async -> [MemoryEntry] {
+        filterAgentMemoryEntries(await allAgentMemoryEntries(agentID: agentID), search: search, filter: filter)
+    }
+
+    private func filterAgentMemoryEntries(
+        _ entries: [MemoryEntry],
+        search: String?,
+        filter: AgentMemoryFilter
+    ) -> [MemoryEntry] {
+        let normalizedSearch = search?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() ?? ""
+
+        return entries.filter { entry in
+            guard matchesAgentMemoryFilter(entry, filter: filter) else {
+                return false
+            }
+
+            guard !normalizedSearch.isEmpty else {
+                return true
+            }
+
+            return entry.id.lowercased().contains(normalizedSearch) ||
+                entry.note.lowercased().contains(normalizedSearch) ||
+                (entry.summary?.lowercased().contains(normalizedSearch) ?? false)
+        }
+    }
+
+    private func belongsToAgentMemory(_ entry: MemoryEntry, agentID: String) -> Bool {
+        if entry.scope.type == .agent, entry.scope.id.caseInsensitiveCompare(agentID) == .orderedSame {
+            return true
+        }
+
+        guard entry.scope.type == .channel else {
+            return false
+        }
+
+        let channelID = entry.scope.channelId ?? entry.scope.id
+        return channelID.hasPrefix("agent:\(agentID):session:")
+    }
+
+    private func matchesAgentMemoryFilter(_ entry: MemoryEntry, filter: AgentMemoryFilter) -> Bool {
+        switch filter {
+        case .all:
+            return true
+        case .persistent:
+            return derivedCategory(for: entry) == .persistent
+        case .temporary:
+            return derivedCategory(for: entry) == .temporary
+        case .todo:
+            return derivedCategory(for: entry) == .todo
+        }
+    }
+
+    private func derivedCategory(for entry: MemoryEntry) -> AgentMemoryCategory {
+        if entry.kind == .todo {
+            return .todo
+        }
+
+        switch entry.memoryClass {
+        case .semantic, .procedural:
+            return .persistent
+        case .episodic, .bulletin:
+            return .temporary
+        }
+    }
+
+    private func makeAgentMemoryItem(from entry: MemoryEntry) -> AgentMemoryItem {
+        AgentMemoryItem(
+            id: entry.id,
+            note: entry.note,
+            summary: entry.summary,
+            kind: entry.kind,
+            memoryClass: entry.memoryClass,
+            scope: entry.scope,
+            source: entry.source,
+            importance: entry.importance,
+            confidence: entry.confidence,
+            createdAt: entry.createdAt,
+            updatedAt: entry.updatedAt,
+            expiresAt: entry.expiresAt,
+            derivedCategory: derivedCategory(for: entry)
+        )
     }
 
     private func mapSessionStoreError(_ error: Error) -> AgentSessionError {

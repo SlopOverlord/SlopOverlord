@@ -261,6 +261,14 @@ public actor HybridMemoryStore: MemoryStore {
 #endif
     }
 
+    public func edges(for memoryIDs: [String]) async -> [MemoryEdgeRecord] {
+#if canImport(SQLite3)
+        listEdges(for: memoryIDs)
+#else
+        []
+#endif
+    }
+
     public func flushOutbox(limit: Int = 50) async -> Int {
 #if canImport(SQLite3)
         let rows = nextOutboxRows(limit: limit)
@@ -695,6 +703,74 @@ private extension HybridMemoryStore {
                 result.append(entry)
             }
         }
+        return result
+    }
+
+    func listEdges(for memoryIDs: [String]) -> [MemoryEdgeRecord] {
+        guard let db else {
+            return []
+        }
+
+        let ids = Array(Set(memoryIDs)).sorted()
+        guard !ids.isEmpty else {
+            return []
+        }
+
+        let placeholders = Array(repeating: "?", count: ids.count).joined(separator: ",")
+        let sql =
+            """
+            SELECT
+                from_memory_id,
+                to_memory_id,
+                relation,
+                weight,
+                provenance,
+                created_at
+            FROM memory_edges
+            WHERE from_memory_id IN (\(placeholders)) OR to_memory_id IN (\(placeholders))
+            ORDER BY created_at DESC;
+            """
+
+        var statement: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK else {
+            return []
+        }
+        defer { sqlite3_finalize(statement) }
+
+        var index: Int32 = 1
+        for id in ids {
+            bindText(id, at: index, statement: statement)
+            index += 1
+        }
+        for id in ids {
+            bindText(id, at: index, statement: statement)
+            index += 1
+        }
+
+        var result: [MemoryEdgeRecord] = []
+        while sqlite3_step(statement) == SQLITE_ROW {
+            guard let fromPtr = sqlite3_column_text(statement, 0),
+                  let toPtr = sqlite3_column_text(statement, 1),
+                  let relationPtr = sqlite3_column_text(statement, 2),
+                  let createdAtPtr = sqlite3_column_text(statement, 5)
+            else {
+                continue
+            }
+
+            let relation = MemoryEdgeRelation(rawValue: String(cString: relationPtr)) ?? .about
+            let createdAt = isoFormatter.date(from: String(cString: createdAtPtr)) ?? Date()
+            result.append(
+                MemoryEdgeRecord(
+                    fromMemoryId: String(cString: fromPtr),
+                    toMemoryId: String(cString: toPtr),
+                    relation: relation,
+                    weight: sqlite3_column_double(statement, 3),
+                    provenance: optionalText(statement: statement, index: 4),
+                    createdAt: createdAt
+                )
+            )
+        }
+
         return result
     }
 

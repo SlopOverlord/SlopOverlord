@@ -3678,6 +3678,314 @@ body.agent-chat-no-page-scroll .page {
   font-variation-settings: "FILL" 0, "wght" 400, "GRAD" 0, "opsz" 20;
 }
 
+.agent-memories-shell {
+  display: grid;
+  gap: 14px;
+}
+
+.agent-memories-toolbar {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  gap: 12px;
+  align-items: center;
+}
+
+.agent-memories-search {
+  min-width: 0;
+}
+
+.agent-memory-segmented {
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid var(--line);
+  background: var(--surface);
+}
+
+.agent-memory-segment {
+  border: none;
+  border-right: 1px solid var(--line);
+  background: transparent;
+  color: var(--muted);
+  padding: 10px 14px;
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+
+.agent-memory-segment:last-child {
+  border-right: none;
+}
+
+.agent-memory-segment:hover {
+  color: var(--text);
+  background: var(--surface-2);
+}
+
+.agent-memory-segment.active {
+  color: var(--text);
+  background: var(--surface-2);
+}
+
+.agent-memories-body {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 320px;
+  gap: 12px;
+  min-height: 420px;
+}
+
+.agent-memories-main,
+.agent-memory-inspector {
+  border: 1px solid var(--line);
+  background: var(--surface);
+}
+
+.agent-memories-main {
+  min-width: 0;
+  padding: 12px;
+}
+
+.agent-memories-empty {
+  min-height: 260px;
+  display: grid;
+  place-items: center;
+}
+
+.agent-memory-list-shell {
+  display: grid;
+  gap: 12px;
+}
+
+.agent-memory-list {
+  display: grid;
+  gap: 10px;
+}
+
+.agent-memory-card {
+  display: grid;
+  gap: 10px;
+  width: 100%;
+  text-align: left;
+  border: 1px solid var(--line);
+  background: var(--surface-2);
+  color: var(--text);
+  padding: 12px;
+  cursor: pointer;
+  transition: border-color 0.2s ease, transform 0.2s ease, background 0.2s ease;
+}
+
+.agent-memory-card:hover,
+.agent-memory-card.selected {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--surface-2) 84%, var(--accent) 16%);
+}
+
+.agent-memory-card.selected {
+  transform: translateY(-1px);
+}
+
+.agent-memory-card-head,
+.agent-memory-card-foot,
+.agent-memory-inspector-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.agent-memory-card-head strong,
+.agent-memory-graph-node strong {
+  font-size: 0.92rem;
+}
+
+.agent-memory-note {
+  margin: 0;
+  color: var(--text);
+  line-height: 1.45;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.agent-memory-card-foot {
+  font-size: 0.78rem;
+  color: var(--muted);
+  flex-wrap: wrap;
+}
+
+.agent-memory-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.agent-memory-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 8px;
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  border: 1px solid currentColor;
+}
+
+.agent-memory-badge-persistent {
+  color: #22c55e;
+  background: rgba(34, 197, 94, 0.08);
+}
+
+.agent-memory-badge-temporary {
+  color: #38bdf8;
+  background: rgba(56, 189, 248, 0.08);
+}
+
+.agent-memory-badge-todo {
+  color: #f59e0b;
+  background: rgba(245, 158, 11, 0.08);
+}
+
+.agent-memory-badge-neutral {
+  color: var(--muted);
+  background: var(--surface-3);
+}
+
+.agent-memory-date {
+  font-size: 0.75rem;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.agent-memory-pagination {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  color: var(--muted);
+  font-size: 0.82rem;
+}
+
+.agent-memory-pagination button {
+  min-width: 88px;
+}
+
+.agent-memory-pagination button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.agent-memory-inspector {
+  display: grid;
+  align-content: start;
+  gap: 14px;
+  padding: 14px;
+}
+
+.agent-memory-inspector h4 {
+  margin: 0;
+}
+
+.agent-memory-inspector-meta {
+  display: grid;
+  gap: 10px;
+  margin: 0;
+}
+
+.agent-memory-inspector-meta div {
+  display: grid;
+  gap: 4px;
+}
+
+.agent-memory-inspector-meta dt {
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+}
+
+.agent-memory-inspector-meta dd {
+  margin: 0;
+  color: var(--text);
+  word-break: break-word;
+}
+
+.agent-memory-graph-shell {
+  display: grid;
+  gap: 10px;
+}
+
+.agent-memory-graph-notice {
+  padding: 10px 12px;
+  border: 1px solid rgba(245, 158, 11, 0.35);
+  background: rgba(245, 158, 11, 0.08);
+  color: #f59e0b;
+  font-size: 0.82rem;
+}
+
+.agent-memory-graph-stage {
+  position: relative;
+  min-height: 420px;
+  overflow: auto;
+  border: 1px solid var(--line);
+  background:
+    linear-gradient(transparent 31px, rgba(255, 255, 255, 0.03) 32px),
+    linear-gradient(90deg, transparent 31px, rgba(255, 255, 255, 0.03) 32px),
+    var(--bg);
+  background-size: 32px 32px;
+}
+
+.agent-memory-graph-canvas {
+  position: relative;
+  min-width: 904px;
+  min-height: 420px;
+}
+
+.agent-memory-graph-svg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+
+.agent-memory-graph-edge {
+  fill: none;
+  stroke: color-mix(in srgb, var(--accent) 55%, var(--line) 45%);
+  stroke-width: 2;
+  opacity: 0.7;
+}
+
+.agent-memory-graph-node {
+  position: absolute;
+  display: grid;
+  align-content: start;
+  gap: 8px;
+  padding: 12px;
+  text-align: left;
+  border: 1px solid var(--line);
+  background: rgba(7, 10, 18, 0.92);
+  color: var(--text);
+  cursor: pointer;
+  box-shadow: 0 14px 36px rgba(0, 0, 0, 0.28);
+}
+
+.agent-memory-graph-node p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.82rem;
+  line-height: 1.35;
+}
+
+.agent-memory-graph-node.seed {
+  border-color: color-mix(in srgb, var(--accent) 60%, var(--line) 40%);
+}
+
+.agent-memory-graph-node.selected {
+  outline: 1px solid var(--accent);
+  transform: translateY(-1px);
+}
+
+.agent-memory-graph-node.neighbor {
+  background: rgba(17, 23, 33, 0.92);
+}
+
 .agent-tools-head {
   align-items: flex-start;
 }
@@ -5759,7 +6067,7 @@ pre {
   background: var(--surface);
   border: 1px solid var(--line);
   border-radius: 0;
-  padding: 10px 14px;
+  padding: 0px 14px;
 }
 
 .skills-search .material-symbols-rounded {
@@ -6800,6 +7108,26 @@ pre {
   font-size: 0.72rem;
   color: var(--muted);
   border-top: 1px solid var(--line);
+}
+
+@media (max-width: 1000px) {
+  .agent-memories-toolbar,
+  .agent-memories-body {
+    grid-template-columns: 1fr;
+  }
+
+  .agent-memory-segmented {
+    width: 100%;
+    overflow: auto;
+  }
+
+  .agent-memory-segment {
+    flex: 1 0 auto;
+  }
+
+  .agent-memory-inspector {
+    order: -1;
+  }
 }
 
 @media (max-width: 900px) {

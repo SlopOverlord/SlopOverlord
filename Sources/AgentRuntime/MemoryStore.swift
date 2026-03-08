@@ -59,6 +59,8 @@ public protocol MemoryStore: Sendable {
     func link(_ edge: MemoryEdgeWriteRequest) async -> Bool
     /// Returns memory entries using structured filters.
     func entries(filter: MemoryEntryFilter) async -> [MemoryEntry]
+    /// Returns edges touching any of the given memory ids.
+    func edges(for memoryIDs: [String]) async -> [MemoryEdgeRecord]
 }
 
 public extension MemoryStore {
@@ -75,6 +77,10 @@ public extension MemoryStore {
     /// Backward-compatible listing API.
     func entries() async -> [MemoryEntry] {
         await entries(filter: .default)
+    }
+
+    func edges(for memoryIDs: [String]) async -> [MemoryEdgeRecord] {
+        []
     }
 }
 
@@ -214,6 +220,28 @@ public actor InMemoryMemoryStore: MemoryStore {
             )
         )
         return true
+    }
+
+    public func edges(for memoryIDs: [String]) async -> [MemoryEdgeRecord] {
+        let ids = Set(memoryIDs)
+        guard !ids.isEmpty else {
+            return []
+        }
+
+        return edges.compactMap { edge in
+            guard ids.contains(edge.fromMemoryId) || ids.contains(edge.toMemoryId) else {
+                return nil
+            }
+
+            return MemoryEdgeRecord(
+                fromMemoryId: edge.fromMemoryId,
+                toMemoryId: edge.toMemoryId,
+                relation: edge.relation,
+                weight: edge.weight,
+                provenance: edge.provenance,
+                createdAt: edge.createdAt
+            )
+        }
     }
 
     /// Lists all in-memory entries using structured filters.
