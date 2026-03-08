@@ -571,8 +571,7 @@ actor AgentSessionOrchestrator {
 
         return value.hasPrefix("model provider error:") ||
             value.hasPrefix("error:") ||
-            value.contains(" failed") ||
-            value.contains("exception")
+            value.hasPrefix("exception:")
     }
 
     private func sessionChannelID(agentID: String, sessionID: String) -> String {

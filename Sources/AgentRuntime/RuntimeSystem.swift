@@ -371,7 +371,10 @@ public actor RuntimeSystem {
         if let fenced = extractJSONFence(from: trimmed) {
             return decodeToolCall(fenced)
         }
-        return decodeToolCall(trimmed)
+        if let decoded = decodeToolCall(trimmed) {
+            return decoded
+        }
+        return extractInlineJSONObject(from: trimmed)
     }
 
     private func decodeToolCall(_ raw: String) -> ToolInvocationRequest? {
@@ -400,6 +403,59 @@ public actor RuntimeSystem {
             return nil
         }
         return String(content[..<fenceRange.lowerBound]).trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private func extractInlineJSONObject(from text: String) -> ToolInvocationRequest? {
+        let characters = Array(text)
+        var startIndex: Int?
+        var depth = 0
+        var inString = false
+        var isEscaped = false
+
+        for (index, character) in characters.enumerated() {
+            if inString {
+                if isEscaped {
+                    isEscaped = false
+                    continue
+                }
+                if character == "\\" {
+                    isEscaped = true
+                    continue
+                }
+                if character == "\"" {
+                    inString = false
+                }
+                continue
+            }
+
+            if character == "\"" {
+                inString = true
+                continue
+            }
+
+            if character == "{" {
+                if depth == 0 {
+                    startIndex = index
+                }
+                depth += 1
+                continue
+            }
+
+            if character == "}" {
+                guard depth > 0 else {
+                    continue
+                }
+                depth -= 1
+                if depth == 0, let startIndex {
+                    let candidate = String(characters[startIndex...index])
+                    if let decoded = decodeToolCall(candidate) {
+                        return decoded
+                    }
+                }
+            }
+        }
+
+        return nil
     }
 
     private func encodedToolResult(_ result: ToolInvocationResult) -> String {
