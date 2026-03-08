@@ -40,6 +40,7 @@ public struct AgentSessionStreamUpdate: Codable, Sendable {
 }
 
 public actor CoreService {
+    private static let heartbeatSuccessToken = "SLOPPY_ACTION_OK"
 
     public enum AgentStorageError: Error {
         case invalidID
@@ -156,6 +157,7 @@ public actor CoreService {
     private var activeGatewayPlugins: [any GatewayPlugin] = []
     private var visorScheduler: VisorScheduler?
     private var cronRunner: CronRunner?
+    private var heartbeatRunner: HeartbeatRunner?
     private var memoryOutboxIndexer: MemoryOutboxIndexer?
     private let recoveryManager: RecoveryManager
     private var liveSessionStreamContinuations: [String: [UUID: AsyncStream<AgentSessionStreamUpdate>.Continuation]] = [:]
@@ -334,6 +336,23 @@ public actor CoreService {
             cronRunner = CronRunner(store: self.store, runtime: self.runtime, logger: self.logger)
         }
         await cronRunner?.start()
+
+        if heartbeatRunner == nil {
+            heartbeatRunner = HeartbeatRunner(
+                logger: Logger(label: "sloppy.core.heartbeat")
+            ) { [weak self] in
+                guard let self else {
+                    return []
+                }
+                return await self.listHeartbeatSchedules()
+            } executor: { [weak self] agentID in
+                guard let self else {
+                    return
+                }
+                await self.runAgentHeartbeat(agentID: agentID)
+            }
+        }
+        await heartbeatRunner?.start()
     }
 
     /// Stops all active in-process gateway plugins and visor scheduler. Called on shutdown.
@@ -346,6 +365,7 @@ public actor CoreService {
         await visorScheduler?.stop()
         await memoryOutboxIndexer?.stop()
         await cronRunner?.stop()
+        await heartbeatRunner?.stop()
     }
 
     private func seedTelegramPluginRecord(
@@ -942,6 +962,126 @@ public actor CoreService {
         }
     }
 
+    func overrideModelProviderForTests(_ modelProvider: (any ModelProviderPlugin)?, defaultModel: String?) async {
+        await runtime.updateModelProvider(modelProvider: modelProvider, defaultModel: defaultModel)
+    }
+
+    func triggerHeartbeatRunnerForTests() async {
+        await heartbeatRunner?.triggerImmediately()
+    }
+
+    func heartbeatRunnerRunningForTests() async -> Bool {
+        await heartbeatRunner?.running() ?? false
+    }
+
+    func listHeartbeatSchedules() async -> [AgentHeartbeatSchedule] {
+        do {
+            let agents = try listAgents()
+            var schedules: [AgentHeartbeatSchedule] = []
+            schedules.reserveCapacity(agents.count)
+
+            for agent in agents {
+                let config = try getAgentConfig(agentID: agent.id)
+                guard config.heartbeat.enabled else {
+                    continue
+                }
+                schedules.append(
+                    AgentHeartbeatSchedule(
+                        agentId: agent.id,
+                        intervalMinutes: config.heartbeat.intervalMinutes,
+                        lastRunAt: config.heartbeatStatus.lastRunAt
+                    )
+                )
+            }
+            return schedules
+        } catch {
+            logger.warning("Failed to load heartbeat schedules: \(error)")
+            return []
+        }
+    }
+
+    func runAgentHeartbeat(agentID: String) async {
+        await waitForStartup()
+
+        do {
+            let config = try getAgentConfig(agentID: agentID)
+            guard config.heartbeat.enabled else {
+                return
+            }
+
+            let now = Date()
+            var status = config.heartbeatStatus
+            status.lastRunAt = now
+            status.lastErrorMessage = nil
+
+            let heartbeatMarkdown = config.documents.heartbeatMarkdown.trimmingCharacters(in: .whitespacesAndNewlines)
+            if heartbeatMarkdown.isEmpty {
+                status.lastSuccessAt = now
+                status.lastResult = "ok_empty"
+                status.lastSessionId = nil
+                try agentCatalogStore.updateHeartbeatStatus(agentID: agentID, status: status)
+                return
+            }
+
+            let session = try await createAgentSession(
+                agentID: agentID,
+                request: AgentSessionCreateRequest(
+                    title: heartbeatSessionTitle(date: now),
+                    kind: .heartbeat
+                )
+            )
+            status.lastSessionId = session.id
+            try agentCatalogStore.updateHeartbeatStatus(agentID: agentID, status: status)
+
+            let response = try await postAgentSessionMessage(
+                agentID: agentID,
+                sessionID: session.id,
+                request: AgentSessionPostMessageRequest(
+                    userId: "system_heartbeat",
+                    content: heartbeatPrompt(markdown: config.documents.heartbeatMarkdown)
+                )
+            )
+
+            let assistantText = latestAssistantText(from: response.appendedEvents)
+            let latestRunStatus = response.appendedEvents.reversed().first(where: { $0.type == .runStatus })?.runStatus
+            let trimmedAssistantText = assistantText.trimmingCharacters(in: .whitespacesAndNewlines)
+
+            if latestRunStatus?.stage != .interrupted && trimmedAssistantText == Self.heartbeatSuccessToken {
+                status.lastSuccessAt = now
+                status.lastResult = "ok"
+                status.lastErrorMessage = nil
+                try agentCatalogStore.updateHeartbeatStatus(agentID: agentID, status: status)
+                return
+            }
+
+            let failureMessage = heartbeatFailureMessage(
+                assistantText: trimmedAssistantText,
+                runStatus: latestRunStatus
+            )
+            status.lastFailureAt = now
+            status.lastResult = "failed"
+            status.lastErrorMessage = failureMessage
+            try agentCatalogStore.updateHeartbeatStatus(agentID: agentID, status: status)
+            await notifyHeartbeatFailure(agentID: agentID, message: failureMessage)
+        } catch {
+            let now = Date()
+            let message = "Heartbeat failed: \(error)"
+
+            do {
+                var status = try agentCatalogStore.getHeartbeatStatus(agentID: agentID)
+                status.lastRunAt = now
+                status.lastFailureAt = now
+                status.lastResult = "failed"
+                status.lastErrorMessage = message
+                try agentCatalogStore.updateHeartbeatStatus(agentID: agentID, status: status)
+            } catch {
+                logger.warning("Failed to persist heartbeat error for agent \(agentID): \(error)")
+            }
+
+            await notifyHeartbeatFailure(agentID: agentID, message: message)
+        }
+    }
+
     /// Returns available tool catalog entries.
     public func toolCatalog() -> [AgentToolCatalogEntry] {
         ToolCatalog.entries
@@ -1067,7 +1207,7 @@ public actor CoreService {
             return installedSkill
         } catch let error as AgentSkillsFileStore.StoreError {
             throw mapAgentSkillsError(error)
-        } catch let error as SkillsGitHubClient.ClientError {
+        } catch is SkillsGitHubClient.ClientError {
             throw AgentSkillsError.downloadFailure
         } catch {
             throw AgentSkillsError.storageFailure
@@ -3927,6 +4067,95 @@ public actor CoreService {
 
     private func normalizedTaskTitleKey(_ value: String) -> String {
         normalizeWhitespace(value).lowercased()
+    }
+
+    private func heartbeatSessionTitle(date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = "yyyy-MM-dd HH:mm"
+        return "Heartbeat \(formatter.string(from: date))"
+    }
+
+    private func heartbeatPrompt(markdown: String) -> String {
+        """
+        [heartbeat_v1]
+        Review the HEARTBEAT.md checklist below.
+
+        Rules:
+        - If every requested item is already completed, verified, or there is nothing actionable, respond with exactly \(Self.heartbeatSuccessToken)
+        - If anything is missing, failed, blocked, or cannot be verified, respond with one short plain-text problem description
+        - Do not return markdown fences
+        - Do not include any extra commentary when returning \(Self.heartbeatSuccessToken)
+
+        [HEARTBEAT.md]
+        \(markdown)
+        """
+    }
+
+    private func latestAssistantText(from events: [AgentSessionEvent]) -> String {
+        for event in events.reversed() {
+            guard event.type == .message, let message = event.message, message.role == .assistant else {
+                continue
+            }
+            return plainText(from: message)
+        }
+        return ""
+    }
+
+    private func plainText(from message: AgentSessionMessage) -> String {
+        message.segments.compactMap { segment in
+            switch segment.kind {
+            case .text, .thinking:
+                return segment.text
+            case .attachment:
+                return nil
+            }
+        }.joined(separator: "\n")
+    }
+
+    private func heartbeatFailureMessage(
+        assistantText: String,
+        runStatus: AgentRunStatusEvent?
+    ) -> String {
+        if let runStatus, runStatus.stage == .interrupted {
+            let details = normalizeWhitespace(runStatus.details ?? "")
+            if !details.isEmpty {
+                return details
+            }
+        }
+
+        let normalizedAssistant = normalizeWhitespace(assistantText)
+        if !normalizedAssistant.isEmpty {
+            return normalizedAssistant
+        }
+
+        return "Heartbeat did not return \(Self.heartbeatSuccessToken)."
+    }
+
+    private func notifyHeartbeatFailure(agentID: String, message: String) async {
+        let notification = "HEARTBEAT failed for agent \(agentID): \(message)"
+        if let channelID = heartbeatNotificationChannelID(agentID: agentID) {
+            await runtime.appendSystemMessage(channelId: channelID, content: notification)
+            await deliverToChannelPlugin(channelId: channelID, content: notification)
+            return
+        }
+
+        logger.warning("\(notification)")
+    }
+
+    private func heartbeatNotificationChannelID(agentID: String) -> String? {
+        guard let board = try? getActorBoard() else {
+            return nil
+        }
+
+        return board.nodes
+            .filter { normalizeWhitespace($0.linkedAgentId ?? "") == agentID }
+            .sorted(by: { $0.createdAt < $1.createdAt })
+            .compactMap { node in
+                let channelID = normalizeWhitespace(node.channelId ?? "")
+                return channelID.isEmpty ? nil : channelID
+            }
+            .first
     }
 
     private func normalizeWhitespace(_ value: String) -> String {

@@ -945,6 +945,10 @@ func agentConfigEndpointsReadAndUpdate() async throws {
     #expect(fetched.agentId == "agent-config")
     #expect(!fetched.selectedModel.isEmpty)
     #expect(!fetched.availableModels.isEmpty)
+    #expect(fetched.heartbeat.enabled == false)
+    #expect(fetched.heartbeat.intervalMinutes == 5)
+    #expect(fetched.documents.heartbeatMarkdown.isEmpty)
+    #expect(fetched.heartbeatStatus.lastRunAt == nil)
 
     let nextModel = fetched.availableModels.last?.id ?? fetched.selectedModel
     let updateRequest = AgentConfigUpdateRequest(
@@ -953,8 +957,10 @@ func agentConfigEndpointsReadAndUpdate() async throws {
             userMarkdown: "# User\nUpdated user profile\n",
             agentsMarkdown: "# Agent\nUpdated orchestration guidance\n",
             soulMarkdown: "# Soul\nUpdated values and boundaries\n",
-            identityMarkdown: "# Identity\nagent-config-v2\n"
-        )
+            identityMarkdown: "# Identity\nagent-config-v2\n",
+            heartbeatMarkdown: "- verify onboarding checklist\n"
+        ),
+        heartbeat: AgentHeartbeatSettings(enabled: true, intervalMinutes: 15)
     )
     let updateBody = try JSONEncoder().encode(updateRequest)
     let updateResponse = await router.handle(method: "PUT", path: "/v1/agents/agent-config/config", body: updateBody)
@@ -966,21 +972,82 @@ func agentConfigEndpointsReadAndUpdate() async throws {
     #expect(updated.documents.agentsMarkdown.contains("Updated orchestration guidance"))
     #expect(updated.documents.soulMarkdown.contains("Updated values and boundaries"))
     #expect(updated.documents.identityMarkdown.contains("agent-config-v2"))
+    #expect(updated.documents.heartbeatMarkdown.contains("verify onboarding checklist"))
+    #expect(updated.heartbeat.enabled == true)
+    #expect(updated.heartbeat.intervalMinutes == 15)
 
     let agentDirectory = config
         .resolvedWorkspaceRootURL()
         .appendingPathComponent("agents", isDirectory: true)
         .appendingPathComponent("agent-config", isDirectory: true)
     let identityPath = agentDirectory.appendingPathComponent("Identity.id")
+    let heartbeatPath = agentDirectory.appendingPathComponent("HEARTBEAT.md")
     let userPath = agentDirectory.appendingPathComponent("User.md")
     let configPath = agentDirectory.appendingPathComponent("config.json")
 
     let identityFileText = try String(contentsOf: identityPath, encoding: .utf8)
+    let heartbeatFileText = try String(contentsOf: heartbeatPath, encoding: .utf8)
     let userFileText = try String(contentsOf: userPath, encoding: .utf8)
     let configFileText = try String(contentsOf: configPath, encoding: .utf8)
     #expect(identityFileText == "agent-config-v2\n")
+    #expect(heartbeatFileText == "- verify onboarding checklist\n")
     #expect(userFileText.contains("Updated user profile"))
     #expect(configFileText.contains(nextModel))
+    #expect(configFileText.contains("\"intervalMinutes\" : 15"))
+}
+
+@Test
+func agentConfigHeartbeatValidationAndBackfill() async throws {
+    let workspaceName = "workspace-agent-heartbeat-\(UUID().uuidString)"
+    let sqlitePath = FileManager.default.temporaryDirectory
+        .appendingPathComponent("core-agent-heartbeat-\(UUID().uuidString).sqlite")
+        .path
+
+    var config = CoreConfig.default
+    config.workspace = .init(name: workspaceName, basePath: FileManager.default.temporaryDirectory.path)
+    config.sqlitePath = sqlitePath
+
+    let service = CoreService(config: config)
+    let router = CoreRouter(service: service)
+
+    let createBody = try JSONEncoder().encode(
+        AgentCreateRequest(
+            id: "agent-heartbeat",
+            displayName: "Agent Heartbeat",
+            role: "Tests heartbeat config validation"
+        )
+    )
+    let createResponse = await router.handle(method: "POST", path: "/v1/agents", body: createBody)
+    #expect(createResponse.status == 201)
+
+    let agentDirectory = config
+        .resolvedWorkspaceRootURL()
+        .appendingPathComponent("agents", isDirectory: true)
+        .appendingPathComponent("agent-heartbeat", isDirectory: true)
+    let heartbeatPath = agentDirectory.appendingPathComponent("HEARTBEAT.md")
+    #expect(FileManager.default.fileExists(atPath: heartbeatPath.path))
+
+    try FileManager.default.removeItem(at: heartbeatPath)
+    #expect(!FileManager.default.fileExists(atPath: heartbeatPath.path))
+
+    let getResponse = await router.handle(method: "GET", path: "/v1/agents/agent-heartbeat/config", body: nil)
+    #expect(getResponse.status == 200)
+    #expect(FileManager.default.fileExists(atPath: heartbeatPath.path))
+
+    let invalidUpdate = AgentConfigUpdateRequest(
+        selectedModel: "openai:gpt-4.1-mini",
+        documents: AgentDocumentBundle(
+            userMarkdown: "# User\nA\n",
+            agentsMarkdown: "# Agent\nB\n",
+            soulMarkdown: "# Soul\nC\n",
+            identityMarkdown: "# Identity\nagent-heartbeat\n",
+            heartbeatMarkdown: "- verify\n"
+        ),
+        heartbeat: AgentHeartbeatSettings(enabled: true, intervalMinutes: 0)
+    )
+    let invalidBody = try JSONEncoder().encode(invalidUpdate)
+    let invalidResponse = await router.handle(method: "PUT", path: "/v1/agents/agent-heartbeat/config", body: invalidBody)
+    #expect(invalidResponse.status == 400)
 }
 
 @Test

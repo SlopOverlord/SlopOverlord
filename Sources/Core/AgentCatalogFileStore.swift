@@ -17,6 +17,16 @@ final class AgentCatalogFileStore {
         let role: String
         let createdAt: Date
         let selectedModel: String?
+        let heartbeat: AgentHeartbeatSettings?
+    }
+
+    private struct AgentHeartbeatStatusFile: Codable {
+        let lastRunAt: Date?
+        let lastSuccessAt: Date?
+        let lastFailureAt: Date?
+        let lastResult: String?
+        let lastErrorMessage: String?
+        let lastSessionId: String?
     }
 
     private let fileManager: FileManager
@@ -113,14 +123,18 @@ final class AgentCatalogFileStore {
         }
 
         let summary = try getAgent(id: normalizedAgentID)
-        let selectedModel = try readAgentConfigFile(for: summary, availableModels: availableModels).selectedModel ?? ""
+        let configFile = try readAgentConfigFile(for: summary, availableModels: availableModels)
+        let selectedModel = configFile.selectedModel ?? ""
         let documents = try readAgentDocuments(agentID: normalizedAgentID)
+        let heartbeatStatus = try readHeartbeatStatus(agentID: normalizedAgentID)
 
         return AgentConfigDetail(
             agentId: normalizedAgentID,
             selectedModel: selectedModel,
             availableModels: availableModels,
-            documents: documents
+            documents: documents,
+            heartbeat: configFile.heartbeat ?? AgentHeartbeatSettings(),
+            heartbeatStatus: heartbeatStatus
         )
     }
 
@@ -149,7 +163,8 @@ final class AgentCatalogFileStore {
             userMarkdown: normalizedDocumentText(request.documents.userMarkdown),
             agentsMarkdown: normalizedDocumentText(request.documents.agentsMarkdown),
             soulMarkdown: normalizedDocumentText(request.documents.soulMarkdown),
-            identityMarkdown: normalizedDocumentText(request.documents.identityMarkdown)
+            identityMarkdown: normalizedDocumentText(request.documents.identityMarkdown),
+            heartbeatMarkdown: normalizedHeartbeatText(request.documents.heartbeatMarkdown)
         )
 
         guard !normalizedDocuments.userMarkdown.isEmpty,
@@ -160,6 +175,11 @@ final class AgentCatalogFileStore {
             throw StoreError.invalidPayload
         }
 
+        let heartbeat = request.heartbeat
+        if heartbeat.enabled && heartbeat.intervalMinutes < 1 {
+            throw StoreError.invalidPayload
+        }
+
         do {
             try writeAgentConfigFile(
                 AgentConfigFile(
@@ -167,7 +187,8 @@ final class AgentCatalogFileStore {
                     displayName: summary.displayName,
                     role: summary.role,
                     createdAt: summary.createdAt,
-                    selectedModel: selectedModel
+                    selectedModel: selectedModel,
+                    heartbeat: heartbeat
                 )
             )
 
@@ -176,6 +197,7 @@ final class AgentCatalogFileStore {
             try writeTextFile(contents: normalizedDocuments.userMarkdown, at: agentDirectory.appendingPathComponent("User.md"))
             try writeTextFile(contents: normalizedDocuments.soulMarkdown, at: agentDirectory.appendingPathComponent("Soul.md"))
             try writeTextFile(contents: normalizedDocuments.identityMarkdown, at: agentDirectory.appendingPathComponent("Identity.md"))
+            try writeTextFile(contents: normalizedDocuments.heartbeatMarkdown, at: agentDirectory.appendingPathComponent("HEARTBEAT.md"))
 
             let legacyIdentity = normalizedIdentityValue(from: normalizedDocuments.identityMarkdown, fallback: summary.id)
             try writeTextFile(contents: legacyIdentity + "\n", at: agentDirectory.appendingPathComponent("Identity.id"))
@@ -187,7 +209,9 @@ final class AgentCatalogFileStore {
             agentId: normalizedAgentID,
             selectedModel: selectedModel,
             availableModels: availableModels,
-            documents: normalizedDocuments
+            documents: normalizedDocuments,
+            heartbeat: heartbeat,
+            heartbeatStatus: try readHeartbeatStatus(agentID: normalizedAgentID)
         )
     }
 
@@ -203,6 +227,7 @@ final class AgentCatalogFileStore {
         let userMarkdown = try readTextFile(at: agentDirectory.appendingPathComponent("User.md"), fallback: "# User\n")
         let agentsMarkdown = try readTextFile(at: agentDirectory.appendingPathComponent("Agents.md"), fallback: "# Agent\n")
         let soulMarkdown = try readTextFile(at: agentDirectory.appendingPathComponent("Soul.md"), fallback: "# Soul\n")
+        let heartbeatMarkdown = try readHeartbeatFile(agentID: normalizedID)
 
         let identityMarkdownPath = agentDirectory.appendingPathComponent("Identity.md")
         let identityLegacyPath = agentDirectory.appendingPathComponent("Identity.id")
@@ -216,8 +241,30 @@ final class AgentCatalogFileStore {
             userMarkdown: userMarkdown,
             agentsMarkdown: agentsMarkdown,
             soulMarkdown: soulMarkdown,
-            identityMarkdown: identityMarkdown
+            identityMarkdown: identityMarkdown,
+            heartbeatMarkdown: heartbeatMarkdown
         )
+    }
+
+    func getHeartbeatStatus(agentID: String) throws -> AgentHeartbeatStatus {
+        guard let normalizedAgentID = normalizedAgentID(agentID) else {
+            throw StoreError.invalidID
+        }
+        _ = try getAgent(id: normalizedAgentID)
+        return try readHeartbeatStatus(agentID: normalizedAgentID)
+    }
+
+    func updateHeartbeatStatus(agentID: String, status: AgentHeartbeatStatus) throws {
+        guard let normalizedAgentID = normalizedAgentID(agentID) else {
+            throw StoreError.invalidID
+        }
+        _ = try getAgent(id: normalizedAgentID)
+
+        do {
+            try writeHeartbeatStatus(status, agentID: normalizedAgentID)
+        } catch {
+            throw StoreError.storageFailure
+        }
     }
 
     private func ensureAgentsRootDirectory() throws {
@@ -310,6 +357,10 @@ final class AgentCatalogFileStore {
             contents: "# Identity\n\(summary.id)\n",
             at: agentDirectory.appendingPathComponent("Identity.md")
         )
+        try writeTextFile(
+            contents: "",
+            at: agentDirectory.appendingPathComponent("HEARTBEAT.md")
+        )
 
         try writeAgentConfigFile(
             AgentConfigFile(
@@ -317,7 +368,8 @@ final class AgentCatalogFileStore {
                 displayName: summary.displayName,
                 role: summary.role,
                 createdAt: summary.createdAt,
-                selectedModel: availableModels.first?.id
+                selectedModel: availableModels.first?.id,
+                heartbeat: AgentHeartbeatSettings()
             )
         )
 
@@ -339,10 +391,16 @@ final class AgentCatalogFileStore {
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         let payload = try encoder.encode(toolsPolicy) + Data("\n".utf8)
         try payload.write(to: toolsDirectory.appendingPathComponent("tools.json"), options: .atomic)
+
+        try writeHeartbeatStatus(AgentHeartbeatStatus(), agentID: summary.id)
     }
 
     private func agentConfigURL(for id: String) -> URL {
         agentDirectoryURL(for: id).appendingPathComponent("config.json")
+    }
+
+    private func heartbeatStatusURL(for id: String) -> URL {
+        agentDirectoryURL(for: id).appendingPathComponent("heartbeat-status.json")
     }
 
     private func readAgentConfigFile(for summary: AgentSummary, availableModels: [ProviderModelOption]) throws -> AgentConfigFile {
@@ -353,7 +411,8 @@ final class AgentCatalogFileStore {
                 displayName: summary.displayName,
                 role: summary.role,
                 createdAt: summary.createdAt,
-                selectedModel: availableModels.first?.id
+                selectedModel: availableModels.first?.id,
+                heartbeat: AgentHeartbeatSettings()
             )
             try writeAgentConfigFile(fallback)
             return fallback
@@ -371,7 +430,18 @@ final class AgentCatalogFileStore {
                 displayName: decoded.displayName,
                 role: decoded.role,
                 createdAt: decoded.createdAt,
-                selectedModel: availableModels.first?.id
+                selectedModel: availableModels.first?.id,
+                heartbeat: decoded.heartbeat ?? AgentHeartbeatSettings()
+            )
+            try writeAgentConfigFile(decoded)
+        } else if decoded.heartbeat == nil {
+            decoded = AgentConfigFile(
+                id: decoded.id,
+                displayName: decoded.displayName,
+                role: decoded.role,
+                createdAt: decoded.createdAt,
+                selectedModel: decoded.selectedModel,
+                heartbeat: AgentHeartbeatSettings()
             )
             try writeAgentConfigFile(decoded)
         }
@@ -398,6 +468,42 @@ final class AgentCatalogFileStore {
         return normalizedDocumentText(text)
     }
 
+    private func readHeartbeatFile(agentID: String) throws -> String {
+        let url = agentDirectoryURL(for: agentID).appendingPathComponent("HEARTBEAT.md")
+        if !fileManager.fileExists(atPath: url.path) {
+            try writeTextFile(contents: "", at: url)
+            return ""
+        }
+
+        let data = try Data(contentsOf: url)
+        guard let text = String(data: data, encoding: .utf8) else {
+            return ""
+        }
+        return normalizedHeartbeatText(text)
+    }
+
+    private func readHeartbeatStatus(agentID: String) throws -> AgentHeartbeatStatus {
+        let url = heartbeatStatusURL(for: agentID)
+        if !fileManager.fileExists(atPath: url.path) {
+            let fallback = AgentHeartbeatStatus()
+            try writeHeartbeatStatus(fallback, agentID: agentID)
+            return fallback
+        }
+
+        let data = try Data(contentsOf: url)
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        let decoded = try decoder.decode(AgentHeartbeatStatusFile.self, from: data)
+        return AgentHeartbeatStatus(
+            lastRunAt: decoded.lastRunAt,
+            lastSuccessAt: decoded.lastSuccessAt,
+            lastFailureAt: decoded.lastFailureAt,
+            lastResult: decoded.lastResult,
+            lastErrorMessage: decoded.lastErrorMessage,
+            lastSessionId: decoded.lastSessionId
+        )
+    }
+
     private func readIdentityMarkdown(markdownURL: URL, legacyURL: URL, fallback: String) throws -> String {
         if fileManager.fileExists(atPath: markdownURL.path) {
             return try readTextFile(at: markdownURL, fallback: fallback + "\n")
@@ -418,12 +524,32 @@ final class AgentCatalogFileStore {
         try data.write(to: url, options: .atomic)
     }
 
+    private func writeHeartbeatStatus(_ status: AgentHeartbeatStatus, agentID: String) throws {
+        let payload = AgentHeartbeatStatusFile(
+            lastRunAt: status.lastRunAt,
+            lastSuccessAt: status.lastSuccessAt,
+            lastFailureAt: status.lastFailureAt,
+            lastResult: status.lastResult,
+            lastErrorMessage: status.lastErrorMessage,
+            lastSessionId: status.lastSessionId
+        )
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        encoder.dateEncodingStrategy = .iso8601
+        let data = try encoder.encode(payload) + Data("\n".utf8)
+        try data.write(to: heartbeatStatusURL(for: agentID), options: .atomic)
+    }
+
     private func normalizedDocumentText(_ raw: String) -> String {
         let normalized = raw.replacingOccurrences(of: "\r\n", with: "\n")
         if normalized.hasSuffix("\n") {
             return normalized
         }
         return normalized + "\n"
+    }
+
+    private func normalizedHeartbeatText(_ raw: String) -> String {
+        raw.replacingOccurrences(of: "\r\n", with: "\n")
     }
 
     private func normalizedIdentityValue(from markdown: String, fallback: String) -> String {

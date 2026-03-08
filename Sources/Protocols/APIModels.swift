@@ -332,17 +332,72 @@ public struct AgentDocumentBundle: Codable, Sendable, Equatable {
     public var agentsMarkdown: String
     public var soulMarkdown: String
     public var identityMarkdown: String
+    public var heartbeatMarkdown: String
 
     public init(
         userMarkdown: String,
         agentsMarkdown: String,
         soulMarkdown: String,
-        identityMarkdown: String
+        identityMarkdown: String,
+        heartbeatMarkdown: String = ""
     ) {
         self.userMarkdown = userMarkdown
         self.agentsMarkdown = agentsMarkdown
         self.soulMarkdown = soulMarkdown
         self.identityMarkdown = identityMarkdown
+        self.heartbeatMarkdown = heartbeatMarkdown
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case userMarkdown
+        case agentsMarkdown
+        case soulMarkdown
+        case identityMarkdown
+        case heartbeatMarkdown
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        userMarkdown = try container.decode(String.self, forKey: .userMarkdown)
+        agentsMarkdown = try container.decode(String.self, forKey: .agentsMarkdown)
+        soulMarkdown = try container.decode(String.self, forKey: .soulMarkdown)
+        identityMarkdown = try container.decode(String.self, forKey: .identityMarkdown)
+        heartbeatMarkdown = try container.decodeIfPresent(String.self, forKey: .heartbeatMarkdown) ?? ""
+    }
+}
+
+public struct AgentHeartbeatSettings: Codable, Sendable, Equatable {
+    public var enabled: Bool
+    public var intervalMinutes: Int
+
+    public init(enabled: Bool = false, intervalMinutes: Int = 5) {
+        self.enabled = enabled
+        self.intervalMinutes = intervalMinutes
+    }
+}
+
+public struct AgentHeartbeatStatus: Codable, Sendable, Equatable {
+    public var lastRunAt: Date?
+    public var lastSuccessAt: Date?
+    public var lastFailureAt: Date?
+    public var lastResult: String?
+    public var lastErrorMessage: String?
+    public var lastSessionId: String?
+
+    public init(
+        lastRunAt: Date? = nil,
+        lastSuccessAt: Date? = nil,
+        lastFailureAt: Date? = nil,
+        lastResult: String? = nil,
+        lastErrorMessage: String? = nil,
+        lastSessionId: String? = nil
+    ) {
+        self.lastRunAt = lastRunAt
+        self.lastSuccessAt = lastSuccessAt
+        self.lastFailureAt = lastFailureAt
+        self.lastResult = lastResult
+        self.lastErrorMessage = lastErrorMessage
+        self.lastSessionId = lastSessionId
     }
 }
 
@@ -351,27 +406,71 @@ public struct AgentConfigDetail: Codable, Sendable, Equatable {
     public var selectedModel: String
     public var availableModels: [ProviderModelOption]
     public var documents: AgentDocumentBundle
+    public var heartbeat: AgentHeartbeatSettings
+    public var heartbeatStatus: AgentHeartbeatStatus
 
     public init(
         agentId: String,
         selectedModel: String,
         availableModels: [ProviderModelOption],
-        documents: AgentDocumentBundle
+        documents: AgentDocumentBundle,
+        heartbeat: AgentHeartbeatSettings = AgentHeartbeatSettings(),
+        heartbeatStatus: AgentHeartbeatStatus = AgentHeartbeatStatus()
     ) {
         self.agentId = agentId
         self.selectedModel = selectedModel
         self.availableModels = availableModels
         self.documents = documents
+        self.heartbeat = heartbeat
+        self.heartbeatStatus = heartbeatStatus
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case agentId
+        case selectedModel
+        case availableModels
+        case documents
+        case heartbeat
+        case heartbeatStatus
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        agentId = try container.decode(String.self, forKey: .agentId)
+        selectedModel = try container.decode(String.self, forKey: .selectedModel)
+        availableModels = try container.decode([ProviderModelOption].self, forKey: .availableModels)
+        documents = try container.decode(AgentDocumentBundle.self, forKey: .documents)
+        heartbeat = try container.decodeIfPresent(AgentHeartbeatSettings.self, forKey: .heartbeat) ?? AgentHeartbeatSettings()
+        heartbeatStatus = try container.decodeIfPresent(AgentHeartbeatStatus.self, forKey: .heartbeatStatus) ?? AgentHeartbeatStatus()
     }
 }
 
 public struct AgentConfigUpdateRequest: Codable, Sendable {
     public var selectedModel: String
     public var documents: AgentDocumentBundle
+    public var heartbeat: AgentHeartbeatSettings
 
-    public init(selectedModel: String, documents: AgentDocumentBundle) {
+    public init(
+        selectedModel: String,
+        documents: AgentDocumentBundle,
+        heartbeat: AgentHeartbeatSettings = AgentHeartbeatSettings()
+    ) {
         self.selectedModel = selectedModel
         self.documents = documents
+        self.heartbeat = heartbeat
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case selectedModel
+        case documents
+        case heartbeat
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        selectedModel = try container.decode(String.self, forKey: .selectedModel)
+        documents = try container.decode(AgentDocumentBundle.self, forKey: .documents)
+        heartbeat = try container.decodeIfPresent(AgentHeartbeatSettings.self, forKey: .heartbeat) ?? AgentHeartbeatSettings()
     }
 }
 
@@ -694,13 +793,37 @@ public struct SessionStatusResponse: Codable, Sendable, Equatable {
     }
 }
 
+public enum AgentSessionKind: String, Codable, Sendable, Equatable {
+    case chat
+    case heartbeat
+}
+
 public struct AgentSessionCreateRequest: Codable, Sendable {
     public var title: String?
     public var parentSessionId: String?
+    public var kind: AgentSessionKind
 
-    public init(title: String? = nil, parentSessionId: String? = nil) {
+    public init(
+        title: String? = nil,
+        parentSessionId: String? = nil,
+        kind: AgentSessionKind = .chat
+    ) {
         self.title = title
         self.parentSessionId = parentSessionId
+        self.kind = kind
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case title
+        case parentSessionId
+        case kind
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        title = try container.decodeIfPresent(String.self, forKey: .title)
+        parentSessionId = try container.decodeIfPresent(String.self, forKey: .parentSessionId)
+        kind = try container.decodeIfPresent(AgentSessionKind.self, forKey: .kind) ?? .chat
     }
 }
 
@@ -713,6 +836,7 @@ public struct AgentSessionSummary: Codable, Sendable, Equatable {
     public var updatedAt: Date
     public var messageCount: Int
     public var lastMessagePreview: String?
+    public var kind: AgentSessionKind
 
     public init(
         id: String,
@@ -722,7 +846,8 @@ public struct AgentSessionSummary: Codable, Sendable, Equatable {
         createdAt: Date = Date(),
         updatedAt: Date = Date(),
         messageCount: Int = 0,
-        lastMessagePreview: String? = nil
+        lastMessagePreview: String? = nil,
+        kind: AgentSessionKind = .chat
     ) {
         self.id = id
         self.agentId = agentId
@@ -732,6 +857,32 @@ public struct AgentSessionSummary: Codable, Sendable, Equatable {
         self.updatedAt = updatedAt
         self.messageCount = messageCount
         self.lastMessagePreview = lastMessagePreview
+        self.kind = kind
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case agentId
+        case title
+        case parentSessionId
+        case createdAt
+        case updatedAt
+        case messageCount
+        case lastMessagePreview
+        case kind
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(String.self, forKey: .id)
+        agentId = try container.decode(String.self, forKey: .agentId)
+        title = try container.decode(String.self, forKey: .title)
+        parentSessionId = try container.decodeIfPresent(String.self, forKey: .parentSessionId)
+        createdAt = try container.decode(Date.self, forKey: .createdAt)
+        updatedAt = try container.decode(Date.self, forKey: .updatedAt)
+        messageCount = try container.decodeIfPresent(Int.self, forKey: .messageCount) ?? 0
+        lastMessagePreview = try container.decodeIfPresent(String.self, forKey: .lastMessagePreview)
+        kind = try container.decodeIfPresent(AgentSessionKind.self, forKey: .kind) ?? .chat
     }
 }
 
@@ -912,10 +1063,29 @@ public struct AgentToolResultEvent: Codable, Sendable, Equatable {
 public struct AgentSessionMetadataEvent: Codable, Sendable, Equatable {
     public var title: String
     public var parentSessionId: String?
+    public var kind: AgentSessionKind
 
-    public init(title: String, parentSessionId: String? = nil) {
+    public init(
+        title: String,
+        parentSessionId: String? = nil,
+        kind: AgentSessionKind = .chat
+    ) {
         self.title = title
         self.parentSessionId = parentSessionId
+        self.kind = kind
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case title
+        case parentSessionId
+        case kind
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        title = try container.decode(String.self, forKey: .title)
+        parentSessionId = try container.decodeIfPresent(String.self, forKey: .parentSessionId)
+        kind = try container.decodeIfPresent(AgentSessionKind.self, forKey: .kind) ?? .chat
     }
 }
 

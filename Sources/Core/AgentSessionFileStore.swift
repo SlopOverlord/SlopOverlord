@@ -33,7 +33,7 @@ final class AgentSessionFileStore {
         self.agentsRootURL = url
     }
 
-    func listSessions(agentID: String) throws -> [AgentSessionSummary] {
+    func listSessions(agentID: String, includeHeartbeat: Bool = false) throws -> [AgentSessionSummary] {
         let normalizedAgentID = try normalizedAgentID(agentID)
         let sessionsDirectory = try sessionsDirectoryURL(agentID: normalizedAgentID, createIfMissing: false)
 
@@ -52,7 +52,9 @@ final class AgentSessionFileStore {
         for file in sessionFiles {
             let sessionID = file.deletingPathExtension().lastPathComponent
             if let detail = try? loadSession(agentID: normalizedAgentID, sessionID: sessionID) {
-                summaries.append(detail.summary)
+                if includeHeartbeat || detail.summary.kind != .heartbeat {
+                    summaries.append(detail.summary)
+                }
             }
         }
 
@@ -77,7 +79,11 @@ final class AgentSessionFileStore {
             agentId: normalizedAgentID,
             sessionId: sessionID,
             type: .sessionCreated,
-            metadata: AgentSessionMetadataEvent(title: title, parentSessionId: normalizedParentSessionID)
+            metadata: AgentSessionMetadataEvent(
+                title: title,
+                parentSessionId: normalizedParentSessionID,
+                kind: request.kind
+            )
         )
 
         let fileURL = sessionsDirectory.appendingPathComponent("\(sessionID).jsonl")
@@ -226,6 +232,7 @@ final class AgentSessionFileStore {
     private func summaryForSession(agentID: String, sessionID: String, events: [AgentSessionEvent]) -> AgentSessionSummary {
         var title = "Session \(sessionID.prefix(8))"
         var parentSessionID: String?
+        var kind: AgentSessionKind = .chat
         var createdAt = events.first?.createdAt ?? Date()
         var updatedAt = createdAt
         var messageCount = 0
@@ -238,6 +245,7 @@ final class AgentSessionFileStore {
             if event.type == .sessionCreated, let metadata = event.metadata {
                 title = metadata.title
                 parentSessionID = metadata.parentSessionId
+                kind = metadata.kind
             }
 
             if let message = event.message {
@@ -256,7 +264,8 @@ final class AgentSessionFileStore {
             createdAt: createdAt,
             updatedAt: updatedAt,
             messageCount: messageCount,
-            lastMessagePreview: lastPreview
+            lastMessagePreview: lastPreview,
+            kind: kind
         )
     }
 

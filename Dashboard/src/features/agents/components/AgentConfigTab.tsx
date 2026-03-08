@@ -10,9 +10,73 @@ function emptyAgentConfigDraft(agentId) {
       userMarkdown: "",
       agentsMarkdown: "",
       soulMarkdown: "",
-      identityMarkdown: ""
+      identityMarkdown: "",
+      heartbeatMarkdown: ""
+    },
+    heartbeat: {
+      enabled: false,
+      intervalMinutes: 5
+    },
+    heartbeatStatus: {
+      lastRunAt: null,
+      lastSuccessAt: null,
+      lastFailureAt: null,
+      lastResult: "",
+      lastErrorMessage: "",
+      lastSessionId: ""
     }
   };
+}
+
+function normalizeConfigDraft(agentId, config) {
+  return {
+    agentId: config.agentId || agentId,
+    selectedModel: config.selectedModel || "",
+    availableModels: Array.isArray(config.availableModels) ? config.availableModels : [],
+    documents: {
+      userMarkdown: String(config.documents?.userMarkdown || ""),
+      agentsMarkdown: String(config.documents?.agentsMarkdown || ""),
+      soulMarkdown: String(config.documents?.soulMarkdown || ""),
+      identityMarkdown: String(config.documents?.identityMarkdown || ""),
+      heartbeatMarkdown: String(config.documents?.heartbeatMarkdown || "")
+    },
+    heartbeat: {
+      enabled: Boolean(config.heartbeat?.enabled),
+      intervalMinutes: Number.parseInt(String(config.heartbeat?.intervalMinutes ?? 5), 10) || 5
+    },
+    heartbeatStatus: {
+      lastRunAt: config.heartbeatStatus?.lastRunAt || null,
+      lastSuccessAt: config.heartbeatStatus?.lastSuccessAt || null,
+      lastFailureAt: config.heartbeatStatus?.lastFailureAt || null,
+      lastResult: String(config.heartbeatStatus?.lastResult || ""),
+      lastErrorMessage: String(config.heartbeatStatus?.lastErrorMessage || ""),
+      lastSessionId: String(config.heartbeatStatus?.lastSessionId || "")
+    }
+  };
+}
+
+function formatDateTime(value) {
+  if (!value) {
+    return "Never";
+  }
+
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return "Never";
+  }
+
+  return date.toLocaleString([], {
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit"
+  });
+}
+
+function statusValue(value, fallback = "None") {
+  const normalized = String(value || "").trim();
+  return normalized || fallback;
 }
 
 export function AgentConfigTab({ agentId }) {
@@ -39,18 +103,7 @@ export function AgentConfigTab({ agentId }) {
         return;
       }
 
-      const config = response as any;
-      setDraft({
-        agentId: config.agentId || agentId,
-        selectedModel: config.selectedModel || "",
-        availableModels: Array.isArray(config.availableModels) ? config.availableModels : [],
-        documents: {
-          userMarkdown: String(config.documents?.userMarkdown || ""),
-          agentsMarkdown: String(config.documents?.agentsMarkdown || ""),
-          soulMarkdown: String(config.documents?.soulMarkdown || ""),
-          identityMarkdown: String(config.documents?.identityMarkdown || "")
-        }
-      });
+      setDraft(normalizeConfigDraft(agentId, response));
       setStatusText("Config loaded.");
       setIsLoading(false);
     }
@@ -84,6 +137,16 @@ export function AgentConfigTab({ agentId }) {
     }));
   }
 
+  function updateHeartbeatField(field, value) {
+    setDraft((previous) => ({
+      ...previous,
+      heartbeat: {
+        ...previous.heartbeat,
+        [field]: value
+      }
+    }));
+  }
+
   async function saveConfig(event) {
     event.preventDefault();
     if (isSaving) {
@@ -96,13 +159,24 @@ export function AgentConfigTab({ agentId }) {
       return;
     }
 
+    const intervalMinutes = Number.parseInt(String(draft.heartbeat.intervalMinutes || 0), 10);
+    if (draft.heartbeat.enabled && (!Number.isFinite(intervalMinutes) || intervalMinutes < 1)) {
+      setStatusText("Heartbeat interval must be at least 1 minute.");
+      return;
+    }
+
     const payload = {
       selectedModel,
       documents: {
         userMarkdown: String(draft.documents.userMarkdown || ""),
         agentsMarkdown: String(draft.documents.agentsMarkdown || ""),
         soulMarkdown: String(draft.documents.soulMarkdown || ""),
-        identityMarkdown: String(draft.documents.identityMarkdown || "")
+        identityMarkdown: String(draft.documents.identityMarkdown || ""),
+        heartbeatMarkdown: String(draft.documents.heartbeatMarkdown || "")
+      },
+      heartbeat: {
+        enabled: Boolean(draft.heartbeat.enabled),
+        intervalMinutes: intervalMinutes || 5
       }
     };
 
@@ -114,18 +188,7 @@ export function AgentConfigTab({ agentId }) {
       return;
     }
 
-    const config = response as any;
-    setDraft({
-      agentId: config.agentId || agentId,
-      selectedModel: config.selectedModel || "",
-      availableModels: Array.isArray(config.availableModels) ? config.availableModels : [],
-      documents: {
-        userMarkdown: String(config.documents?.userMarkdown || ""),
-        agentsMarkdown: String(config.documents?.agentsMarkdown || ""),
-        soulMarkdown: String(config.documents?.soulMarkdown || ""),
-        identityMarkdown: String(config.documents?.identityMarkdown || "")
-      }
-    });
+    setDraft(normalizeConfigDraft(agentId, response));
     setStatusText("Config saved.");
     setIsSaving(false);
   }
@@ -189,6 +252,71 @@ export function AgentConfigTab({ agentId }) {
               />
             </label>
           </div>
+
+          <section className="agent-config-heartbeat">
+            <div className="agent-config-head">
+              <div className="agent-tools-head-copy">
+                <h4>Heartbeat</h4>
+                <p className="placeholder-text">
+                  Runs `HEARTBEAT.md` on a timer and expects exactly `SLOPPY_ACTION_OK` on success.
+                </p>
+              </div>
+            </div>
+
+            <label className="cron-form-toggle">
+              <span>Enabled</span>
+              <span className="agent-tools-switch">
+                <input
+                  type="checkbox"
+                  checked={draft.heartbeat.enabled}
+                  onChange={(event) => updateHeartbeatField("enabled", event.target.checked)}
+                />
+                <span className="agent-tools-switch-track" />
+              </span>
+            </label>
+
+            <label>
+              Interval (minutes)
+              <input
+                type="number"
+                min="1"
+                step="1"
+                value={draft.heartbeat.intervalMinutes}
+                onChange={(event) => updateHeartbeatField("intervalMinutes", event.target.value)}
+              />
+            </label>
+
+            <label>
+              HEARTBEAT.md
+              <textarea
+                rows={10}
+                value={draft.documents.heartbeatMarkdown}
+                onChange={(event) => updateDocumentField("heartbeatMarkdown", event.target.value)}
+                placeholder="Describe what the automated heartbeat should verify."
+              />
+            </label>
+
+            <div className="agent-config-heartbeat-status">
+              <div>
+                <strong>Last run:</strong> {formatDateTime(draft.heartbeatStatus.lastRunAt)}
+              </div>
+              <div>
+                <strong>Last success:</strong> {formatDateTime(draft.heartbeatStatus.lastSuccessAt)}
+              </div>
+              <div>
+                <strong>Last failure:</strong> {formatDateTime(draft.heartbeatStatus.lastFailureAt)}
+              </div>
+              <div>
+                <strong>Last result:</strong> {statusValue(draft.heartbeatStatus.lastResult)}
+              </div>
+              <div>
+                <strong>Last session:</strong> {statusValue(draft.heartbeatStatus.lastSessionId)}
+              </div>
+              <div>
+                <strong>Last error:</strong> {statusValue(draft.heartbeatStatus.lastErrorMessage)}
+              </div>
+            </div>
+          </section>
 
           <div className="agent-config-actions">
             <button type="submit" disabled={isSaving}>
