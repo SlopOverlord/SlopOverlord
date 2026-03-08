@@ -28,6 +28,9 @@ func decodeLegacyStringModelsAndPlugins() throws {
     #expect(decoded.plugins[0].plugin == "telegram-gateway")
     #expect(decoded.workspace.name == CoreConfig.defaultWorkspaceName)
     #expect(decoded.workspace.basePath == CoreConfig.defaultWorkspaceBasePath)
+    #expect(decoded.gitSync.enabled == false)
+    #expect(decoded.gitSync.branch == "main")
+    #expect(decoded.gitSync.conflictStrategy == .remoteWins)
     #expect(decoded.sqlitePath == CoreConfig.defaultSQLiteFileName)
 }
 
@@ -148,4 +151,43 @@ func memoryProviderSupportsRemoteAliasAndKeepsSettings() throws {
     #expect(decoded.memory.provider.endpoint == "https://memory.example.com")
     #expect(decoded.memory.provider.timeoutMs == 5000)
     #expect(decoded.memory.provider.apiKeyEnv == "MEMORY_API_KEY")
+}
+
+@Test
+func gitSyncSettingsDecodeWhenPresent() throws {
+    let json =
+        """
+        {
+          "listen": { "host": "0.0.0.0", "port": 25101 },
+          "workspace": { "name": "workspace", "basePath": "~" },
+          "auth": { "token": "dev-token" },
+          "models": [],
+          "memory": { "backend": "sqlite-local-vectors" },
+          "nodes": ["local"],
+          "gateways": [],
+          "plugins": [],
+          "channels": { "telegram": null },
+          "gitSync": {
+            "enabled": true,
+            "authToken": "ghp_test",
+            "repository": "acme/workspace-sync",
+            "branch": "sync/main",
+            "schedule": {
+              "frequency": "daily",
+              "time": "18:00"
+            },
+            "conflictStrategy": "remote_wins"
+          },
+          "sqlitePath": "core.sqlite"
+        }
+        """
+
+    let decoded = try JSONDecoder().decode(CoreConfig.self, from: Data(json.utf8))
+    #expect(decoded.gitSync.enabled == true)
+    #expect(decoded.gitSync.authToken == "ghp_test")
+    #expect(decoded.gitSync.repository == "acme/workspace-sync")
+    #expect(decoded.gitSync.branch == "sync/main")
+    #expect(decoded.gitSync.schedule.frequency == .daily)
+    #expect(decoded.gitSync.schedule.time == "18:00")
+    #expect(decoded.gitSync.conflictStrategy == .remoteWins)
 }

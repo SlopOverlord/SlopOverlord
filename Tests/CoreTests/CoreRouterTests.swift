@@ -666,6 +666,14 @@ func putConfigEndpoint() async throws {
     var config = CoreConfig.default
     config.listen.port = 25155
     config.sqlitePath = "./.data/core-config-test.sqlite"
+    config.gitSync = .init(
+        enabled: true,
+        authToken: "ghp_test",
+        repository: "acme/workspace-sync",
+        branch: "sync/main",
+        schedule: .init(frequency: .daily, time: "18:00"),
+        conflictStrategy: .remoteWins
+    )
 
     let payload = try JSONEncoder().encode(config)
     let response = await router.handle(method: "PUT", path: "/v1/config", body: payload)
@@ -673,6 +681,9 @@ func putConfigEndpoint() async throws {
 
     let updated = try JSONDecoder().decode(CoreConfig.self, from: response.body)
     #expect(updated.listen.port == 25155)
+    #expect(updated.gitSync.enabled == true)
+    #expect(updated.gitSync.repository == "acme/workspace-sync")
+    #expect(updated.gitSync.branch == "sync/main")
 }
 
 @Test

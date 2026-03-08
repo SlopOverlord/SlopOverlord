@@ -21,8 +21,12 @@ const SETTINGS_ITEMS = [
   { id: "audio", title: "Audio", icon: "volume_up" },
   { id: "media", title: "Media", icon: "perm_media" },
   { id: "session", title: "Session", icon: "manage_accounts" },
+  { id: "git-sync", title: "Git Sync", icon: "sync" },
   { id: "logging", title: "Logging", icon: "description" }
 ];
+
+const GIT_SYNC_FREQUENCIES = new Set(["manual", "daily", "weekdays"]);
+const GIT_SYNC_CONFLICT_STRATEGIES = new Set(["remote_wins", "local_wins", "manual"]);
 
 const PROVIDER_CATALOG = [
   {
@@ -120,6 +124,17 @@ const EMPTY_CONFIG = {
   gateways: [],
   plugins: [],
   channels: { telegram: null },
+  gitSync: {
+    enabled: false,
+    authToken: "",
+    repository: "",
+    branch: "main",
+    schedule: {
+      frequency: "daily",
+      time: "18:00"
+    },
+    conflictStrategy: "remote_wins"
+  },
   sqlitePath: "core.sqlite"
 };
 
@@ -275,6 +290,22 @@ function normalizeConfig(config) {
     normalized.memory.retention.bulletinDays
   );
   normalized.sqlitePath = config?.sqlitePath || normalized.sqlitePath;
+  normalized.gitSync.enabled = Boolean(config?.gitSync?.enabled);
+  normalized.gitSync.authToken = String(config?.gitSync?.authToken || "");
+  normalized.gitSync.repository = String(config?.gitSync?.repository || "");
+  normalized.gitSync.branch = String(config?.gitSync?.branch || normalized.gitSync.branch);
+  normalized.gitSync.schedule.frequency = normalizeGitSyncFrequency(
+    config?.gitSync?.schedule?.frequency,
+    normalized.gitSync.schedule.frequency
+  );
+  normalized.gitSync.schedule.time = normalizeTimeValue(
+    config?.gitSync?.schedule?.time,
+    normalized.gitSync.schedule.time
+  );
+  normalized.gitSync.conflictStrategy = normalizeGitSyncConflictStrategy(
+    config?.gitSync?.conflictStrategy,
+    normalized.gitSync.conflictStrategy
+  );
 
   normalized.nodes = Array.isArray(config?.nodes) ? config.nodes.filter(Boolean) : [];
   normalized.gateways = Array.isArray(config?.gateways) ? config.gateways.filter(Boolean) : [];
@@ -320,6 +351,25 @@ function parseInteger(value, fallback) {
 function parseNumber(value, fallback) {
   const parsed = Number.parseFloat(String(value));
   return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+function normalizeGitSyncFrequency(value, fallback = "daily") {
+  const normalized = String(value || "")
+    .trim()
+    .toLowerCase();
+  return GIT_SYNC_FREQUENCIES.has(normalized) ? normalized : fallback;
+}
+
+function normalizeGitSyncConflictStrategy(value, fallback = "remote_wins") {
+  const normalized = String(value || "")
+    .trim()
+    .toLowerCase();
+  return GIT_SYNC_CONFLICT_STRATEGIES.has(normalized) ? normalized : fallback;
+}
+
+function normalizeTimeValue(value, fallback = "18:00") {
+  const normalized = String(value || "").trim();
+  return /^([01]\d|2[0-3]):[0-5]\d$/.test(normalized) ? normalized : fallback;
 }
 
 function isSettingsSection(id) {
@@ -809,6 +859,118 @@ export function ConfigView({ sectionId = "providers", onSectionChange = null }) 
         <div className="tg-settings-shell">
           <TelegramEditor draftConfig={draftConfig} mutateDraft={mutateDraft} />
         </div>
+      );
+    }
+    if (selectedSettings === "git-sync") {
+      const gitSyncEnabled = Boolean(draftConfig.gitSync?.enabled);
+      const syncFrequency = normalizeGitSyncFrequency(draftConfig.gitSync?.schedule?.frequency);
+      const conflictStrategy = normalizeGitSyncConflictStrategy(draftConfig.gitSync?.conflictStrategy);
+
+      return (
+        <section className="entry-editor-card">
+          <h3>Workspace Git Sync</h3>
+          <div className="entry-form-grid">
+            <label style={{ gridColumn: "1 / -1" }}>
+              Enable Sync
+              <select
+                value={gitSyncEnabled ? "enabled" : "disabled"}
+                onChange={(event) =>
+                  mutateDraft((draft) => {
+                    draft.gitSync.enabled = event.target.value === "enabled";
+                  })
+                }
+              >
+                <option value="disabled">Disabled</option>
+                <option value="enabled">Enabled</option>
+              </select>
+            </label>
+            <label style={{ gridColumn: "1 / -1" }}>
+              Git Auth Token
+              <input
+                type="password"
+                autoComplete="new-password"
+                placeholder="ghp_xxx"
+                value={draftConfig.gitSync.authToken}
+                onChange={(event) =>
+                  mutateDraft((draft) => {
+                    draft.gitSync.authToken = event.target.value;
+                  })
+                }
+              />
+              <span className="entry-form-hint">Stored in runtime config and used for authenticated sync against the target repo.</span>
+            </label>
+            <label>
+              Repository
+              <input
+                placeholder="owner/repo or https://github.com/owner/repo.git"
+                value={draftConfig.gitSync.repository}
+                onChange={(event) =>
+                  mutateDraft((draft) => {
+                    draft.gitSync.repository = event.target.value;
+                  })
+                }
+              />
+            </label>
+            <label>
+              Push Branch
+              <input
+                placeholder="main"
+                value={draftConfig.gitSync.branch}
+                onChange={(event) =>
+                  mutateDraft((draft) => {
+                    draft.gitSync.branch = event.target.value;
+                  })
+                }
+              />
+            </label>
+            <label>
+              Sync Schedule
+              <select
+                value={syncFrequency}
+                onChange={(event) =>
+                  mutateDraft((draft) => {
+                    draft.gitSync.schedule.frequency = normalizeGitSyncFrequency(event.target.value);
+                  })
+                }
+              >
+                <option value="manual">Manual only</option>
+                <option value="daily">Every day</option>
+                <option value="weekdays">Weekdays</option>
+              </select>
+            </label>
+            <label>
+              Sync Time
+              <input
+                type="time"
+                disabled={syncFrequency === "manual"}
+                value={normalizeTimeValue(draftConfig.gitSync.schedule.time)}
+                onChange={(event) =>
+                  mutateDraft((draft) => {
+                    draft.gitSync.schedule.time = normalizeTimeValue(event.target.value, "18:00");
+                  })
+                }
+              />
+            </label>
+            <label style={{ gridColumn: "1 / -1" }}>
+              Conflict Strategy
+              <select
+                value={conflictStrategy}
+                onChange={(event) =>
+                  mutateDraft((draft) => {
+                    draft.gitSync.conflictStrategy = normalizeGitSyncConflictStrategy(event.target.value);
+                  })
+                }
+              >
+                <option value="remote_wins">Remote wins (overwrite local workspace)</option>
+                <option value="local_wins">Keep local changes</option>
+                <option value="manual">Stop and resolve manually</option>
+              </select>
+              <span className="entry-form-hint">
+                Default policy keeps remote as the source of truth and rewrites local workspace state on conflict.
+              </span>
+            </label>
+          </div>
+        </section>
       );
     }
 
