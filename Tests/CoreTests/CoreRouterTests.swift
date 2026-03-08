@@ -4,6 +4,10 @@ import Testing
 @testable import Core
 @testable import Protocols
 
+#if canImport(SQLite3)
+import SQLite3
+#endif
+
 @Test
 func postChannelMessageEndpoint() async throws {
     let service = CoreService(config: .default)
@@ -96,6 +100,19 @@ func projectCrudEndpoints() async throws {
     let updated = try decoder.decode(ProjectRecord.self, from: updateResponse.body)
     #expect(updated.name == "Platform Board v2")
 
+    let updateMembersBody = try JSONEncoder().encode(
+        ProjectUpdateRequest(actors: ["actor:builder", "actor:qa"], teams: ["team:platform"])
+    )
+    let updateMembersResponse = await router.handle(
+        method: "PATCH",
+        path: "/v1/projects/\(created.id)",
+        body: updateMembersBody
+    )
+    #expect(updateMembersResponse.status == 200)
+    let updatedMembers = try decoder.decode(ProjectRecord.self, from: updateMembersResponse.body)
+    #expect(updatedMembers.actors == ["actor:builder", "actor:qa"])
+    #expect(updatedMembers.teams == ["team:platform"])
+
     let createTaskBody = try JSONEncoder().encode(
         ProjectTaskCreateRequest(
             title: "Wire API",
@@ -183,6 +200,79 @@ func projectCrudEndpoints() async throws {
     let fetchDeletedResponse = await router.handle(method: "GET", path: "/v1/projects/\(created.id)", body: nil)
     #expect(fetchDeletedResponse.status == 404)
 }
+
+#if canImport(SQLite3)
+@Test
+func projectMembersMigrateFromLegacyDashboardProjectsSchema() async throws {
+    let sqlitePath = FileManager.default.temporaryDirectory
+        .appendingPathComponent("core-project-legacy-\(UUID().uuidString).sqlite")
+        .path
+
+    var db: OpaquePointer?
+    #expect(sqlite3_open(sqlitePath, &db) == SQLITE_OK)
+    defer {
+        if let db {
+            sqlite3_close(db)
+        }
+    }
+
+    let formatter = ISO8601DateFormatter()
+    let now = formatter.string(from: Date())
+    let legacySchema =
+        """
+        CREATE TABLE dashboard_projects (
+            id TEXT PRIMARY KEY,
+            name TEXT NOT NULL,
+            description TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        );
+        """
+    #expect(sqlite3_exec(db, legacySchema, nil, nil, nil) == SQLITE_OK)
+
+    let insertSQL =
+        """
+        INSERT INTO dashboard_projects(id, name, description, created_at, updated_at)
+        VALUES('legacy-project', 'Legacy Project', 'Project from pre-members schema', '\(now)', '\(now)');
+        """
+    #expect(sqlite3_exec(db, insertSQL, nil, nil, nil) == SQLITE_OK)
+
+    sqlite3_close(db)
+    db = nil
+
+    var config = CoreConfig.default
+    config.sqlitePath = sqlitePath
+
+    let service = CoreService(config: config)
+    let router = CoreRouter(service: service)
+
+    let body = try JSONEncoder().encode(
+        ProjectUpdateRequest(actors: ["actor:builder"], teams: ["team:ops"])
+    )
+    let updateResponse = await router.handle(
+        method: "PATCH",
+        path: "/v1/projects/legacy-project",
+        body: body
+    )
+    #expect(updateResponse.status == 200)
+
+    let decoder = JSONDecoder()
+    decoder.dateDecodingStrategy = .iso8601
+
+    let updated = try decoder.decode(ProjectRecord.self, from: updateResponse.body)
+    #expect(updated.actors == ["actor:builder"])
+    #expect(updated.teams == ["team:ops"])
+
+    let restartedService = CoreService(config: config)
+    let restartedRouter = CoreRouter(service: restartedService)
+    let fetchResponse = await restartedRouter.handle(method: "GET", path: "/v1/projects/legacy-project", body: nil)
+    #expect(fetchResponse.status == 200)
+
+    let fetched = try decoder.decode(ProjectRecord.self, from: fetchResponse.body)
+    #expect(fetched.actors == ["actor:builder"])
+    #expect(fetched.teams == ["team:ops"])
+}
+#endif
 
 @Test
 func projectCreateCreatesWorkspaceDirectory() async throws {

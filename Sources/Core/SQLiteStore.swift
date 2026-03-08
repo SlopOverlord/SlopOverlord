@@ -45,6 +45,7 @@ public actor SQLiteStore: PersistenceStore {
             Self.applyProjectTaskMigrations(db: db)
             Self.applyChannelPluginMigrations(db: db)
             Self.applyCronTaskMigrations(db: db)
+            Self.applyDashboardProjectsMigrations(db: db)
         } else {
             db = nil
         }
@@ -1955,6 +1956,20 @@ public actor SQLiteStore: PersistenceStore {
                 updated_at TEXT NOT NULL
             );
             """,
+            nil, nil, nil
+        )
+    }
+
+    private static func applyDashboardProjectsMigrations(db: OpaquePointer?) {
+        guard let db else { return }
+        _ = sqlite3_exec(
+            db,
+            "ALTER TABLE dashboard_projects ADD COLUMN actors_json TEXT NOT NULL DEFAULT '[]';",
+            nil, nil, nil
+        )
+        _ = sqlite3_exec(
+            db,
+            "ALTER TABLE dashboard_projects ADD COLUMN teams_json TEXT NOT NULL DEFAULT '[]';",
             nil, nil, nil
         )
     }

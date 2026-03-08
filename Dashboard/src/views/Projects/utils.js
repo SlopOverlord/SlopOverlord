@@ -338,13 +338,16 @@ export function normalizeProjectIdentifier(value) {
 }
 
 export function parseListInput(value) {
-  if (typeof value !== "string") {
-    return [];
-  }
   const unique = new Set();
   const parsed = [];
-  for (const rawItem of value.split(/[\n,]+/g)) {
-    const item = rawItem.trim();
+  const rawItems = Array.isArray(value)
+    ? value
+    : typeof value === "string"
+      ? value.split(/[\n,]+/g)
+      : [];
+
+  for (const rawItem of rawItems) {
+    const item = String(rawItem || "").trim();
     if (!item || unique.has(item.toLowerCase())) {
       continue;
     }
