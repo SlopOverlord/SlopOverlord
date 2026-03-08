@@ -2,7 +2,7 @@
   "name": "Sloppy",
   "dockerComposeFile": "../utils/docker/docker-compose.yml",
   "service": "core",
-  "workspaceFolder": "/workspace",
+  "workspaceFolder": "/.sloppy",
   "customizations": {
     "vscode": {
       "extensions": [

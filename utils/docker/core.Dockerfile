@@ -43,7 +43,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libstdc++6 \
     && rm -rf /var/lib/apt/lists/*
 WORKDIR /root
-RUN mkdir -p /root/workspace /etc/sloppy /var/lib/sloppy
+RUN mkdir -p /root/.sloppy /etc/sloppy /var/lib/sloppy
 COPY --from=builder /usr/lib/swift /usr/lib/swift
 COPY --from=builder /artifacts/sloppy-core /usr/bin/sloppy-core
 COPY --from=builder /artifacts/Sloppy_Core.resources /usr/bin/Sloppy_Core.resources

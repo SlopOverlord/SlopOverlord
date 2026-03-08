@@ -73,9 +73,8 @@ const STEP_TITLES = [
 ];
 
 const DEFAULT_PROMPT =
-  "Setup yourself as the CEO. Use the ceo persona found here: https://github.com/TeamSloppy/Sloppy/blob/main/Assets/Agents/ceo/AGENTS.md\n\n" +
-  "Ensure you have a folder agents/ceo and then download this AGENTS.md as well as the sibling HEARTBEAT.md, SOUL.md, and TOOLS.md. and set that AGENTS.md as the path to your agents instruction file\n\n" +
-  "And after you've finished that, hire yourself a Founding Engineer agent";
+  "You are already configured as the CEO. Use the ceo persona found here: https://github.com/TeamSloppy/Sloppy/blob/main/Assets/Agents/ceo/AGENTS.md.\n\n" +
+  "Start operating as the CEO of this company and project. First, inspect the current workspace and establish the company's immediate priorities.\n\n";
 
 function clone<T>(value: T): T {
   return JSON.parse(JSON.stringify(value)) as T;
@@ -126,6 +125,14 @@ function runtimeModelId(providerId: string, modelId: string) {
     return `ollama:${modelId}`;
   }
   return modelId;
+}
+
+function shouldUseCeoPersona(agentId: string, agentName: string, agentRole: string) {
+  const normalizedId = agentId.trim().toLowerCase();
+  const normalizedName = agentName.trim().toLowerCase();
+  const normalizedRole = agentRole.trim().toLowerCase();
+
+  return normalizedId === "ceo" || normalizedName === "ceo" || normalizedRole === "ceo";
 }
 
 function createConfigWithProvider(
@@ -277,7 +284,7 @@ export function OnboardingView({ coreApi, initialConfig, onCompleted }: Onboardi
   const [probeOk, setProbeOk] = useState(false);
   const [probeModels, setProbeModels] = useState<AnyRecord[]>([]);
   const [agentName, setAgentName] = useState("CEO");
-  const [agentRole, setAgentRole] = useState("Founding operator");
+  const [agentRole, setAgentRole] = useState("CEO");
   const [launchPrompt, setLaunchPrompt] = useState(DEFAULT_PROMPT);
   const [statusText, setStatusText] = useState("Preparing first-run setup.");
   const [isProbing, setIsProbing] = useState(false);
@@ -359,7 +366,8 @@ export function OnboardingView({ coreApi, initialConfig, onCompleted }: Onboardi
     const created = await coreApi.createProject({
       id: projectId,
       name: projectName.trim(),
-      description: ""
+      description: "",
+      channels: []
     });
     if (created) {
       return created;
@@ -430,9 +438,17 @@ export function OnboardingView({ coreApi, initialConfig, onCompleted }: Onboardi
         throw new Error("Failed to load agent config.");
       }
 
+      const nextDocuments =
+        shouldUseCeoPersona(agentId, agentName, agentRole)
+          ? {
+              ...agentConfig.documents,
+              agentsMarkdown: DEFAULT_PROMPT.trim()
+            }
+          : agentConfig.documents;
+
       const updatedAgentConfig = await coreApi.updateAgentConfig(agentId, {
         selectedModel: selectedRuntimeModel,
-        documents: agentConfig.documents,
+        documents: nextDocuments,
         heartbeat: agentConfig.heartbeat
       });
       if (!updatedAgentConfig) {
@@ -590,11 +606,11 @@ export function OnboardingView({ coreApi, initialConfig, onCompleted }: Onboardi
 
               <div className="onboarding-provider-actions">
                 {activeProvider.id === "openai-oauth" ? (
-                  <button type="button" className="onboarding-ghost-button" onClick={openOAuth}>
+                  <button type="button" className="onboarding-ghost-button hover-levitate" onClick={openOAuth}>
                     Open OAuth in Codex
                   </button>
                 ) : null}
-                <button type="button" className="onboarding-primary-button" onClick={() => void testProviderConnection()} disabled={isProbing}>
+                <button type="button" className="onboarding-primary-button hover-levitate" onClick={() => void testProviderConnection()} disabled={isProbing}>
                   {isProbing ? "Testing..." : "Test connection"}
                 </button>
               </div>
@@ -668,12 +684,12 @@ export function OnboardingView({ coreApi, initialConfig, onCompleted }: Onboardi
         </div>
 
         <div className="onboarding-footer">
-          <button type="button" className="onboarding-ghost-button" onClick={previousStep} disabled={stepIndex === 0 || isSubmitting}>
+          <button type="button" className="onboarding-ghost-button hover-levitate" onClick={previousStep} disabled={stepIndex === 0 || isSubmitting}>
             Back
           </button>
           <button
             type="button"
-            className="onboarding-primary-button"
+            className="onboarding-primary-button hover-levitate"
             onClick={nextStep}
             disabled={!canAdvance() || isSubmitting}
           >

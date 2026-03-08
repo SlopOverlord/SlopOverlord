@@ -14,7 +14,7 @@ services:
     ports:
       - "25101:25101"
     volumes:
-      - core_data:/root/workspace
+      - core_data:/root/.sloppy
 
   dashboard:
     build:
