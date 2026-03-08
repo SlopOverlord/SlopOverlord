@@ -436,8 +436,9 @@ actor SkillsRegistryService {
         let owner = extractString(from: object, keys: [["owner"], ["author"], ["organization"]]) ??
             extractString(from: object, keys: [["owner", "login"], ["owner", "name"]])
         let repo = extractString(from: object, keys: [["repo"], ["repository"], ["repoName"]])
-        let id = extractString(from: object, keys: [["id"], ["slug"]])
+        let id = extractString(from: object, keys: [["id"], ["slug"], ["skillId"]])
         let name = extractString(from: object, keys: [["name"], ["skillName"], ["title"]])
+        let sourceStr = extractString(from: object, keys: [["source"]])
 
         let githubURL = extractString(
             from: object,
@@ -446,8 +447,12 @@ actor SkillsRegistryService {
         let description = extractString(from: object, keys: [["description"], ["summary"]])
         let installs = extractInt(from: object, keys: [["installs"], ["downloadCount"], ["download_count"], ["downloads"]]) ?? 0
 
-        let resolvedOwner = owner ?? id?.split(separator: "/").first.map(String.init) ?? ""
+        let resolvedOwner = owner ?? sourceStr?.split(separator: "/").first.map(String.init) ?? id?.split(separator: "/").first.map(String.init) ?? ""
         let resolvedRepo = repo ?? {
+            if let sourceStr {
+                let components = sourceStr.split(separator: "/").map(String.init)
+                if components.count >= 2 { return components[1] }
+            }
             if let id {
                 let components = id.split(separator: "/").map(String.init)
                 if components.count >= 2 {

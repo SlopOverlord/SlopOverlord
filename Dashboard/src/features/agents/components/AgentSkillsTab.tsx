@@ -58,8 +58,10 @@ function SkillCard({
   return (
     <div className="skill-card hover-levitate">
       <div className="skill-card-header">
-        <h4 className="skill-name">{skill.name}</h4>
-        <span className="skill-owner">{skill.owner}/{skill.repo}</span>
+        <a href={skill.githubUrl} target="_blank" rel="noopener noreferrer" style={{ textDecoration: 'none', color: 'inherit' }}>
+          <h4 className="skill-name">{skill.name}</h4>
+          <span className="skill-owner">{skill.owner}/{skill.repo}</span>
+        </a>
       </div>
       <p className="skill-description">
         {skill.description || "No description provided"}
@@ -106,8 +108,10 @@ function InstalledSkillCard({
   return (
     <div className="skill-card hover-levitate">
       <div className="skill-card-header">
-        <h4 className="skill-name">{skill.name}</h4>
-        <span className="skill-owner">{skill.owner}/{skill.repo}</span>
+        <a href={`https://github.com/${skill.owner}/${skill.repo}`} target="_blank" rel="noopener noreferrer" style={{ textDecoration: 'none', color: 'inherit' }}>
+          <h4 className="skill-name">{skill.name}</h4>
+          <span className="skill-owner">{skill.owner}/{skill.repo}</span>
+        </a>
       </div>
       <p className="skill-description">
         {skill.description || "No description provided"}
