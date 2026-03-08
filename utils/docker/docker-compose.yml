@@ -9,6 +9,8 @@ services:
       - ../../.env
     environment:
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      BRAVE_API_KEY: ${BRAVE_API_KEY:-}
+      PERPLEXITY_API_KEY: ${PERPLEXITY_API_KEY:-}
     ports:
       - "25101:25101"
     volumes:
@@ -24,6 +26,8 @@ services:
       - "25102:25102"
     environment:
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      BRAVE_API_KEY: ${BRAVE_API_KEY:-}
+      PERPLEXITY_API_KEY: ${PERPLEXITY_API_KEY:-}
     depends_on:
       - core
 

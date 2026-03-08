@@ -191,3 +191,56 @@ func gitSyncSettingsDecodeWhenPresent() throws {
     #expect(decoded.gitSync.schedule.time == "18:00")
     #expect(decoded.gitSync.conflictStrategy == .remoteWins)
 }
+
+@Test
+func missingSearchToolsFallsBackToDefaults() throws {
+    let json =
+        """
+        {
+          "listen": { "host": "0.0.0.0", "port": 25101 },
+          "auth": { "token": "dev-token" },
+          "models": [],
+          "memory": { "backend": "sqlite-local-vectors" },
+          "nodes": ["local"],
+          "gateways": [],
+          "plugins": [],
+          "sqlitePath": "core.sqlite"
+        }
+        """
+
+    let decoded = try JSONDecoder().decode(CoreConfig.self, from: Data(json.utf8))
+
+    #expect(decoded.searchTools.activeProvider == .perplexity)
+    #expect(decoded.searchTools.providers.brave.apiKey.isEmpty)
+    #expect(decoded.searchTools.providers.perplexity.apiKey.isEmpty)
+}
+
+@Test
+func searchToolsDecodeWhenPresent() throws {
+    let json =
+        """
+        {
+          "listen": { "host": "0.0.0.0", "port": 25101 },
+          "auth": { "token": "dev-token" },
+          "models": [],
+          "memory": { "backend": "sqlite-local-vectors" },
+          "nodes": ["local"],
+          "gateways": [],
+          "plugins": [],
+          "searchTools": {
+            "activeProvider": "brave",
+            "providers": {
+              "brave": { "apiKey": "brave-config-key" },
+              "perplexity": { "apiKey": "pplx-config-key" }
+            }
+          },
+          "sqlitePath": "core.sqlite"
+        }
+        """
+
+    let decoded = try JSONDecoder().decode(CoreConfig.self, from: Data(json.utf8))
+
+    #expect(decoded.searchTools.activeProvider == .brave)
+    #expect(decoded.searchTools.providers.brave.apiKey == "brave-config-key")
+    #expect(decoded.searchTools.providers.perplexity.apiKey == "pplx-config-key")
+}

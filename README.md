@@ -84,6 +84,7 @@ Notes:
 - On first start, Sloppy creates a workspace layout and a default `sloppy.json` config if one does not exist.
 - Visor scheduling is configured through `sloppy.json` under `visor.scheduler`, and `visor.bootstrapBulletin` controls the immediate boot-time bulletin by default.
 - OpenAI-backed model flows require `OPENAI_API_KEY`.
+- Web search via tool `web.search` can use `BRAVE_API_KEY` or `PERPLEXITY_API_KEY`; environment keys override values saved in `sloppy.json` under `searchTools`.
 - Ollama-backed flows use the local Ollama endpoint by default.
 
 ### 2. Start the dashboard
@@ -105,6 +106,7 @@ npm run dev
 ### Do I need an API key to run Sloppy?
 
 No. The runtime, tests, and dashboard can run without OpenAI credentials. You only need `OPENAI_API_KEY` for OpenAI-backed model execution.
+If you want agent web search, provide `BRAVE_API_KEY` or `PERPLEXITY_API_KEY`, or store the fallback keys in runtime config.
 
 ### Where does Sloppy store data?
 

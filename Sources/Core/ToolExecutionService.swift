@@ -11,6 +11,7 @@ final class ToolExecutionService: @unchecked Sendable {
     private let processRegistry: SessionProcessRegistry
     private let channelSessionStore: ChannelSessionFileStore
     private let store: any PersistenceStore
+    private let searchProviderService: SearchProviderService
     private let logger: Logger
     private var workspaceRootURL: URL
 
@@ -23,6 +24,7 @@ final class ToolExecutionService: @unchecked Sendable {
         processRegistry: SessionProcessRegistry,
         channelSessionStore: ChannelSessionFileStore,
         store: any PersistenceStore,
+        searchProviderService: SearchProviderService,
         logger: Logger = Logger(label: "sloppy.core.tools")
     ) {
         self.workspaceRootURL = workspaceRootURL
@@ -33,6 +35,7 @@ final class ToolExecutionService: @unchecked Sendable {
         self.processRegistry = processRegistry
         self.channelSessionStore = channelSessionStore
         self.store = store
+        self.searchProviderService = searchProviderService
         self.logger = logger
     }
 
@@ -93,7 +96,9 @@ final class ToolExecutionService: @unchecked Sendable {
             result = await executeMemorySearch(tool: toolID, request: request)
         case "memory.save":
             result = await executeMemorySave(tool: toolID, request: request)
-        case "web.search", "web.fetch":
+        case "web.search":
+            result = await executeWebSearch(tool: toolID, request: request, policy: policy)
+        case "web.fetch":
             result = unsupportedAdapterResult(tool: toolID)
         case "cron":
             result = await executeCron(agentID: agentID, sessionID: sessionID, request: request)
@@ -554,6 +559,65 @@ final class ToolExecutionService: @unchecked Sendable {
 
     private func unsupportedAdapterResult(tool: String) -> ToolInvocationResult {
         failed(tool: tool, code: "not_configured", message: "Tool adapter is not configured.", retryable: false)
+    }
+
+    private func executeWebSearch(
+        tool: String,
+        request: ToolInvocationRequest,
+        policy: AgentToolsPolicy
+    ) async -> ToolInvocationResult {
+        let query = request.arguments["query"]?.asString?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        guard !query.isEmpty else {
+            return failed(tool: tool, code: "invalid_arguments", message: "`query` is required.", retryable: false)
+        }
+
+        let count = min(10, max(1, request.arguments["count"]?.asInt ?? 5))
+
+        do {
+            let response = try await searchProviderService.search(
+                query: query,
+                count: count,
+                timeoutMs: policy.guardrails.webTimeoutMs,
+                maxBytes: policy.guardrails.webMaxBytes
+            )
+
+            return success(
+                tool: tool,
+                data: .object([
+                    "query": .string(response.query),
+                    "provider": .string(response.provider),
+                    "results": .array(response.results.map { item in
+                        .object([
+                            "title": .string(item.title),
+                            "url": .string(item.url),
+                            "snippet": .string(item.snippet)
+                        ])
+                    }),
+                    "citations": .array(response.citations.map { citation in
+                        .object([
+                            "title": .string(citation.title),
+                            "url": .string(citation.url)
+                        ])
+                    }),
+                    "count": .number(Double(response.count))
+                ])
+            )
+        } catch let error as SearchProviderService.SearchError {
+            switch error {
+            case .notConfigured:
+                return failed(tool: tool, code: "not_configured", message: "Search provider is not configured.", retryable: false)
+            case .responseTooLarge:
+                return failed(tool: tool, code: "response_too_large", message: "Search response exceeded configured size limit.", retryable: false)
+            case .httpError(let status):
+                return failed(tool: tool, code: "search_http_error", message: "Search provider returned HTTP \(status).", retryable: true)
+            case .invalidResponse:
+                return failed(tool: tool, code: "invalid_response", message: "Search provider returned an invalid response.", retryable: true)
+            case .transportFailure:
+                return failed(tool: tool, code: "transport_failed", message: "Search request failed.", retryable: true)
+            }
+        } catch {
+            return failed(tool: tool, code: "search_failed", message: "Search request failed.", retryable: true)
+        }
     }
 
     private func executeMemorySave(tool: String, request: ToolInvocationRequest) async -> ToolInvocationResult {

@@ -23,7 +23,7 @@ The Docker assets live in `utils/docker/`:
 
 Optional:
 
-- `.env` in the repository root if you want to provide values such as `OPENAI_API_KEY`
+- `.env` in the repository root if you want to provide values such as `OPENAI_API_KEY`, `BRAVE_API_KEY`, or `PERPLEXITY_API_KEY`
 
 ## Build the containers
 
@@ -86,12 +86,14 @@ The Compose stack defines a named volume:
 
 ## Environment variables
 
-The Compose file loads the repository `.env` file and passes through `OPENAI_API_KEY` when present.
+The Compose file loads the repository `.env` file. For agent web search, `BRAVE_API_KEY` and `PERPLEXITY_API_KEY` can also be provided there and will override any saved `searchTools` config values at runtime.
 
-If you want OpenAI-backed flows in Docker, add this to `.env`:
+If you want OpenAI-backed flows or agent web search in Docker, add this to `.env`:
 
 ```bash
 OPENAI_API_KEY=your_key_here
+BRAVE_API_KEY=your_key_here
+PERPLEXITY_API_KEY=your_key_here
 ```
 
 ## Build details
