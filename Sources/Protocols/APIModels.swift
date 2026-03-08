@@ -1432,6 +1432,41 @@ public struct OpenAIProviderStatusResponse: Codable, Sendable {
     }
 }
 
+public struct SearchProviderStatusResponse: Codable, Sendable {
+    public var provider: String
+    public var hasEnvironmentKey: Bool
+    public var hasConfiguredKey: Bool
+    public var hasAnyKey: Bool
+
+    public init(
+        provider: String,
+        hasEnvironmentKey: Bool,
+        hasConfiguredKey: Bool,
+        hasAnyKey: Bool
+    ) {
+        self.provider = provider
+        self.hasEnvironmentKey = hasEnvironmentKey
+        self.hasConfiguredKey = hasConfiguredKey
+        self.hasAnyKey = hasAnyKey
+    }
+}
+
+public struct SearchToolsStatusResponse: Codable, Sendable {
+    public var activeProvider: String
+    public var brave: SearchProviderStatusResponse
+    public var perplexity: SearchProviderStatusResponse
+
+    public init(
+        activeProvider: String,
+        brave: SearchProviderStatusResponse,
+        perplexity: SearchProviderStatusResponse
+    ) {
+        self.activeProvider = activeProvider
+        self.brave = brave
+        self.perplexity = perplexity
+    }
+}
+
 public enum ActorKind: String, Codable, Sendable {
     case agent
     case human

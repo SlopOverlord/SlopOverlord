@@ -137,6 +137,7 @@ public actor CoreService {
     private let hybridMemoryStore: HybridMemoryStore?
     private let store: any PersistenceStore
     private let openAIProviderCatalog: OpenAIProviderCatalogService
+    private let searchProviderService: SearchProviderService
     private let agentCatalogStore: AgentCatalogFileStore
     private let sessionStore: AgentSessionFileStore
     private let actorBoardStore: ActorBoardFileStore
@@ -169,7 +170,8 @@ public actor CoreService {
     public init(
         config: CoreConfig,
         configPath: String = CoreConfig.defaultConfigPath,
-        persistenceBuilder: any CorePersistenceBuilding = DefaultCorePersistenceBuilder()
+        persistenceBuilder: any CorePersistenceBuilding = DefaultCorePersistenceBuilder(),
+        searchProviderService: SearchProviderService? = nil
     ) {
         let resolvedModels = CoreModelProviderFactory.resolveModelIdentifiers(config: config)
         let modelProvider = CoreModelProviderFactory.buildModelProvider(config: config, resolvedModels: resolvedModels)
@@ -193,6 +195,7 @@ public actor CoreService {
         self.hybridMemoryStore = hybridMemoryStore
         self.store = persistenceBuilder.makeStore(config: config)
         self.openAIProviderCatalog = OpenAIProviderCatalogService()
+        self.searchProviderService = searchProviderService ?? SearchProviderService(config: config.searchTools)
         self.configPath = configPath
         self.workspaceRootURL = config
             .resolvedWorkspaceRootURL(currentDirectory: FileManager.default.currentDirectoryPath)
@@ -232,7 +235,8 @@ public actor CoreService {
             agentCatalogStore: self.agentCatalogStore,
             processRegistry: processRegistry,
             channelSessionStore: self.channelSessionStore,
-            store: self.store
+            store: self.store,
+            searchProviderService: self.searchProviderService
         )
         self.logger = Logger(label: "sloppy.core.visor")
         if let hybridMemoryStore {
@@ -2118,6 +2122,11 @@ public actor CoreService {
         openAIProviderCatalog.status(config: currentConfig)
     }
 
+    /// Returns search provider key availability for configured web search providers.
+    public func searchProviderStatus() async -> SearchToolsStatusResponse {
+        await searchProviderService.status()
+    }
+
     /// Returns latest persisted system logs from `/workspace/logs/*.log`.
     public func getSystemLogs(limit: Int = 1500) throws -> SystemLogsResponse {
         do {
@@ -2303,6 +2312,7 @@ public actor CoreService {
         await toolsAuthorization.updateAgentsRootURL(agentsRootURL)
         toolExecution.updateWorkspaceRootURL(workspaceRootURL)
         systemLogStore.updateWorkspaceRootURL(workspaceRootURL)
+        await searchProviderService.updateConfig(config.searchTools)
         let resolvedModels = CoreModelProviderFactory.resolveModelIdentifiers(config: config)
         let modelProvider = CoreModelProviderFactory.buildModelProvider(config: config, resolvedModels: resolvedModels)
         let defaultModel = modelProvider?.models.first ?? resolvedModels.first

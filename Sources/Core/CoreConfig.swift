@@ -262,6 +262,67 @@ public struct CoreConfig: Codable, Sendable {
         }
     }
 
+    public struct SearchTools: Codable, Sendable, Equatable {
+        public enum ProviderID: String, Codable, Sendable, Equatable {
+            case brave
+            case perplexity
+        }
+
+        public struct Provider: Codable, Sendable, Equatable {
+            public var apiKey: String
+
+            public init(apiKey: String = "") {
+                self.apiKey = apiKey
+            }
+        }
+
+        public struct Providers: Codable, Sendable, Equatable {
+            public var brave: Provider
+            public var perplexity: Provider
+
+            public init(
+                brave: Provider = Provider(),
+                perplexity: Provider = Provider()
+            ) {
+                self.brave = brave
+                self.perplexity = perplexity
+            }
+
+            private enum CodingKeys: String, CodingKey {
+                case brave
+                case perplexity
+            }
+
+            public init(from decoder: Decoder) throws {
+                let container = try decoder.container(keyedBy: CodingKeys.self)
+                brave = try container.decodeIfPresent(Provider.self, forKey: .brave) ?? Provider()
+                perplexity = try container.decodeIfPresent(Provider.self, forKey: .perplexity) ?? Provider()
+            }
+        }
+
+        public var activeProvider: ProviderID
+        public var providers: Providers
+
+        public init(
+            activeProvider: ProviderID = .perplexity,
+            providers: Providers = Providers()
+        ) {
+            self.activeProvider = activeProvider
+            self.providers = providers
+        }
+
+        private enum CodingKeys: String, CodingKey {
+            case activeProvider
+            case providers
+        }
+
+        public init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            activeProvider = try container.decodeIfPresent(ProviderID.self, forKey: .activeProvider) ?? .perplexity
+            providers = try container.decodeIfPresent(Providers.self, forKey: .providers) ?? Providers()
+        }
+    }
+
     public struct ChannelConfig: Codable, Sendable, Equatable {
         public struct Telegram: Codable, Sendable, Equatable {
             /// Telegram Bot API token.
@@ -332,6 +393,7 @@ public struct CoreConfig: Codable, Sendable {
     public var plugins: [PluginConfig]
     public var channels: ChannelConfig
     public var gitSync: GitSync
+    public var searchTools: SearchTools
     public var visor: Visor
     public var sqlitePath: String
 
@@ -346,6 +408,7 @@ public struct CoreConfig: Codable, Sendable {
         plugins: [PluginConfig],
         channels: ChannelConfig = ChannelConfig(),
         gitSync: GitSync = GitSync(),
+        searchTools: SearchTools = SearchTools(),
         visor: Visor = Visor(),
         sqlitePath: String
     ) {
@@ -359,6 +422,7 @@ public struct CoreConfig: Codable, Sendable {
         self.plugins = plugins
         self.channels = channels
         self.gitSync = gitSync
+        self.searchTools = searchTools
         self.visor = visor
         self.sqlitePath = sqlitePath
     }
@@ -388,6 +452,7 @@ public struct CoreConfig: Codable, Sendable {
             plugins: [],
             channels: .init(),
             gitSync: .init(),
+            searchTools: .init(),
             visor: .init(),
             sqlitePath: CoreConfig.defaultSQLiteFileName
         )
@@ -457,6 +522,7 @@ public struct CoreConfig: Codable, Sendable {
         case plugins
         case channels
         case gitSync
+        case searchTools
         case visor
         case sqlitePath
     }
@@ -472,6 +538,7 @@ public struct CoreConfig: Codable, Sendable {
         gateways = try container.decodeIfPresent([String].self, forKey: .gateways) ?? []
         channels = try container.decodeIfPresent(ChannelConfig.self, forKey: .channels) ?? .init()
         gitSync = try container.decodeIfPresent(GitSync.self, forKey: .gitSync) ?? .init()
+        searchTools = try container.decodeIfPresent(SearchTools.self, forKey: .searchTools) ?? .init()
         visor = try container.decodeIfPresent(Visor.self, forKey: .visor) ?? .init()
         sqlitePath = try container.decode(String.self, forKey: .sqlitePath)
         if sqlitePath == CoreConfig.legacyDefaultSQLitePath {

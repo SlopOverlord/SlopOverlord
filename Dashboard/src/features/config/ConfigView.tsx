@@ -1,8 +1,9 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { fetchOpenAIModels, fetchOpenAIProviderStatus, fetchRuntimeConfig, updateRuntimeConfig } from "../../api";
+import { fetchOpenAIModels, fetchOpenAIProviderStatus, fetchRuntimeConfig, fetchSearchProviderStatus, updateRuntimeConfig } from "../../api";
 import { NodeHostEditor } from "./components/NodeHostEditor";
 import { PluginEditor } from "./components/PluginEditor";
 import { ProviderEditor } from "./components/ProviderEditor";
+import { SearchToolsEditor } from "./components/SearchToolsEditor";
 import { SettingsMainHeader } from "./components/SettingsMainHeader";
 import { SettingsPlaceholder } from "./components/SettingsPlaceholder";
 import { SettingsSidebar } from "./components/SettingsSidebar";
@@ -10,6 +11,7 @@ import { TelegramEditor } from "./components/TelegramEditor";
 
 const SETTINGS_ITEMS = [
   { id: "providers", title: "Providers", icon: "hub" },
+  { id: "search-tools", title: "Search Tools", icon: "travel_explore" },
   { id: "channels", title: "Channels", icon: "forum" },
   { id: "approvals", title: "Approvals", icon: "fact_check" },
   { id: "plugins", title: "Plugins", icon: "extension" },
@@ -124,6 +126,17 @@ const EMPTY_CONFIG = {
   gateways: [],
   plugins: [],
   channels: { telegram: null },
+  searchTools: {
+    activeProvider: "perplexity",
+    providers: {
+      brave: {
+        apiKey: ""
+      },
+      perplexity: {
+        apiKey: ""
+      }
+    }
+  },
   gitSync: {
     enabled: false,
     authToken: "",
@@ -330,8 +343,15 @@ function normalizeConfig(config) {
       }
     };
   } else {
-    normalized.channels = { telegram: null };
+  normalized.channels = { telegram: null };
   }
+
+  normalized.searchTools.activeProvider =
+    String(config?.searchTools?.activeProvider || normalized.searchTools.activeProvider).trim().toLowerCase() === "brave"
+      ? "brave"
+      : "perplexity";
+  normalized.searchTools.providers.brave.apiKey = String(config?.searchTools?.providers?.brave?.apiKey || "");
+  normalized.searchTools.providers.perplexity.apiKey = String(config?.searchTools?.providers?.perplexity?.apiKey || "");
 
   return normalized;
 }
@@ -426,6 +446,11 @@ export function ConfigView({ sectionId = "providers", onSectionChange = null }) 
     hasConfiguredKey: false,
     hasAnyKey: false
   });
+  const [searchProviderStatus, setSearchProviderStatus] = useState({
+    activeProvider: "perplexity",
+    brave: { hasEnvironmentKey: false, hasConfiguredKey: false, hasAnyKey: false },
+    perplexity: { hasEnvironmentKey: false, hasConfiguredKey: false, hasAnyKey: false }
+  });
   const providerModelLoadTimerRef = useRef(null);
   const providerModelLoadTokenRef = useRef(0);
   const providerModelPickerRef = useRef(null);
@@ -518,6 +543,7 @@ export function ConfigView({ sectionId = "providers", onSectionChange = null }) 
     setProviderModelOptions({});
     setProviderModelStatus({});
     await loadOpenAIProviderStatus();
+    await loadSearchProviderStatus();
     setStatusText("Config loaded");
   }
 
@@ -536,6 +562,7 @@ export function ConfigView({ sectionId = "providers", onSectionChange = null }) 
       setSavedConfig(normalized);
       setRawConfig(JSON.stringify(normalized, null, 2));
       await loadOpenAIProviderStatus();
+      await loadSearchProviderStatus();
       setStatusText("Config saved");
     } catch {
       setStatusText("Invalid raw JSON");
@@ -552,6 +579,27 @@ export function ConfigView({ sectionId = "providers", onSectionChange = null }) 
       hasEnvironmentKey: Boolean(response.hasEnvironmentKey),
       hasConfiguredKey: Boolean(response.hasConfiguredKey),
       hasAnyKey: Boolean(response.hasAnyKey)
+    });
+  }
+
+  async function loadSearchProviderStatus() {
+    const response = await fetchSearchProviderStatus();
+    if (!response) {
+      return;
+    }
+
+    setSearchProviderStatus({
+      activeProvider: String(response.activeProvider || "perplexity"),
+      brave: {
+        hasEnvironmentKey: Boolean(response.brave?.hasEnvironmentKey),
+        hasConfiguredKey: Boolean(response.brave?.hasConfiguredKey),
+        hasAnyKey: Boolean(response.brave?.hasAnyKey)
+      },
+      perplexity: {
+        hasEnvironmentKey: Boolean(response.perplexity?.hasEnvironmentKey),
+        hasConfiguredKey: Boolean(response.perplexity?.hasConfiguredKey),
+        hasAnyKey: Boolean(response.perplexity?.hasAnyKey)
+      }
     });
   }
 
@@ -859,6 +907,15 @@ export function ConfigView({ sectionId = "providers", onSectionChange = null }) 
         <div className="tg-settings-shell">
           <TelegramEditor draftConfig={draftConfig} mutateDraft={mutateDraft} />
         </div>
+      );
+    }
+    if (selectedSettings === "search-tools") {
+      return (
+        <SearchToolsEditor
+          draftConfig={draftConfig}
+          searchProviderStatus={searchProviderStatus}
+          mutateDraft={mutateDraft}
+        />
       );
     }
     if (selectedSettings === "git-sync") {

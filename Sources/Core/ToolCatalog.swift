@@ -28,8 +28,8 @@ enum ToolCatalog {
             id: "web.search",
             domain: "web",
             title: "Web search",
-            status: "adapter",
-            description: "Search web via external adapter."
+            status: "fully_functional",
+            description: "Search web via configured Brave or Perplexity provider."
         ),
         .init(
             id: "web.fetch",
