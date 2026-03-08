@@ -395,6 +395,17 @@ public actor CoreRouter {
             return Self.encodable(status: HTTPStatus.ok, payload: status)
         }
 
+        add(.post, "/v1/providers/probe") { request in
+            guard let body = request.body,
+                  let payload = Self.decode(body, as: ProviderProbeRequest.self)
+            else {
+                return Self.json(status: HTTPStatus.badRequest, payload: ["error": ErrorCode.invalidBody])
+            }
+
+            let response = await service.probeProvider(request: payload)
+            return Self.encodable(status: HTTPStatus.ok, payload: response)
+        }
+
         add(.get, "/v1/config") { _ in
             let config = await service.getConfig()
             return Self.encodable(status: HTTPStatus.ok, payload: config)

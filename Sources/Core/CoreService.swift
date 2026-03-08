@@ -166,6 +166,7 @@ public actor CoreService {
     private let hybridMemoryStore: HybridMemoryStore?
     private let store: any PersistenceStore
     private let openAIProviderCatalog: OpenAIProviderCatalogService
+    private let providerProbeService: ProviderProbeService
     private let searchProviderService: SearchProviderService
     private let agentCatalogStore: AgentCatalogFileStore
     private let sessionStore: AgentSessionFileStore
@@ -217,6 +218,7 @@ public actor CoreService {
         configPath: String = CoreConfig.defaultConfigPath,
         persistenceBuilder: any CorePersistenceBuilding = DefaultCorePersistenceBuilder(),
         searchProviderService: SearchProviderService? = nil,
+        providerProbeService: ProviderProbeService? = nil,
         builtInGatewayPluginFactory: BuiltInGatewayPluginFactory
     ) {
         let resolvedModels = CoreModelProviderFactory.resolveModelIdentifiers(config: config)
@@ -241,6 +243,7 @@ public actor CoreService {
         self.hybridMemoryStore = hybridMemoryStore
         self.store = persistenceBuilder.makeStore(config: config)
         self.openAIProviderCatalog = OpenAIProviderCatalogService()
+        self.providerProbeService = providerProbeService ?? ProviderProbeService()
         self.searchProviderService = searchProviderService ?? SearchProviderService(config: config.searchTools)
         self.configPath = configPath
         self.workspaceRootURL = config
@@ -2200,6 +2203,11 @@ public actor CoreService {
     /// Returns OpenAI provider key availability without fetching remote model catalog.
     public func openAIProviderStatus() -> OpenAIProviderStatusResponse {
         openAIProviderCatalog.status(config: currentConfig)
+    }
+
+    /// Probes provider connectivity and returns remote model options on success.
+    public func probeProvider(request: ProviderProbeRequest) async -> ProviderProbeResponse {
+        await providerProbeService.probe(config: currentConfig, request: request)
     }
 
     /// Returns search provider key availability for configured web search providers.

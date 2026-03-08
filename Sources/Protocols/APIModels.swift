@@ -1371,6 +1371,24 @@ public enum ProviderAuthMethod: String, Codable, Sendable {
     case deeplink
 }
 
+public enum ProviderProbeID: String, Codable, Sendable {
+    case openAIAPI = "openai-api"
+    case openAIOAuth = "openai-oauth"
+    case ollama
+}
+
+public struct ProviderProbeRequest: Codable, Sendable {
+    public var providerId: ProviderProbeID
+    public var apiKey: String?
+    public var apiUrl: String?
+
+    public init(providerId: ProviderProbeID, apiKey: String? = nil, apiUrl: String? = nil) {
+        self.providerId = providerId
+        self.apiKey = apiKey
+        self.apiUrl = apiUrl
+    }
+}
+
 public struct OpenAIProviderModelsRequest: Codable, Sendable {
     public var authMethod: ProviderAuthMethod
     public var apiKey: String?
@@ -1443,6 +1461,28 @@ public struct OpenAIProviderStatusResponse: Codable, Sendable {
         self.hasEnvironmentKey = hasEnvironmentKey
         self.hasConfiguredKey = hasConfiguredKey
         self.hasAnyKey = hasAnyKey
+    }
+}
+
+public struct ProviderProbeResponse: Codable, Sendable {
+    public var providerId: ProviderProbeID
+    public var ok: Bool
+    public var usedEnvironmentKey: Bool
+    public var message: String
+    public var models: [ProviderModelOption]
+
+    public init(
+        providerId: ProviderProbeID,
+        ok: Bool,
+        usedEnvironmentKey: Bool,
+        message: String,
+        models: [ProviderModelOption]
+    ) {
+        self.providerId = providerId
+        self.ok = ok
+        self.usedEnvironmentKey = usedEnvironmentKey
+        self.message = message
+        self.models = models
     }
 }
 

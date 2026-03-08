@@ -98,8 +98,9 @@ function emptyPlugin() {
 
 const EMPTY_CONFIG = {
   listen: { host: "0.0.0.0", port: 25101 },
-  workspace: { name: "workspace", basePath: "~" },
+  workspace: { name: ".sloppy", basePath: "~" },
   auth: { token: "dev-token" },
+  onboarding: { completed: false },
   models: [emptyModel()],
   memory: {
     backend: "sqlite-local-vectors",
@@ -263,6 +264,7 @@ function normalizeConfig(config) {
   normalized.workspace.name = config?.workspace?.name || normalized.workspace.name;
   normalized.workspace.basePath = config?.workspace?.basePath || normalized.workspace.basePath;
   normalized.auth.token = config?.auth?.token || normalized.auth.token;
+  normalized.onboarding.completed = Boolean(config?.onboarding?.completed);
   normalized.memory.backend = config?.memory?.backend || normalized.memory.backend;
   normalized.memory.provider.mode = String(config?.memory?.provider?.mode || normalized.memory.provider.mode);
   normalized.memory.provider.endpoint = String(config?.memory?.provider?.endpoint || "");

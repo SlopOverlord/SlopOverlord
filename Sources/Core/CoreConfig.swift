@@ -6,7 +6,7 @@ public struct CoreConfig: Codable, Sendable {
     public static var defaultConfigPath: String {
         defaultConfigPath(currentDirectory: FileManager.default.currentDirectoryPath)
     }
-    public static let defaultWorkspaceName = "workspace"
+    public static let defaultWorkspaceName = ".sloppy"
     public static let defaultWorkspaceBasePath = "~"
     public static let defaultSQLiteFileName = "core.sqlite"
     public static let legacyDefaultSQLitePath = "./.data/core.sqlite"
@@ -190,6 +190,14 @@ public struct CoreConfig: Codable, Sendable {
 
         public init(token: String) {
             self.token = token
+        }
+    }
+
+    public struct Onboarding: Codable, Sendable, Equatable {
+        public var completed: Bool
+
+        public init(completed: Bool = false) {
+            self.completed = completed
         }
     }
 
@@ -418,6 +426,7 @@ public struct CoreConfig: Codable, Sendable {
     public var listen: Listen
     public var workspace: Workspace
     public var auth: Auth
+    public var onboarding: Onboarding
     public var models: [ModelConfig]
     public var memory: Memory
     public var nodes: [String]
@@ -433,6 +442,7 @@ public struct CoreConfig: Codable, Sendable {
         listen: Listen,
         workspace: Workspace,
         auth: Auth,
+        onboarding: Onboarding = Onboarding(),
         models: [ModelConfig],
         memory: Memory,
         nodes: [String],
@@ -447,6 +457,7 @@ public struct CoreConfig: Codable, Sendable {
         self.listen = listen
         self.workspace = workspace
         self.auth = auth
+        self.onboarding = onboarding
         self.models = models
         self.memory = memory
         self.nodes = nodes
@@ -464,6 +475,7 @@ public struct CoreConfig: Codable, Sendable {
             listen: .init(host: "0.0.0.0", port: 25101),
             workspace: .init(),
             auth: .init(token: "dev-token"),
+            onboarding: .init(),
             models: [
                 .init(
                     title: "openai-main",
@@ -547,6 +559,7 @@ public struct CoreConfig: Codable, Sendable {
         case listen
         case workspace
         case auth
+        case onboarding
         case models
         case memory
         case nodes
@@ -565,6 +578,7 @@ public struct CoreConfig: Codable, Sendable {
         listen = try container.decode(Listen.self, forKey: .listen)
         workspace = try container.decodeIfPresent(Workspace.self, forKey: .workspace) ?? .init()
         auth = try container.decode(Auth.self, forKey: .auth)
+        onboarding = try container.decodeIfPresent(Onboarding.self, forKey: .onboarding) ?? .init()
         memory = try container.decode(Memory.self, forKey: .memory)
         nodes = try container.decodeIfPresent([String].self, forKey: .nodes) ?? []
         gateways = try container.decodeIfPresent([String].self, forKey: .gateways) ?? []

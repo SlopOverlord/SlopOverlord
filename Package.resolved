@@ -1,5 +1,5 @@
 {
-  "originHash" : "64e30047d87a40331a7f870c3e6aa74fc8434a156d7e6368c62499f7437a0a1a",
+  "originHash" : "e3f6f99dc56b2200e6a30c87e43b2f63de6e9b95360a8dc532374339580ed7a9",
   "pins" : [
     {
       "identity" : "anylanguagemodel",
@@ -8,6 +8,15 @@
       "state" : {
         "branch" : "main",
         "revision" : "7b311b18a209fabf593ad9006ca09bef2fc4de1a"
+      }
+    },
+    {
+      "identity" : "codexbar",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/TeamSloppy/CodexBar.git",
+      "state" : {
+        "branch" : "main",
+        "revision" : "8a079c03b7bf56688678d076add4deff3b0d2290"
       }
     },
     {
