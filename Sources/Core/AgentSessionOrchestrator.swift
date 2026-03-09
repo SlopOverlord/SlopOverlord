@@ -293,7 +293,68 @@ actor AgentSessionOrchestrator {
                         )
                     )
                 }
-                return await self.invokeTool(agentID: agentID, sessionID: sessionID, request: toolRequest)
+                
+                let toolCallEvent = AgentSessionEvent(
+                    agentId: agentID,
+                    sessionId: sessionID,
+                    type: .toolCall,
+                    toolCall: AgentToolCallEvent(
+                        tool: toolRequest.tool,
+                        arguments: toolRequest.arguments,
+                        reason: toolRequest.reason
+                    )
+                )
+                
+                let toolCallStatusEvent = AgentSessionEvent(
+                    agentId: agentID,
+                    sessionId: sessionID,
+                    type: .runStatus,
+                    runStatus: AgentRunStatusEvent(
+                        stage: .searching,
+                        label: "Executing tool",
+                        details: "Tool: \(toolRequest.tool)"
+                    )
+                )
+
+                await self.appendEventsSafely(
+                    agentID: agentID,
+                    sessionID: sessionID,
+                    events: [toolCallStatusEvent, toolCallEvent]
+                )
+
+                let result = await self.invokeTool(agentID: agentID, sessionID: sessionID, request: toolRequest)
+
+                let toolResultEvent = AgentSessionEvent(
+                    agentId: agentID,
+                    sessionId: sessionID,
+                    type: .toolResult,
+                    toolResult: AgentToolResultEvent(
+                        tool: result.tool,
+                        ok: result.ok,
+                        data: result.data,
+                        error: result.error,
+                        durationMs: result.durationMs
+                    )
+                )
+
+                let toolResultStatusEvent = AgentSessionEvent(
+                    agentId: agentID,
+                    sessionId: sessionID,
+                    type: .runStatus,
+                    runStatus: AgentRunStatusEvent(
+                        stage: .responding,
+                        label: "Responding",
+                        details: "Generating response..."
+                    )
+                )
+
+                await self.appendEventsSafely(
+                    agentID: agentID,
+                    sessionID: sessionID,
+                    events: [toolResultEvent, toolResultStatusEvent]
+                )
+
+                return result
             }
         )
 
@@ -491,6 +552,10 @@ actor AgentSessionOrchestrator {
         streamedAssistantLastPersistedAtByChannel.removeValue(forKey: channelID)
     }
 
+    private func appendEventsSafely(agentID: String, sessionID: String, events: [AgentSessionEvent]) {
+        _ = try? sessionStore.appendEvents(agentID: agentID, sessionID: sessionID, events: events)
+    }
+
     private func handleSessionResponseChunk(
         agentID: String,
         sessionID: String,
@@ -502,52 +567,6 @@ actor AgentSessionOrchestrator {
 
         if let responseChunkObserver {
             await responseChunkObserver(agentID, sessionID, normalized)
-        }
-
-        if interruptedSessionRunChannels.contains(channelID) {
-            return false
-        }
-
-        let trimmed = normalized.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else {
-            return true
-        }
-
-        let lastPersistedText = streamedAssistantLastPersistedByChannel[channelID] ?? ""
-        let lastPersistedAt = streamedAssistantLastPersistedAtByChannel[channelID] ?? .distantPast
-        let now = Date()
-        let progressed = max(0, normalized.count - lastPersistedText.count)
-        let changed = normalized != lastPersistedText
-        let resetDetected = normalized.count < lastPersistedText.count
-        let shouldPersist = lastPersistedText.isEmpty ||
-            (changed && progressed >= 8) ||
-            (changed && now.timeIntervalSince(lastPersistedAt) >= 0.12) ||
-            resetDetected
-
-        if shouldPersist {
-            do {
-                _ = try sessionStore.appendEvents(
-                    agentID: agentID,
-                    sessionID: sessionID,
-                    events: [
-                        AgentSessionEvent(
-                            agentId: agentID,
-                            sessionId: sessionID,
-                            type: .runStatus,
-                            runStatus: AgentRunStatusEvent(
-                                stage: .responding,
-                                label: "Responding",
-                                details: "Generating response...",
-                                expandedText: normalized
-                            )
-                        )
-                    ]
-                )
-                streamedAssistantLastPersistedByChannel[channelID] = normalized
-                streamedAssistantLastPersistedAtByChannel[channelID] = now
-            } catch {
-                return false
-            }
         }
 
         return !interruptedSessionRunChannels.contains(channelID)
@@ -676,6 +695,14 @@ actor AgentSessionOrchestrator {
                 [Runtime capabilities]
                 - This session runs with a persistent channel history and agent bootstrap context.
                 - You can use available tools when the runtime exposes tool calls.
+                - To call a tool, respond with exactly one JSON object and no surrounding prose: `{"tool":"<tool-id>","arguments":{},"reason":"<short reason>"}`
+                - If you don't know the exact arguments or tools available, you MUST call `{"tool":"system.list_tools","arguments":{},"reason":"Discovering available tools"}` to get the catalog before attempting any unknown tool.
+                - Common tools:
+                  - `system.list_tools` with `{}`
+                  - `files.read` with `{"path":"path/to/file"}`
+                  - `files.write` with `{"path":"path/to/file","content":"..."}`
+                  - `files.edit` with `{"path":"path/to/file","search":"old","replace":"new"}`
+                  - `runtime.exec` with `{"command":"mkdir","arguments":["-p","agents/ceo"]}`
                 """
         )
         let runtimeRulesSection = renderedFallbackPromptPartial(
@@ -687,6 +714,16 @@ actor AgentSessionOrchestrator {
                 - Use fetched task details (status, priority, description, assignee) in the response.
                 - If task is not found, explicitly say that and ask for a correct task id.
                 - Blend your own concrete suggestions based on the user's goal, not only direct execution.
+                """
+        )
+        let toolsInstructionSection = renderedFallbackPromptPartial(
+            named: "tools_instruction",
+            fallback:
+                """
+                [Tools usage rules]
+                - You MUST request the list of available tools before answering the user if you don't know what tools are available.
+                - You can get the available tools by using the appropriately named tool (e.g. `get_available_tools` or similar).
+                - Do not guess the tool schemas or names. Always check the available tools first.
                 """
         )
 
@@ -711,6 +748,8 @@ actor AgentSessionOrchestrator {
         \(capabilitiesSection)
 
         \(runtimeRulesSection)
+        
+        \(toolsInstructionSection)
         """
     }
 

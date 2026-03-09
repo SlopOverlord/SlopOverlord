@@ -106,6 +106,8 @@ final class ToolExecutionService: @unchecked Sendable {
             result = unsupportedAdapterResult(tool: toolID)
         case "cron":
             result = await executeCron(agentID: agentID, sessionID: sessionID, request: request)
+        case "system.list_tools":
+            result = executeSystemListTools(request: request)
         default:
             result = failed(
                 tool: toolID,
@@ -559,6 +561,165 @@ final class ToolExecutionService: @unchecked Sendable {
                 retryable: true
             )
         }
+    }
+
+    private func executeSystemListTools(request: ToolInvocationRequest) -> ToolInvocationResult {
+        let tools: [JSONValue] = [
+            .object([
+                "name": .string("files.read"),
+                "description": .string("Reads text content of a file. Fails if file exceeds guardrail read bytes."),
+                "parameters": .object([
+                    "type": .string("object"),
+                    "properties": .object([
+                        "path": .object(["type": .string("string")]),
+                        "maxBytes": .object(["type": .string("number")])
+                    ]),
+                    "required": .array([.string("path")])
+                ])
+            ]),
+            .object([
+                "name": .string("files.write"),
+                "description": .string("Creates or overwrites a file with UTF-8 content."),
+                "parameters": .object([
+                    "type": .string("object"),
+                    "properties": .object([
+                        "path": .object(["type": .string("string")]),
+                        "content": .object(["type": .string("string")]),
+                        "allowEmpty": .object(["type": .string("boolean")])
+                    ]),
+                    "required": .array([.string("path"), .string("content")])
+                ])
+            ]),
+            .object([
+                "name": .string("files.edit"),
+                "description": .string("Replaces an exact text sequence within a file. Best for surgical updates."),
+                "parameters": .object([
+                    "type": .string("object"),
+                    "properties": .object([
+                        "path": .object(["type": .string("string")]),
+                        "search": .object(["type": .string("string")]),
+                        "replace": .object(["type": .string("string")]),
+                        "all": .object(["type": .string("boolean")])
+                    ]),
+                    "required": .array([.string("path"), .string("search"), .string("replace")])
+                ])
+            ]),
+            .object([
+                "name": .string("runtime.exec"),
+                "description": .string("Executes a foreground shell command and returns output. Max runtime defined by policy timeout."),
+                "parameters": .object([
+                    "type": .string("object"),
+                    "properties": .object([
+                        "command": .object(["type": .string("string")]),
+                        "arguments": .object(["type": .array([.string("string")])]),
+                        "cwd": .object(["type": .string("string")]),
+                        "timeoutMs": .object(["type": .string("number")])
+                    ]),
+                    "required": .array([.string("command")])
+                ])
+            ]),
+            .object([
+                "name": .string("runtime.process"),
+                "description": .string("Manages background processes scoped to the session. Valid actions: start, status, stop, list."),
+                "parameters": .object([
+                    "type": .string("object"),
+                    "properties": .object([
+                        "action": .object(["type": .string("string")]),
+                        "command": .object(["type": .string("string")]),
+                        "arguments": .object(["type": .array([.string("string")])]),
+                        "cwd": .object(["type": .string("string")]),
+                        "processId": .object(["type": .string("string")])
+                    ]),
+                    "required": .array([.string("action")])
+                ])
+            ]),
+            .object([
+                "name": .string("sessions.spawn"),
+                "description": .string("Spawns a new nested session associated with the agent."),
+                "parameters": .object([
+                    "type": .string("object"),
+                    "properties": .object([
+                        "title": .object(["type": .string("string")]),
+                        "parentSessionId": .object(["type": .string("string")])
+                    ])
+                ])
+            ]),
+            .object([
+                "name": .string("sessions.list"),
+                "description": .string("Lists all active sessions for the current agent."),
+                "parameters": .object(["type": .string("object")])
+            ]),
+            .object([
+                "name": .string("sessions.send"),
+                "description": .string("Sends a message inline to another session via channel mechanism and completes it."),
+                "parameters": .object([
+                    "type": .string("object"),
+                    "properties": .object([
+                        "sessionId": .object(["type": .string("string")]),
+                        "content": .object(["type": .string("string")]),
+                        "userId": .object(["type": .string("string")])
+                    ]),
+                    "required": .array([.string("content")])
+                ])
+            ]),
+            .object([
+                "name": .string("memory.save"),
+                "description": .string("Saves a standalone piece of persistent memory. Memory class can be 'fact', 'preference', 'decision'."),
+                "parameters": .object([
+                    "type": .string("object"),
+                    "properties": .object([
+                        "note": .object(["type": .string("string")]),
+                        "summary": .object(["type": .string("string")]),
+                        "class": .object(["type": .string("string")])
+                    ]),
+                    "required": .array([.string("note")])
+                ])
+            ]),
+            .object([
+                "name": .string("memory.recall"),
+                "description": .string("Recalls saved memory related to query semantics."),
+                "parameters": .object([
+                    "type": .string("object"),
+                    "properties": .object([
+                        "query": .object(["type": .string("string")]),
+                        "limit": .object(["type": .string("number")])
+                    ]),
+                    "required": .array([.string("query")])
+                ])
+            ]),
+            .object([
+                "name": .string("web.search"),
+                "description": .string("Performs an external web search. Requires provider configuration."),
+                "parameters": .object([
+                    "type": .string("object"),
+                    "properties": .object([
+                        "query": .object(["type": .string("string")]),
+                        "count": .object(["type": .string("number")])
+                    ]),
+                    "required": .array([.string("query")])
+                ])
+            ]),
+            .object([
+                "name": .string("cron"),
+                "description": .string("Schedules recurring work using crontab syntax limit logic."),
+                "parameters": .object([
+                    "type": .string("object"),
+                    "properties": .object([
+                        "action": .object(["type": .string("string")])
+                    ])
+                ])
+            ]),
+            .object([
+                "name": .string("system.list_tools"),
+                "description": .string("Returns a JSON array of all available tool schemas and their required arguments."),
+                "parameters": .object(["type": .string("object")])
+            ])
+        ]
+
+        return success(
+            tool: request.tool,
+            data: .array(tools)
+        )
     }
 
     private func unsupportedAdapterResult(tool: String) -> ToolInvocationResult {

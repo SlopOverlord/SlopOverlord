@@ -46,6 +46,10 @@ struct AgentPromptComposer {
             named: "runtime_rules",
             values: [:]
         )
+        let toolsInstructionSection = try renderPartial(
+            named: "tools_instruction",
+            values: [:]
+        )
         let skillsSection = try renderSkillsSection(skills: context.installedSkills)
         let template = try templateLoader.loadTemplate(for: .agentSessionBootstrap)
 
@@ -61,7 +65,8 @@ struct AgentPromptComposer {
                 "soul_markdown": documents.soulMarkdown,
                 "skills_section": skillsSection,
                 "process_capabilities_section": capabilitiesSection,
-                "runtime_rules_section": runtimeRulesSection
+                "runtime_rules_section": runtimeRulesSection,
+                "tools_instruction_section": toolsInstructionSection
             ]
         )
     }

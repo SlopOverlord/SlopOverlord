@@ -20,3 +20,5 @@ Session: {{session_id}}
 {{process_capabilities_section}}
 
 {{runtime_rules_section}}
+
+{{tools_instruction_section}}
