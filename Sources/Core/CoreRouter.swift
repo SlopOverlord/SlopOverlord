@@ -43,6 +43,18 @@ public enum HTTPRouteMethod: String, Sendable {
     case delete = "DELETE"
 }
 
+public struct RouteMetadata: Sendable {
+    public var summary: String?
+    public var description: String?
+    public var tags: [String]?
+
+    public init(summary: String? = nil, description: String? = nil, tags: [String]? = nil) {
+        self.summary = summary
+        self.description = description
+        self.tags = tags
+    }
+}
+
 /// Typed request object passed into router callbacks.
 public struct HTTPRequest: Sendable {
     public var method: HTTPRouteMethod
@@ -195,25 +207,29 @@ private struct WorkerCreateResponse: Encodable {
     let workerId: String
 }
 
-private enum RoutePathSegment: Equatable {
+public enum RoutePathSegment: Equatable {
     case literal(String)
     case parameter(String)
 }
 
-private struct RouteDefinition {
-    typealias Callback = (HTTPRequest) async -> CoreRouterResponse
+public struct RouteDefinition {
+    public typealias Callback = (HTTPRequest) async -> CoreRouterResponse
 
-    let method: HTTPRouteMethod
-    let segments: [RoutePathSegment]
-    let callback: Callback
+    public let method: HTTPRouteMethod
+    public let path: String
+    public let segments: [RoutePathSegment]
+    public let callback: Callback
+    public let metadata: RouteMetadata?
 
-    init(method: HTTPRouteMethod, path: String, callback: @escaping Callback) {
+    public init(method: HTTPRouteMethod, path: String, metadata: RouteMetadata? = nil, callback: @escaping Callback) {
         self.method = method
+        self.path = path
         self.segments = parseRoutePath(path)
         self.callback = callback
+        self.metadata = metadata
     }
 
-    func match(pathSegments: [String]) -> [String: String]? {
+    public func match(pathSegments: [String]) -> [String: String]? {
         guard segments.count == pathSegments.count else {
             return nil
         }
@@ -283,25 +299,26 @@ public actor CoreRouter {
     public func register(
         path: String,
         method: HTTPRouteMethod,
+        metadata: RouteMetadata? = nil,
         callback: @escaping (HTTPRequest) async -> CoreRouterResponse
     ) {
-        routes.append(.init(method: method, path: path, callback: callback))
+        routes.append(.init(method: method, path: path, metadata: metadata, callback: callback))
     }
 
-    public func get(_ path: String, callback: @escaping (HTTPRequest) async -> CoreRouterResponse) {
-        register(path: path, method: .get, callback: callback)
+    public func get(_ path: String, metadata: RouteMetadata? = nil, callback: @escaping (HTTPRequest) async -> CoreRouterResponse) {
+        register(path: path, method: .get, metadata: metadata, callback: callback)
     }
 
-    public func post(_ path: String, callback: @escaping (HTTPRequest) async -> CoreRouterResponse) {
-        register(path: path, method: .post, callback: callback)
+    public func post(_ path: String, metadata: RouteMetadata? = nil, callback: @escaping (HTTPRequest) async -> CoreRouterResponse) {
+        register(path: path, method: .post, metadata: metadata, callback: callback)
     }
 
-    public func put(_ path: String, callback: @escaping (HTTPRequest) async -> CoreRouterResponse) {
-        register(path: path, method: .put, callback: callback)
+    public func put(_ path: String, metadata: RouteMetadata? = nil, callback: @escaping (HTTPRequest) async -> CoreRouterResponse) {
+        register(path: path, method: .put, metadata: metadata, callback: callback)
     }
 
-    public func delete(_ path: String, callback: @escaping (HTTPRequest) async -> CoreRouterResponse) {
-        register(path: path, method: .delete, callback: callback)
+    public func delete(_ path: String, metadata: RouteMetadata? = nil, callback: @escaping (HTTPRequest) async -> CoreRouterResponse) {
+        register(path: path, method: .delete, metadata: metadata, callback: callback)
     }
 
     /// WebSocket-like registration API (transport integration to be wired in CoreHTTPServer later).
@@ -330,6 +347,13 @@ public actor CoreRouter {
 
         await route.definition.callback(route.request, connection)
         return true
+    }
+
+    public func generateOpenAPISpec() async throws -> Data {
+        let spec = OpenAPIGenerator.generate(routes: routes)
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        return try encoder.encode(spec)
     }
 
     /// Routes incoming HTTP-like request into registered Core handlers.
@@ -365,16 +389,17 @@ public actor CoreRouter {
         func add(
             _ method: HTTPRouteMethod,
             _ path: String,
+            metadata: RouteMetadata? = nil,
             _ callback: @escaping (HTTPRequest) async -> CoreRouterResponse
         ) {
-            routes.append(.init(method: method, path: path, callback: callback))
+            routes.append(.init(method: method, path: path, metadata: metadata, callback: callback))
         }
 
-        add(.get, "/health") { _ in
+        add(.get, "/health", metadata: RouteMetadata(summary: "Health check", description: "Returns the current status of the core service", tags: ["System"])) { _ in
             Self.json(status: HTTPStatus.ok, payload: ["status": "ok"])
         }
 
-        add(.get, "/v1/channels/:channelId/state") { request in
+        add(.get, "/v1/channels/:channelId/state", metadata: RouteMetadata(summary: "Get channel state", description: "Returns the current state of a communication channel", tags: ["Channels"])) { request in
             let channelId = request.pathParam("channelId") ?? ""
             let state = await service.getChannelState(channelId: channelId) ?? ChannelSnapshot(
                 channelId: channelId,
@@ -453,7 +478,7 @@ public actor CoreRouter {
             return Self.encodable(status: HTTPStatus.ok, payload: workers)
         }
 
-        add(.get, "/v1/projects") { _ in
+        add(.get, "/v1/projects", metadata: RouteMetadata(summary: "List projects", description: "Returns a list of all active projects", tags: ["Projects"])) { _ in
             let projects = await service.listProjects()
             return Self.encodable(status: HTTPStatus.ok, payload: projects)
         }

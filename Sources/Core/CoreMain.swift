@@ -25,6 +25,9 @@ struct CoreMain: AsyncParsableCommand {
     @Flag(name: .long, help: "Run one-shot startup flow and exit")
     var oneshot: Bool = false
 
+    @Option(name: .customLong("generate-openapi"), help: "Generate OpenAPI (Swagger) specification and save to the provided path")
+    var openapiPath: String?
+
     mutating func run() async throws {
         var runtimeLogger: Logger?
 
@@ -77,6 +80,13 @@ struct CoreMain: AsyncParsableCommand {
                 router: router,
                 logger: logger
             )
+
+            if let openapiPath = openapiPath {
+                let data = try await router.generateOpenAPISpec()
+                try data.write(to: URL(fileURLWithPath: openapiPath))
+                logger.info("OpenAPI specification generated at \(openapiPath)")
+                return
+            }
 
             logger.info("Sloppy Core initialized")
 
