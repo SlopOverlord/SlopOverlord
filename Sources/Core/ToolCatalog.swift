@@ -4,6 +4,13 @@ import Protocols
 enum ToolCatalog {
     static let entries: [AgentToolCatalogEntry] = [
         .init(
+            id: "system.list_tools",
+            domain: "system",
+            title: "List tools",
+            status: "fully_functional",
+            description: "Return the available tool catalog with argument schemas."
+        ),
+        .init(
             id: "files.read",
             domain: "files",
             title: "Read file",
@@ -187,5 +194,228 @@ enum ToolCatalog {
         )
     ]
 
+    static func listToolsPayload() -> [JSONValue] {
+        entries.map { entry in
+            .object([
+                "name": .string(entry.id),
+                "title": .string(entry.title),
+                "domain": .string(entry.domain),
+                "status": .string(entry.status),
+                "description": .string(entry.description),
+                "parameters": parameterSchema(for: entry.id)
+            ])
+        }
+    }
+
     static let knownToolIDs: Set<String> = Set(entries.map(\.id))
+
+    private static func parameterSchema(for toolID: String) -> JSONValue {
+        parameterSchemas[toolID] ?? .object(["type": .string("object")])
+    }
+
+    private static let parameterSchemas: [String: JSONValue] = [
+        "system.list_tools": .object(["type": .string("object")]),
+        "files.read": .object([
+            "type": .string("object"),
+            "properties": .object([
+                "path": .object(["type": .string("string")]),
+                "maxBytes": .object(["type": .string("number")])
+            ]),
+            "required": .array([.string("path")])
+        ]),
+        "files.write": .object([
+            "type": .string("object"),
+            "properties": .object([
+                "path": .object(["type": .string("string")]),
+                "content": .object(["type": .string("string")]),
+                "allowEmpty": .object(["type": .string("boolean")])
+            ]),
+            "required": .array([.string("path"), .string("content")])
+        ]),
+        "files.edit": .object([
+            "type": .string("object"),
+            "properties": .object([
+                "path": .object(["type": .string("string")]),
+                "search": .object(["type": .string("string")]),
+                "replace": .object(["type": .string("string")]),
+                "all": .object(["type": .string("boolean")])
+            ]),
+            "required": .array([.string("path"), .string("search"), .string("replace")])
+        ]),
+        "runtime.exec": .object([
+            "type": .string("object"),
+            "properties": .object([
+                "command": .object(["type": .string("string")]),
+                "arguments": .object([
+                    "type": .string("array"),
+                    "items": .object(["type": .string("string")])
+                ]),
+                "cwd": .object(["type": .string("string")]),
+                "timeoutMs": .object(["type": .string("number")])
+            ]),
+            "required": .array([.string("command")])
+        ]),
+        "runtime.process": .object([
+            "type": .string("object"),
+            "properties": .object([
+                "action": .object(["type": .string("string")]),
+                "command": .object(["type": .string("string")]),
+                "arguments": .object([
+                    "type": .string("array"),
+                    "items": .object(["type": .string("string")])
+                ]),
+                "cwd": .object(["type": .string("string")]),
+                "processId": .object(["type": .string("string")])
+            ]),
+            "required": .array([.string("action")])
+        ]),
+        "sessions.spawn": .object([
+            "type": .string("object"),
+            "properties": .object([
+                "title": .object(["type": .string("string")]),
+                "parentSessionId": .object(["type": .string("string")])
+            ])
+        ]),
+        "sessions.list": .object(["type": .string("object")]),
+        "sessions.history": .object([
+            "type": .string("object"),
+            "properties": .object([
+                "sessionId": .object(["type": .string("string")]),
+                "limit": .object(["type": .string("number")])
+            ])
+        ]),
+        "sessions.status": .object([
+            "type": .string("object"),
+            "properties": .object([
+                "sessionId": .object(["type": .string("string")])
+            ])
+        ]),
+        "sessions.send": .object([
+            "type": .string("object"),
+            "properties": .object([
+                "sessionId": .object(["type": .string("string")]),
+                "content": .object(["type": .string("string")]),
+                "userId": .object(["type": .string("string")])
+            ]),
+            "required": .array([.string("content")])
+        ]),
+        "messages.send": .object([
+            "type": .string("object"),
+            "properties": .object([
+                "sessionId": .object(["type": .string("string")]),
+                "content": .object(["type": .string("string")]),
+                "userId": .object(["type": .string("string")])
+            ]),
+            "required": .array([.string("content")])
+        ]),
+        "agents.list": .object(["type": .string("object")]),
+        "channel.history": .object([
+            "type": .string("object"),
+            "properties": .object([
+                "channel_id": .object(["type": .string("string")]),
+                "limit": .object(["type": .string("number")])
+            ]),
+            "required": .array([.string("channel_id")])
+        ]),
+        "memory.get": .object([
+            "type": .string("object"),
+            "properties": .object([
+                "query": .object(["type": .string("string")]),
+                "limit": .object(["type": .string("number")])
+            ]),
+            "required": .array([.string("query")])
+        ]),
+        "memory.recall": .object([
+            "type": .string("object"),
+            "properties": .object([
+                "query": .object(["type": .string("string")]),
+                "limit": .object(["type": .string("number")])
+            ]),
+            "required": .array([.string("query")])
+        ]),
+        "memory.search": .object([
+            "type": .string("object"),
+            "properties": .object([
+                "query": .object(["type": .string("string")]),
+                "limit": .object(["type": .string("number")])
+            ]),
+            "required": .array([.string("query")])
+        ]),
+        "memory.save": .object([
+            "type": .string("object"),
+            "properties": .object([
+                "note": .object(["type": .string("string")]),
+                "summary": .object(["type": .string("string")]),
+                "class": .object(["type": .string("string")])
+            ]),
+            "required": .array([.string("note")])
+        ]),
+        "web.search": .object([
+            "type": .string("object"),
+            "properties": .object([
+                "query": .object(["type": .string("string")]),
+                "count": .object(["type": .string("number")])
+            ]),
+            "required": .array([.string("query")])
+        ]),
+        "web.fetch": .object([
+            "type": .string("object"),
+            "properties": .object([
+                "url": .object(["type": .string("string")])
+            ]),
+            "required": .array([.string("url")])
+        ]),
+        "cron": .object([
+            "type": .string("object"),
+            "properties": .object([
+                "schedule": .object(["type": .string("string")]),
+                "command": .object(["type": .string("string")]),
+                "channel_id": .object(["type": .string("string")]),
+                "action": .object(["type": .string("string")])
+            ])
+        ]),
+        "project.task_list": .object(["type": .string("object")]),
+        "project.task_create": .object([
+            "type": .string("object"),
+            "properties": .object([
+                "title": .object(["type": .string("string")]),
+                "description": .object(["type": .string("string")]),
+                "priority": .object(["type": .string("string")]),
+                "status": .object(["type": .string("string")])
+            ]),
+            "required": .array([.string("title")])
+        ]),
+        "project.task_get": .object([
+            "type": .string("object"),
+            "properties": .object([
+                "taskId": .object(["type": .string("string")]),
+                "reference": .object(["type": .string("string")])
+            ])
+        ]),
+        "project.escalate_to_user": .object([
+            "type": .string("object"),
+            "properties": .object([
+                "reason": .object(["type": .string("string")]),
+                "taskId": .object(["type": .string("string")])
+            ]),
+            "required": .array([.string("reason")])
+        ]),
+        "actor.discuss_with_actor": .object([
+            "type": .string("object"),
+            "properties": .object([
+                "actorId": .object(["type": .string("string")]),
+                "topic": .object(["type": .string("string")]),
+                "message": .object(["type": .string("string")])
+            ]),
+            "required": .array([.string("actorId")])
+        ]),
+        "actor.conclude_discussion": .object([
+            "type": .string("object"),
+            "properties": .object([
+                "discussionId": .object(["type": .string("string")]),
+                "summary": .object(["type": .string("string")])
+            ]),
+            "required": .array([.string("discussionId")])
+        ])
+    ]
 }

@@ -46,8 +46,14 @@ actor SessionProcessRegistry {
         }
 
         let process = Process()
-        process.executableURL = URL(fileURLWithPath: command)
-        process.arguments = arguments
+        if command.hasPrefix("/") || command.hasPrefix("./") || command.hasPrefix("../") {
+            process.executableURL = URL(fileURLWithPath: command)
+            process.arguments = arguments
+        } else {
+            // Use /usr/bin/env to resolve command from PATH
+            process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
+            process.arguments = [command] + arguments
+        }
         process.standardOutput = FileHandle.nullDevice
         process.standardError = FileHandle.nullDevice
 

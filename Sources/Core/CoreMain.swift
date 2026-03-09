@@ -22,9 +22,6 @@ struct CoreMain: AsyncParsableCommand {
     @Flag(name: .long, inversion: .prefixedNo, help: "Overrides config and controls the immediate visor bulletin after boot")
     var bootstrapBulletin: Bool?
 
-    @Flag(name: .long, help: "Runs demo request on startup")
-    var runDemoRequest: Bool = false
-
     @Flag(name: .long, help: "Run one-shot startup flow and exit")
     var oneshot: Bool = false
 
@@ -88,23 +85,6 @@ struct CoreMain: AsyncParsableCommand {
             if !oneshot {
                 try server.start()
                 logger.info("Core HTTP server listening on \(config.listen.host):\(config.listen.port)")
-            }
-
-            if runDemoRequest {
-                let sampleRequest = ChannelMessageRequest(
-                    userId: "demo-user",
-                    content: "Implement a feature and run tests"
-                )
-                let requestBody = try? JSONEncoder().encode(sampleRequest)
-                let response = await router.handle(
-                    method: "POST",
-                    path: "/v1/channels/general/messages",
-                    body: requestBody
-                )
-
-                if let body = String(data: response.body, encoding: .utf8) {
-                    logger.info("POST /v1/channels/general/messages -> \(response.status) \(body)")
-                }
             }
 
             if shouldBootstrapVisorBulletin(cliOverride: bootstrapBulletin, config: config) {

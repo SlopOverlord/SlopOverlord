@@ -76,3 +76,21 @@ func authorizationHotReloadsPolicyByModificationDate() async throws {
     #expect(decision.allowed == false)
     #expect(decision.error?.code == "tool_forbidden")
 }
+
+@Test
+func authorizationAllowsSystemListToolsFromCatalog() async throws {
+    let root = FileManager.default.temporaryDirectory
+        .appendingPathComponent("tools-store-system-list-\(UUID().uuidString)", isDirectory: true)
+    let agentsRoot = root.appendingPathComponent("agents", isDirectory: true)
+    let agentDirectory = agentsRoot.appendingPathComponent("agent-4", isDirectory: true)
+    try FileManager.default.createDirectory(at: agentDirectory, withIntermediateDirectories: true)
+
+    #expect(ToolCatalog.knownToolIDs.contains("system.list_tools"))
+
+    let store = AgentToolsFileStore(agentsRootURL: agentsRoot)
+    let auth = ToolAuthorizationService(store: store)
+    let decision = try await auth.authorize(agentID: "agent-4", toolID: "system.list_tools")
+
+    #expect(decision.allowed == true)
+    #expect(decision.error == nil)
+}
