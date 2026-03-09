@@ -1230,7 +1230,6 @@ body.mobile-menu-open {
 .sidebar-head {
   display: flex;
   align-items: center;
-  background: var(--accent-color);
   max-height: 48px;
   gap: 8px;
   padding: 8px;
@@ -1251,7 +1250,7 @@ body.mobile-menu-open {
   font-weight: 600;
   letter-spacing: 0.01em;
   white-space: nowrap;
-  color: #000;
+  color: var(--text);
 }
 
 .sidebar-logo {
@@ -6278,12 +6277,10 @@ pre {
 
   .sidebar-head {
     align-items: center;
-    background: var(--accent-color);
   }
 
   .sidebar.compact .sidebar-head {
     justify-content: space-between;
-    background: var(--accent-color);
   }
 
   .sidebar.compact .sidebar-item {
@@ -7492,6 +7489,19 @@ pre {
   flex-wrap: wrap;
 }
 
+.channel-card-meta {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.72rem;
+  color: var(--muted);
+}
+
+.channel-card-meta .material-symbols-rounded {
+  font-size: 14px;
+  color: var(--accent);
+}
+
 .channel-card-preview {
   min-height: 2.6em;
   font-size: 0.78rem;
@@ -7545,6 +7555,186 @@ pre {
 .channel-card:hover .channel-card-arrow {
   color: var(--accent);
   transform: translateX(3px);
+}
+
+.channel-session-shell {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+  padding: 0 0 40px;
+}
+
+.channel-session-hero {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 18px;
+  padding: 20px;
+  border: 1px solid var(--line);
+  background: linear-gradient(180deg, rgba(28, 32, 44, 0.9), rgba(18, 21, 29, 0.96));
+}
+
+.channel-session-titlebar {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  min-width: 0;
+}
+
+.channel-session-avatar {
+  width: 56px;
+  height: 56px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid rgba(114, 137, 229, 0.45);
+  background: rgba(76, 91, 150, 0.22);
+  color: var(--accent);
+  font-size: 1rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  flex-shrink: 0;
+}
+
+.channel-session-copy {
+  min-width: 0;
+  display: grid;
+  gap: 4px;
+}
+
+.channel-session-copy h1 {
+  margin: 0;
+  font-size: 1.2rem;
+  font-weight: 700;
+  color: var(--text);
+}
+
+.channel-session-copy p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.86rem;
+}
+
+.channel-session-badges {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.channel-session-badge {
+  display: inline-flex;
+  align-items: center;
+  min-height: 28px;
+  padding: 4px 10px;
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.02);
+  color: var(--muted);
+  font-size: 0.74rem;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.channel-session-layout {
+  display: grid;
+  grid-template-columns: minmax(260px, 320px) minmax(0, 1fr);
+  gap: 18px;
+  min-height: 0;
+}
+
+.channel-session-sidebar,
+.channel-session-main {
+  min-width: 0;
+  display: grid;
+  align-content: start;
+  gap: 14px;
+}
+
+.channel-session-panel,
+.channel-session-transcript-panel {
+  border: 1px solid var(--line);
+  background: var(--surface);
+}
+
+.channel-session-panel {
+  padding: 16px;
+  display: grid;
+  gap: 14px;
+}
+
+.channel-session-meta-list {
+  display: grid;
+  gap: 12px;
+  margin: 0;
+}
+
+.channel-session-meta-list div {
+  display: grid;
+  gap: 3px;
+}
+
+.channel-session-meta-list dt {
+  font-size: 0.7rem;
+  color: var(--muted);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.channel-session-meta-list dd {
+  margin: 0;
+  color: var(--text);
+  font-size: 0.83rem;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
+.channel-session-preview {
+  margin: 0;
+  white-space: pre-wrap;
+  color: #d5dcee;
+  font-size: 0.84rem;
+  line-height: 1.45;
+}
+
+.channel-session-transcript-panel {
+  min-height: 520px;
+  padding: 18px;
+}
+
+.channel-session-events {
+  padding-top: 0;
+}
+
+.channel-session-message {
+  max-width: min(820px, 100%);
+}
+
+.channel-session-transcript-panel .agent-chat-message-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  color: var(--muted);
+  font-size: 0.75rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.channel-session-transcript-panel .agent-chat-message.assistant,
+.channel-session-transcript-panel .agent-chat-message.system {
+  padding: 12px 14px;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.channel-session-technical-copy {
+  display: inline-grid;
+  gap: 2px;
+}
+
+.channel-session-technical-copy small {
+  font-size: 0.72rem;
+  color: var(--muted);
 }
 
 /* ── Stat Row ── */
@@ -7704,6 +7894,18 @@ pre {
   .agent-memory-inspector {
     order: -1;
   }
+
+  .channel-session-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .channel-session-hero {
+    flex-direction: column;
+  }
+
+  .channel-session-badges {
+    justify-content: flex-start;
+  }
 }
 
 @media (max-width: 900px) {
@@ -7713,6 +7915,10 @@ pre {
 
   .active-channels-grid {
     grid-template-columns: 1fr 1fr;
+  }
+
+  .channel-session-transcript-panel {
+    padding: 14px;
   }
 }
 
@@ -7727,5 +7933,19 @@ pre {
 
   .activity-charts-grid {
     grid-template-columns: 1fr;
+  }
+
+  .channel-session-hero,
+  .channel-session-panel,
+  .channel-session-transcript-panel {
+    padding: 14px;
+  }
+
+  .channel-session-titlebar {
+    align-items: flex-start;
+  }
+
+  .channel-session-copy h1 {
+    font-size: 1rem;
   }
 }

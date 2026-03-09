@@ -35,6 +35,8 @@ export interface DashboardRoute {
   projectTaskReference: string | null;
   agentId: string | null;
   agentTab: AgentTab | null;
+  sessionAgentId: string | null;
+  sessionId: string | null;
 }
 
 function decodePathSegment(value: string) {
@@ -85,7 +87,9 @@ export function parseRouteFromPath(pathname: string): DashboardRoute {
       projectTab: "tasks",
       projectTaskReference: decodePathSegment(sectionArgRaw) || null,
       agentId: null,
-      agentTab: null
+      agentTab: null,
+      sessionAgentId: null,
+      sessionId: null
     };
   }
 
@@ -107,7 +111,9 @@ export function parseRouteFromPath(pathname: string): DashboardRoute {
       projectTab: "tasks",
       projectTaskReference: sectionArg2 || null,
       agentId: null,
-      agentTab: null
+      agentTab: null,
+      sessionAgentId: null,
+      sessionId: null
     };
   }
 
@@ -117,8 +123,20 @@ export function parseRouteFromPath(pathname: string): DashboardRoute {
   const projectTaskReference = section === "projects" && projectTab === "tasks" ? sectionArg3 || null : null;
   const agentId = section === "agents" && sectionArg ? sectionArg : null;
   const agentTab = section === "agents" && agentId ? normalizeAgentTab(sectionArg2Lower) : null;
+  const sessionAgentId = section === "sessions" && sectionArg ? sectionArg : null;
+  const sessionId = section === "sessions" && sessionAgentId && sectionArg2 ? sectionArg2 : null;
 
-  return { section, configSection, projectId, projectTab, projectTaskReference, agentId, agentTab };
+  return {
+    section,
+    configSection,
+    projectId,
+    projectTab,
+    projectTaskReference,
+    agentId,
+    agentTab,
+    sessionAgentId,
+    sessionId
+  };
 }
 
 export function buildPathFromRoute(route: DashboardRoute) {
@@ -146,6 +164,13 @@ export function buildPathFromRoute(route: DashboardRoute) {
       if (route.agentTab && route.agentTab !== DEFAULT_AGENT_TAB) {
         nextPathname = `${nextPathname}/${route.agentTab}`;
       }
+    }
+  }
+
+  if (route.section === "sessions") {
+    nextPathname = "/sessions";
+    if (route.sessionAgentId && route.sessionId) {
+      nextPathname = `/sessions/${encodeURIComponent(route.sessionAgentId)}/${encodeURIComponent(route.sessionId)}`;
     }
   }
 

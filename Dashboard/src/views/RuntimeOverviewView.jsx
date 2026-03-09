@@ -51,7 +51,15 @@ function agentInitials(name) {
 
 // ─── Section 1 — Active Channels ─────────────────────────────────────────────
 
-function ActiveChannelsSection({ agents, channelSessions, projects, actorBoard, onNavigateToProject }) {
+function ActiveChannelsSection({
+  agents,
+  sessions,
+  channelSessions,
+  projects,
+  actorBoard,
+  onNavigateToProject,
+  onNavigateToChannelSession
+}) {
   const activeChannels = useMemo(() => {
     if (!Array.isArray(channelSessions) || channelSessions.length === 0) {
       return [];
@@ -80,6 +88,11 @@ function ActiveChannelsSection({ agents, channelSessions, projects, actorBoard, 
     const agentNameById = new Map(
       agents.map((agent) => [String(agent.id || ""), String(agent.displayName || agent.id || "")])
     );
+    const sessionById = new Map(
+      (Array.isArray(sessions) ? sessions : [])
+        .map((session) => [String(session?.id || session?.sessionId || "").trim(), session])
+        .filter(([sessionId]) => sessionId)
+    );
     const agentsByChannel = new Map();
     const nodes = Array.isArray(actorBoard?.nodes) ? actorBoard.nodes : [];
     for (const node of nodes) {
@@ -104,9 +117,14 @@ function ActiveChannelsSection({ agents, channelSessions, projects, actorBoard, 
     return channelSessions.map((session) => {
       const channelId = String(session?.channelId || "").trim();
       const projectMeta = projectByChannel.get(channelId);
+      const agentSession = sessionById.get(String(session?.sessionId || "").trim());
+      const channelAgents = agentsByChannel.get(channelId) || [];
+      const fallbackAgentId = channelAgents.length === 1 ? String(channelAgents[0]?.id || "").trim() : "";
+      const agentId = String(agentSession?.agentId || fallbackAgentId).trim();
       return {
         key: String(session?.sessionId || channelId),
         sessionId: String(session?.sessionId || ""),
+        agentId,
         channelId,
         channelTitle: projectMeta?.channelTitle || channelId || "Channel",
         projectId: projectMeta?.projectId || "",
@@ -114,10 +132,12 @@ function ActiveChannelsSection({ agents, channelSessions, projects, actorBoard, 
         updatedAt: session?.updatedAt || session?.createdAt || "",
         messageCount: Number(session?.messageCount || 0),
         lastMessagePreview: String(session?.lastMessagePreview || ""),
-        agents: agentsByChannel.get(channelId) || []
+        agents: channelAgents,
+        primaryAgentName: agentNameById.get(agentId) || "",
+        canOpenSession: Boolean(agentId && session?.sessionId)
       };
     });
-  }, [actorBoard, agents, channelSessions, projects]);
+  }, [actorBoard, agents, channelSessions, projects, sessions]);
 
   return (
     <section className="overview-section">
@@ -141,14 +161,28 @@ function ActiveChannelsSection({ agents, channelSessions, projects, actorBoard, 
               key={ch.key}
               type="button"
               className="channel-card hover-levitate"
-              disabled={!ch.projectId}
-              onClick={() => ch.projectId && onNavigateToProject && onNavigateToProject(ch.projectId)}
+              disabled={!ch.canOpenSession && !ch.projectId}
+              onClick={() => {
+                if (ch.canOpenSession && onNavigateToChannelSession) {
+                  onNavigateToChannelSession(ch.agentId, ch.sessionId);
+                  return;
+                }
+                if (ch.projectId && onNavigateToProject) {
+                  onNavigateToProject(ch.projectId);
+                }
+              }}
             >
               <div className="channel-card-head">
                 <span className="channel-card-dot channel-dot-active" />
                 <span className="channel-card-title">{ch.channelTitle}</span>
                 <span className="channel-card-project">{ch.projectName}</span>
               </div>
+              {ch.primaryAgentName ? (
+                <div className="channel-card-meta">
+                  <span className="material-symbols-rounded">smart_toy</span>
+                  <span>{ch.primaryAgentName}</span>
+                </div>
+              ) : null}
               <div className="channel-card-agents">
                 {ch.agents.slice(0, 5).map((agent, i) => {
                   const name = String(agent?.name || agent?.id || `Agent ${i + 1}`);
@@ -404,7 +438,7 @@ function ClosedTasksSection({ projects }) {
 
 // ─── Main View ────────────────────────────────────────────────────────────────
 
-export function RuntimeOverviewView({ workers, events, onNavigateToProject }) {
+export function RuntimeOverviewView({ workers, events, onNavigateToProject, onNavigateToChannelSession }) {
   const [agents, setAgents] = useState([]);
   const [projects, setProjects] = useState([]);
   const [sessions, setSessions] = useState([]);
@@ -459,10 +493,12 @@ export function RuntimeOverviewView({ workers, events, onNavigateToProject }) {
 
       <ActiveChannelsSection
         agents={agents}
+        sessions={sessions}
         channelSessions={channelSessions}
         projects={projects}
         actorBoard={actorBoard}
         onNavigateToProject={onNavigateToProject}
+        onNavigateToChannelSession={onNavigateToChannelSession}
       />
 
       <CountersSection agents={agents} workers={normalizedWorkers} />

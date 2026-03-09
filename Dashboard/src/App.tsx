@@ -11,6 +11,7 @@ import { ConfigView } from "./views/ConfigView";
 import { LogsView } from "./views/LogsView";
 import { NotFoundView } from "./views/NotFoundView";
 import { ProjectsView } from "./views/ProjectsView";
+import { ChannelSessionView } from "./views/ChannelSessionView";
 import { RuntimeOverviewView } from "./views/RuntimeOverviewView";
 
 interface SidebarItem {
@@ -26,7 +27,7 @@ type AnyRecord = Record<string, unknown>;
 
 function DashboardShell({ dependencies }: { dependencies: ReturnType<typeof createDependencies> }) {
   const runtime = useRuntimeOverview(dependencies.coreApi);
-  const { route, setSection, setConfigSection, setProjectRoute, setAgentRoute } = useDashboardRoute();
+  const { route, setSection, setConfigSection, setProjectRoute, setAgentRoute, setSessionRoute } = useDashboardRoute();
   const [sidebarCompact, setSidebarCompact] = useState(true);
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
 
@@ -82,6 +83,9 @@ function DashboardShell({ dependencies }: { dependencies: ReturnType<typeof crea
           onProjectRouteChange(projectId, DEFAULT_PROJECT_TAB, null);
         }
       }}
+      onNavigateToChannelSession={(agentId: string, sessionId: string) => {
+        setSessionRoute(agentId, sessionId);
+      }}
     />
   );
 
@@ -130,6 +134,18 @@ function DashboardShell({ dependencies }: { dependencies: ReturnType<typeof crea
 
   const isNotFound = route.section === "not_found";
   const activeItem = sidebarItems.find((item) => item.id === route.section) || sidebarItems[0];
+  const pageContent = isNotFound ? (
+    <NotFoundView />
+  ) : route.section === "sessions" ? (
+    <ChannelSessionView
+      agentId={route.sessionAgentId}
+      sessionId={route.sessionId}
+      onNavigateBack={() => setSection("overview")}
+      onOpenSession={(nextAgentId: string, nextSessionId: string) => setSessionRoute(nextAgentId, nextSessionId)}
+    />
+  ) : (
+    activeItem.content
+  );
 
   return (
     <div className="layout">
@@ -198,7 +214,7 @@ function DashboardShell({ dependencies }: { dependencies: ReturnType<typeof crea
             menu
           </span>
         </button>
-        {isNotFound ? <NotFoundView /> : activeItem.content}
+        {pageContent}
       </div>
     </div>
   );
