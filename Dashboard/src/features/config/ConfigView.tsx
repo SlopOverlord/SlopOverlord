@@ -1,4 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
+import ReactDiffViewer, { DiffMethod } from "react-diff-viewer-continued";
+import Prism from "prismjs";
+import "prismjs/components/prism-json";
 import {
   completeOpenAIOAuth,
   fetchOpenAIModels,
@@ -428,6 +431,8 @@ function normalizeSearch(value) {
   return String(value || "").trim().toLowerCase();
 }
 
+const DRAFT_CONFIG_KEY = "sloppy_draft_config";
+
 function filterProviderModels(models, query) {
   const needle = normalizeSearch(query);
   if (!needle) {
@@ -484,6 +489,7 @@ export function ConfigView({ sectionId = "providers", onSectionChange = null }) 
     brave: { hasEnvironmentKey: false, hasConfiguredKey: false, hasAnyKey: false },
     perplexity: { hasEnvironmentKey: false, hasConfiguredKey: false, hasAnyKey: false }
   });
+  const [showDiff, setShowDiff] = useState(false);
   const providerModelLoadTimerRef = useRef(null);
   const providerModelLoadTokenRef = useRef(0);
   const providerModelPickerRef = useRef(null);
@@ -567,17 +573,40 @@ export function ConfigView({ sectionId = "providers", onSectionChange = null }) 
     }
 
     const normalized = normalizeConfig(config);
-
-    setDraftConfig(normalized);
     setSavedConfig(normalized);
-    setRawConfig(JSON.stringify(normalized, null, 2));
+
+    const savedDraft = localStorage.getItem(DRAFT_CONFIG_KEY);
+    if (savedDraft) {
+      try {
+        const parsedDraft = normalizeConfig(JSON.parse(savedDraft));
+        setDraftConfig(parsedDraft);
+        setRawConfig(JSON.stringify(parsedDraft, null, 2));
+        setStatusText("Config loaded (with local draft)");
+      } catch {
+        setDraftConfig(normalized);
+        setRawConfig(JSON.stringify(normalized, null, 2));
+        setStatusText("Config loaded (draft corrupted)");
+      }
+    } else {
+      setDraftConfig(normalized);
+      setRawConfig(JSON.stringify(normalized, null, 2));
+      setStatusText("Config loaded");
+    }
+
     setProviderModalId(null);
     setProviderForm(null);
     setProviderModelOptions({});
     setProviderModelStatus({});
     await loadOpenAIProviderStatus();
     await loadSearchProviderStatus();
-    setStatusText("Config loaded");
+  }
+
+  async function cancelChanges() {
+    localStorage.removeItem(DRAFT_CONFIG_KEY);
+    const normalized = clone(savedConfig);
+    setDraftConfig(normalized);
+    setRawConfig(JSON.stringify(normalized, null, 2));
+    setStatusText("Changes cancelled");
   }
 
   async function saveConfig() {
@@ -589,6 +618,7 @@ export function ConfigView({ sectionId = "providers", onSectionChange = null }) 
         return;
       }
 
+      localStorage.removeItem(DRAFT_CONFIG_KEY);
       const normalized = normalizeConfig(response);
 
       setDraftConfig(normalized);
@@ -608,14 +638,15 @@ export function ConfigView({ sectionId = "providers", onSectionChange = null }) 
       return;
     }
 
+    const payload = response as any;
     setOpenAIProviderStatus({
-      hasEnvironmentKey: Boolean(response.hasEnvironmentKey),
-      hasConfiguredKey: Boolean(response.hasConfiguredKey),
-      hasAnyKey: Boolean(response.hasAnyKey),
-      hasOAuthCredentials: Boolean(response.hasOAuthCredentials),
-      oauthAccountId: String(response.oauthAccountId || ""),
-      oauthPlanType: String(response.oauthPlanType || ""),
-      oauthExpiresAt: String(response.oauthExpiresAt || "")
+      hasEnvironmentKey: Boolean(payload.hasEnvironmentKey),
+      hasConfiguredKey: Boolean(payload.hasConfiguredKey),
+      hasAnyKey: Boolean(payload.hasAnyKey),
+      hasOAuthCredentials: Boolean(payload.hasOAuthCredentials),
+      oauthAccountId: String(payload.oauthAccountId || ""),
+      oauthPlanType: String(payload.oauthPlanType || ""),
+      oauthExpiresAt: String(payload.oauthExpiresAt || "")
     });
   }
 
@@ -625,17 +656,18 @@ export function ConfigView({ sectionId = "providers", onSectionChange = null }) 
       return;
     }
 
+    const payload = response as any;
     setSearchProviderStatus({
-      activeProvider: String(response.activeProvider || "perplexity"),
+      activeProvider: String(payload.activeProvider || "perplexity"),
       brave: {
-        hasEnvironmentKey: Boolean(response.brave?.hasEnvironmentKey),
-        hasConfiguredKey: Boolean(response.brave?.hasConfiguredKey),
-        hasAnyKey: Boolean(response.brave?.hasAnyKey)
+        hasEnvironmentKey: Boolean(payload.brave?.hasEnvironmentKey),
+        hasConfiguredKey: Boolean(payload.brave?.hasConfiguredKey),
+        hasAnyKey: Boolean(payload.brave?.hasAnyKey)
       },
       perplexity: {
-        hasEnvironmentKey: Boolean(response.perplexity?.hasEnvironmentKey),
-        hasConfiguredKey: Boolean(response.perplexity?.hasConfiguredKey),
-        hasAnyKey: Boolean(response.perplexity?.hasAnyKey)
+        hasEnvironmentKey: Boolean(payload.perplexity?.hasEnvironmentKey),
+        hasConfiguredKey: Boolean(payload.perplexity?.hasConfiguredKey),
+        hasAnyKey: Boolean(payload.perplexity?.hasAnyKey)
       }
     });
   }
@@ -644,7 +676,9 @@ export function ConfigView({ sectionId = "providers", onSectionChange = null }) 
     setDraftConfig((previous) => {
       const next = clone(previous);
       mutator(next);
-      setRawConfig(JSON.stringify(next, null, 2));
+      const json = JSON.stringify(next, null, 2);
+      setRawConfig(json);
+      localStorage.setItem(DRAFT_CONFIG_KEY, json);
       return next;
     });
   }
@@ -787,10 +821,10 @@ export function ConfigView({ sectionId = "providers", onSectionChange = null }) 
       setOpenAIProviderStatus((previous) => (
         provider.id === "openai-api"
           ? {
-              ...previous,
-              hasEnvironmentKey: Boolean(payload.usedEnvironmentKey),
-              hasAnyKey: previous.hasConfiguredKey || Boolean(payload.usedEnvironmentKey)
-            }
+            ...previous,
+            hasEnvironmentKey: Boolean(payload.usedEnvironmentKey),
+            hasAnyKey: previous.hasConfiguredKey || Boolean(payload.usedEnvironmentKey)
+          }
           : previous
       ));
     }
@@ -920,7 +954,7 @@ export function ConfigView({ sectionId = "providers", onSectionChange = null }) 
 
       setProviderStatus("openai-oauth", String(payload.message || "OpenAI OAuth updated."));
       setStatusText(payload.ok ? "OpenAI OAuth connected" : "OpenAI OAuth failed");
-      loadOpenAIProviderStatus().catch(() => {});
+      loadOpenAIProviderStatus().catch(() => { });
       if (payload.ok && providerModalId === "openai-oauth") {
         loadProviderModels("openai-oauth", providerForm || getProviderDefinition("openai-oauth").defaultEntry).catch(() => {
           setProviderStatus("openai-oauth", "Failed to load OpenAI Codex models.");
@@ -1227,10 +1261,77 @@ export function ConfigView({ sectionId = "providers", onSectionChange = null }) 
       />
 
       <section className="settings-main">
-        <SettingsMainHeader hasChanges={hasChanges} statusText={statusText} onReload={loadConfig} onSave={saveConfig} />
+        <SettingsMainHeader
+          hasChanges={hasChanges}
+          statusText={statusText}
+          onReload={cancelChanges}
+          onSave={saveConfig}
+        />
 
         {mode === "raw" ? (
-          <textarea className="settings-raw-editor" value={rawConfig} onChange={(event) => setRawConfig(event.target.value)} />
+          <div className="settings-raw-pane">
+            <div className="settings-raw-toolbar">
+              <div className="settings-raw-toggle-group">
+                <span>Show Diff</span>
+                <label className="agent-tools-switch">
+                  <input type="checkbox" checked={showDiff} onChange={(e) => setShowDiff(e.target.checked)} />
+                  <div className="agent-tools-switch-track" />
+                </label>
+              </div>
+            </div>
+            {showDiff ? (
+              <div className="settings-raw-diff-container">
+                <ReactDiffViewer
+                  oldValue={JSON.stringify(savedConfig, null, 2)}
+                  newValue={rawConfig}
+                  splitView={true}
+                  useDarkTheme={true}
+                  compareMethod={DiffMethod.LINES}
+                  renderContent={(str) => (
+                    <pre
+                      style={{ display: "inline" }}
+                      dangerouslySetInnerHTML={{
+                        __html: Prism.highlight(str || "", Prism.languages.json, "json")
+                      }}
+                    />
+                  )}
+                />
+              </div>
+            ) : (
+              <div className="settings-raw-editor-container">
+                <div
+                  className="settings-raw-editor-highlight"
+                  dangerouslySetInnerHTML={{
+                    __html: Prism.highlight(rawConfig, Prism.languages.json, "json") + "\n"
+                  }}
+                />
+                <textarea
+                  className="settings-raw-editor-input"
+                  value={rawConfig}
+                  spellCheck={false}
+                  onChange={(event) => {
+                    const val = event.target.value;
+                    setRawConfig(val);
+                    try {
+                      const parsed = JSON.parse(val);
+                      const normalized = normalizeConfig(parsed);
+                      setDraftConfig(normalized);
+                      localStorage.setItem(DRAFT_CONFIG_KEY, JSON.stringify(normalized, null, 2));
+                    } catch {
+                      // invalid json, just update rawConfig
+                    }
+                  }}
+                  onScroll={(e) => {
+                    const highlight = e.currentTarget.parentElement?.querySelector(".settings-raw-editor-highlight");
+                    if (highlight) {
+                      highlight.scrollTop = e.currentTarget.scrollTop;
+                      highlight.scrollLeft = e.currentTarget.scrollLeft;
+                    }
+                  }}
+                />
+              </div>
+            )}
+          </div>
         ) : (
           renderSettingsContent()
         )}

@@ -5176,6 +5176,202 @@ body.agent-chat-no-page-scroll .page {
   min-height: 520px;
   font-family: "Fira Code", monospace;
   line-height: 1.4;
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid var(--line);
+  padding: 12px;
+}
+
+.settings-raw-pane {
+  display: grid;
+  grid-template-rows: auto 1fr;
+  gap: 12px;
+  height: 100%;
+}
+
+.settings-raw-toolbar {
+  display: flex;
+  justify-content: flex-end;
+  padding: 4px 0;
+}
+
+.settings-raw-toggle-group {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-size: 0.85rem;
+  font-weight: 500;
+  color: var(--text-heading);
+}
+
+.settings-raw-editor-container {
+  position: relative;
+  width: 100%;
+  min-height: 520px;
+  border: 1px solid var(--line);
+  background: var(--bg);
+  font-family: "Fira Code", monospace;
+  font-size: 14px;
+  line-height: 1.5;
+  overflow: hidden;
+}
+
+.settings-raw-editor-highlight,
+.settings-raw-editor-input {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  padding: 16px;
+  margin: 0;
+  border: none;
+  font-family: inherit;
+  font-size: inherit;
+  line-height: inherit;
+  white-space: pre;
+  word-wrap: normal;
+  overflow: auto;
+  box-sizing: border-box;
+}
+
+.settings-raw-editor-highlight {
+  pointer-events: none;
+  z-index: 1;
+}
+
+.settings-raw-editor-input {
+  background: transparent;
+  color: transparent;
+  caret-color: var(--text);
+  resize: none;
+  z-index: 2;
+  outline: none;
+}
+
+.settings-raw-editor-input::selection {
+  background: rgba(255, 255, 255, 0.1);
+  color: transparent;
+}
+
+.settings-raw-diff-container {
+  border: 1px solid var(--line);
+  padding: 0;
+  overflow: auto;
+  background: var(--bg);
+  min-height: 520px;
+}
+
+/* Custom scrollbar for diff container */
+.settings-raw-diff-container::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+.settings-raw-diff-container::-webkit-scrollbar-track {
+  background: var(--bg);
+}
+
+.settings-raw-diff-container::-webkit-scrollbar-thumb {
+  background: var(--surface-3);
+  border: 2px solid var(--bg);
+}
+
+.settings-raw-diff-container::-webkit-scrollbar-thumb:hover {
+  background: var(--line);
+}
+
+/* Custom styles for react-diff-viewer-continued to match the theme */
+.settings-raw-diff-container [class*="diff-viewer"] {
+  background: var(--bg) !important;
+  color: var(--text) !important;
+  font-family: inherit !important;
+}
+
+.settings-raw-diff-container table {
+  width: 100% !important;
+}
+
+.settings-raw-diff-container [class*="diff-gutter"] {
+  background: var(--surface) !important;
+  border-right: 1px solid var(--line) !important;
+  color: var(--muted) !important;
+  font-size: 0.75rem !important;
+  padding: 0 10px !important;
+  min-width: 50px !important;
+}
+
+.settings-raw-diff-container [class*="diff-line"] {
+  background: transparent !important;
+}
+
+.settings-raw-diff-container [class*="diff-added"] {
+  background: rgba(204, 255, 0, 0.08) !important;
+}
+
+.settings-raw-diff-container [class*="diff-removed"] {
+  background: rgba(255, 0, 255, 0.08) !important;
+}
+
+/* Hunk header (the @@ part) */
+.settings-raw-diff-container [class*="diff-header"] {
+  background: var(--surface-3) !important;
+  padding: 8px 16px !important;
+  color: var(--accent) !important;
+  border-bottom: 1px solid var(--line) !important;
+  font-weight: bold !important;
+  font-size: 0.8rem !important;
+}
+
+/* Word level highlights */
+.settings-raw-diff-container [class*="diff-word-added"] {
+  background: var(--accent) !important;
+  color: var(--bg) !important;
+  border-bottom: 1px solid var(--accent) !important;
+}
+
+.settings-raw-diff-container [class*="diff-word-removed"] {
+  background: var(--danger) !important;
+  color: #fff !important;
+  border-bottom: 1px solid var(--danger) !important;
+}
+
+.settings-raw-diff-container pre {
+  margin: 0;
+  font-family: "Fira Code", monospace;
+  font-size: 13px !important;
+  line-height: 1.6 !important;
+}
+
+/* Prism syntax highlighting for JSON */
+.settings-raw-diff-container .token.property,
+.settings-raw-editor-highlight .token.property {
+  color: var(--accent);
+}
+
+.settings-raw-diff-container .token.string,
+.settings-raw-editor-highlight .token.string {
+  color: var(--success);
+}
+
+.settings-raw-diff-container .token.number,
+.settings-raw-editor-highlight .token.number,
+.settings-raw-diff-container .token.boolean,
+.settings-raw-editor-highlight .token.boolean {
+  color: var(--warn);
+}
+
+.settings-raw-diff-container .token.punctuation,
+.settings-raw-editor-highlight .token.punctuation {
+  color: var(--muted);
+}
+
+.settings-raw-diff-container .token.operator {
+  color: var(--muted);
+}
+
+.settings-raw-diff-container .token.punctuation {
+  color: var(--muted);
 }
 
 .entry-editor-layout {
