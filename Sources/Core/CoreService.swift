@@ -164,17 +164,19 @@ public actor CoreService {
     private let runtime: RuntimeSystem
     private let memoryStore: any MemoryStore
     private let hybridMemoryStore: HybridMemoryStore?
-    private let store: any PersistenceStore
+    private let persistenceBuilder: any CorePersistenceBuilding
+    private var store: any PersistenceStore
     private let openAIProviderCatalog: OpenAIProviderCatalogService
+    private let providerProbeService: ProviderProbeService
     private let searchProviderService: SearchProviderService
     private let agentCatalogStore: AgentCatalogFileStore
     private let sessionStore: AgentSessionFileStore
     private let actorBoardStore: ActorBoardFileStore
     private let sessionOrchestrator: AgentSessionOrchestrator
     private let toolsAuthorization: ToolAuthorizationService
-    private let toolExecution: ToolExecutionService
+    private var toolExecution: ToolExecutionService
     private let systemLogStore: SystemLogFileStore
-    private let channelDelivery: ChannelDeliveryService
+    private var channelDelivery: ChannelDeliveryService
     private let channelSessionStore: ChannelSessionFileStore
     private let agentSkillsStore: AgentSkillsFileStore
     private let skillsRegistryService: SkillsRegistryService
@@ -192,7 +194,7 @@ public actor CoreService {
     private var cronRunner: CronRunner?
     private var heartbeatRunner: HeartbeatRunner?
     private var memoryOutboxIndexer: MemoryOutboxIndexer?
-    private let recoveryManager: RecoveryManager
+    private var recoveryManager: RecoveryManager
     private var liveSessionStreamContinuations: [String: [UUID: AsyncStream<AgentSessionStreamUpdate>.Continuation]] = [:]
     private var liveSessionStreamCursor: [String: Int] = [:]
 
@@ -217,6 +219,7 @@ public actor CoreService {
         configPath: String = CoreConfig.defaultConfigPath,
         persistenceBuilder: any CorePersistenceBuilding = DefaultCorePersistenceBuilder(),
         searchProviderService: SearchProviderService? = nil,
+        providerProbeService: ProviderProbeService? = nil,
         builtInGatewayPluginFactory: BuiltInGatewayPluginFactory
     ) {
         let resolvedModels = CoreModelProviderFactory.resolveModelIdentifiers(config: config)
@@ -239,8 +242,10 @@ public actor CoreService {
         self.runtime = runtime
         self.memoryStore = runtimeMemoryStore
         self.hybridMemoryStore = hybridMemoryStore
+        self.persistenceBuilder = persistenceBuilder
         self.store = persistenceBuilder.makeStore(config: config)
         self.openAIProviderCatalog = OpenAIProviderCatalogService()
+        self.providerProbeService = providerProbeService ?? ProviderProbeService()
         self.searchProviderService = searchProviderService ?? SearchProviderService(config: config.searchTools)
         self.configPath = configPath
         self.workspaceRootURL = config
@@ -2202,6 +2207,11 @@ public actor CoreService {
         openAIProviderCatalog.status(config: currentConfig)
     }
 
+    /// Probes provider connectivity and returns remote model options on success.
+    public func probeProvider(request: ProviderProbeRequest) async -> ProviderProbeResponse {
+        await providerProbeService.probe(config: currentConfig, request: request)
+    }
+
     /// Returns search provider key availability for configured web search providers.
     public func searchProviderStatus() async -> SearchToolsStatusResponse {
         await searchProviderService.status()
@@ -2381,6 +2391,8 @@ public actor CoreService {
 
         let previousChannels = currentConfig.channels
         currentConfig = config
+        let refreshedStore = persistenceBuilder.makeStore(config: config)
+        store = refreshedStore
         workspaceRootURL = config
             .resolvedWorkspaceRootURL(currentDirectory: FileManager.default.currentDirectoryPath)
         agentsRootURL = workspaceRootURL
@@ -2391,7 +2403,10 @@ public actor CoreService {
         await sessionOrchestrator.updateAgentsRootURL(agentsRootURL)
         await toolsAuthorization.updateAgentsRootURL(agentsRootURL)
         toolExecution.updateWorkspaceRootURL(workspaceRootURL)
+        toolExecution.updateStore(refreshedStore)
         systemLogStore.updateWorkspaceRootURL(workspaceRootURL)
+        await channelDelivery.updateStore(refreshedStore)
+        await recoveryManager.updateStore(refreshedStore)
         await searchProviderService.updateConfig(config.searchTools)
         let resolvedModels = CoreModelProviderFactory.resolveModelIdentifiers(config: config)
         let modelProvider = CoreModelProviderFactory.buildModelProvider(config: config, resolvedModels: resolvedModels)

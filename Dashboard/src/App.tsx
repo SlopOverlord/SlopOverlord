@@ -3,15 +3,15 @@ import { createDependencies } from "./app/di/createDependencies";
 import { DEFAULT_AGENT_TAB, DEFAULT_PROJECT_TAB } from "./app/routing/dashboardRouteAdapter";
 import { useDashboardRoute } from "./app/routing/useDashboardRoute";
 import { SidebarView } from "./components/SidebarView";
+import { OnboardingView } from "./features/onboarding/OnboardingView";
 import { useRuntimeOverview } from "./features/runtime-overview/model/useRuntimeOverview";
 import { AgentsView } from "./views/AgentsView";
 import { ActorsView } from "./views/ActorsView";
 import { ConfigView } from "./views/ConfigView";
-import { PlaceholderView } from "./views/PlaceholderView";
-import { ProjectsView } from "./views/ProjectsView";
-import { RuntimeOverviewView } from "./views/RuntimeOverviewView";
 import { LogsView } from "./views/LogsView";
 import { NotFoundView } from "./views/NotFoundView";
+import { ProjectsView } from "./views/ProjectsView";
+import { RuntimeOverviewView } from "./views/RuntimeOverviewView";
 
 interface SidebarItem {
   id: string;
@@ -22,8 +22,9 @@ interface SidebarItem {
   content: React.ReactNode;
 }
 
-export function App() {
-  const dependencies = useMemo(() => createDependencies(), []);
+type AnyRecord = Record<string, unknown>;
+
+function DashboardShell({ dependencies }: { dependencies: ReturnType<typeof createDependencies> }) {
   const runtime = useRuntimeOverview(dependencies.coreApi);
   const { route, setSection, setConfigSection, setProjectRoute, setAgentRoute } = useDashboardRoute();
   const [sidebarCompact, setSidebarCompact] = useState(true);
@@ -115,11 +116,6 @@ export function App() {
       label: { icon: "group", title: "Actors" },
       content: <ActorsView />
     },
-    // {
-    //   id: "nodes",
-    //   label: { icon: "dns", title: "Nodes" },
-    //   content: <PlaceholderView title="Nodes" />
-    // },
     {
       id: "config",
       label: { icon: "settings", title: "Config" },
@@ -153,12 +149,34 @@ export function App() {
         aria-label="Close menu"
       />
 
-      <div className={`page ${activeItem.id === "config" ? "page-config" : ""}`} style={{ position: 'relative' }}>
-        {/* HUD Elements */}
-        <div style={{ position: 'absolute', top: '2px', right: '20px', fontSize: '10px', color: 'var(--accent)', zIndex: 1000, pointerEvents: 'none', opacity: 0.6, letterSpacing: '0.1em' }}>
+      <div className={`page ${activeItem.id === "config" ? "page-config" : ""}`} style={{ position: "relative" }}>
+        <div
+          style={{
+            position: "absolute",
+            top: "2px",
+            right: "20px",
+            fontSize: "10px",
+            color: "var(--accent)",
+            zIndex: 1000,
+            pointerEvents: "none",
+            opacity: 0.6,
+            letterSpacing: "0.1em"
+          }}
+        >
           [&gt;_ SECURE_SESSION_ACTIVE // PID: 9284]
         </div>
-        <div style={{ position: 'absolute', bottom: '10px', right: '20px', fontSize: '10px', color: 'var(--muted)', zIndex: 1000, pointerEvents: 'none', opacity: 0.5 }}>
+        <div
+          style={{
+            position: "absolute",
+            bottom: "10px",
+            right: "20px",
+            fontSize: "10px",
+            color: "var(--muted)",
+            zIndex: 1000,
+            pointerEvents: "none",
+            opacity: 0.5
+          }}
+        >
           UPLINK: ESTABLISHED / LATENCY: 12MS
         </div>
         <button
@@ -184,4 +202,105 @@ export function App() {
       </div>
     </div>
   );
+}
+
+export function App() {
+  const dependencies = useMemo(() => createDependencies(), []);
+  const [bootState, setBootState] = useState<{
+    isLoading: boolean;
+    config: AnyRecord | null;
+    error: string;
+  }>({
+    isLoading: true,
+    config: null,
+    error: ""
+  });
+
+  useEffect(() => {
+    let isCancelled = false;
+
+    async function bootstrap() {
+      const config = await dependencies.coreApi.fetchRuntimeConfig();
+      if (isCancelled) {
+        return;
+      }
+
+      if (!config) {
+        setBootState({
+          isLoading: false,
+          config: null,
+          error: "Failed to load runtime config."
+        });
+        return;
+      }
+
+      setBootState({
+        isLoading: false,
+        config,
+        error: ""
+      });
+    }
+
+    bootstrap().catch(() => {
+      if (isCancelled) {
+        return;
+      }
+      setBootState({
+        isLoading: false,
+        config: null,
+        error: "Failed to load runtime config."
+      });
+    });
+
+    return () => {
+      isCancelled = true;
+    };
+  }, [dependencies]);
+
+  if (bootState.isLoading) {
+    return (
+      <div className="onboarding-loading-shell">
+        <div className="onboarding-loading-card">
+          <span className="onboarding-loading-kicker">Sloppy init</span>
+          <strong>Loading runtime config...</strong>
+        </div>
+      </div>
+    );
+  }
+
+  if (bootState.error || !bootState.config) {
+    return (
+      <div className="onboarding-loading-shell">
+        <div className="onboarding-loading-card onboarding-loading-card-error">
+          <span className="onboarding-loading-kicker">Sloppy init</span>
+          <strong>{bootState.error || "Runtime config is unavailable."}</strong>
+          <button
+            type="button"
+            className="onboarding-primary-button"
+            onClick={() => window.location.reload()}
+          >
+            Retry
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  if (!Boolean((bootState.config.onboarding as AnyRecord | undefined)?.completed)) {
+    return (
+      <OnboardingView
+        coreApi={dependencies.coreApi}
+        initialConfig={bootState.config}
+        onCompleted={(config) =>
+          setBootState({
+            isLoading: false,
+            config,
+            error: ""
+          })
+        }
+      />
+    );
+  }
+
+  return <DashboardShell dependencies={dependencies} />;
 }

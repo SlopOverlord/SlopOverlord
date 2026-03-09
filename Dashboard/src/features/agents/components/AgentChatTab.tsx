@@ -762,13 +762,6 @@ function AgentChatEvents({
         <p className="placeholder-text">No messages yet.</p>
       ) : (
         <>
-          {latestRunStatus ? (
-            <p className="placeholder-text">
-              Status: {latestRunStatus.label}
-              {latestRunStatus.details ? ` - ${latestRunStatus.details}` : ""}
-            </p>
-          ) : null}
-
           {timelineItems.map((timelineItem, index) => {
             if (timelineItem.kind === "technical" && timelineItem.record) {
               const record = timelineItem.record;

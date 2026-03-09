@@ -35,6 +35,26 @@ private actor SessionCapturingModelProvider: ModelProviderPlugin {
     }
 }
 
+private actor FixedOutputModelProvider: ModelProviderPlugin {
+    let id: String = "fixed-output"
+    let models: [String]
+    let output: String
+
+    init(models: [String], output: String) {
+        self.models = models
+        self.output = output
+    }
+
+    func complete(
+        model: String,
+        prompt: String,
+        maxTokens: Int,
+        reasoningEffort: ReasoningEffort?
+    ) async throws -> String {
+        output
+    }
+}
+
 private func makeAgentSessionFixture(
     agentID: String,
     selectedModel: String,
@@ -75,8 +95,19 @@ private func expectedFallbackBootstrapMessage(
     agentID: String,
     sessionID: String,
     documents: AgentDocumentBundle
-) -> String {
-    """
+) throws -> String {
+    let loader = PromptTemplateLoader()
+    let renderer = PromptTemplateRenderer()
+    let capabilities = try renderer.render(
+        template: try loader.loadPartial(named: "session_capabilities"),
+        values: [:]
+    )
+    let runtimeRules = try renderer.render(
+        template: try loader.loadPartial(named: "runtime_rules"),
+        values: [:]
+    )
+
+    return """
     [agent_session_context_bootstrap_v1]
     Session context initialized.
     Agent: \(agentID)
@@ -94,11 +125,9 @@ private func expectedFallbackBootstrapMessage(
     [Soul.md]
     \(documents.soulMarkdown)
 
-    [Runtime task-reference rules]
-    - If user mentions task references like #MOBILE-1, call tool `project.task_get` with {"taskId":"MOBILE-1"} before answering.
-    - Use fetched task details (status, priority, description, assignee) in the response.
-    - If task is not found, explicitly say that and ask for a correct task id.
-    - Blend your own concrete suggestions based on the user's goal, not only direct execution.
+    \(capabilities)
+
+    \(runtimeRules)
     """
 }
 
@@ -245,6 +274,73 @@ func agentSessionBootstrapRendersEmptySkillsStateWhenAgentHasNoSkills() async th
 }
 
 @Test
+func agentSessionBootstrapIncludesToolCallProtocol() async throws {
+    let availableModels = [
+        ProviderModelOption(id: "openai:gpt-4.1-mini", title: "openai:gpt-4.1-mini", capabilities: ["tools"])
+    ]
+    let (catalogStore, sessionStore, _) = try makeAgentSessionFixture(
+        agentID: "tool-protocol-agent",
+        selectedModel: "openai:gpt-4.1-mini",
+        availableModels: availableModels
+    )
+
+    let runtime = RuntimeSystem()
+    let orchestrator = AgentSessionOrchestrator(
+        runtime: runtime,
+        sessionStore: sessionStore,
+        agentCatalogStore: catalogStore,
+        availableModels: availableModels
+    )
+
+    let session = try await orchestrator.createSession(agentID: "tool-protocol-agent", request: AgentSessionCreateRequest())
+    let snapshot = await runtime.channelState(channelId: "agent:tool-protocol-agent:session:\(session.id)")
+    let bootstrapMessage = snapshot?.messages.first(where: {
+        $0.userId == "system" && $0.content.contains("[agent_session_context_bootstrap_v1]")
+    })?.content ?? ""
+
+    #expect(bootstrapMessage.contains(#""tool":"<tool-id>""#))
+    #expect(bootstrapMessage.contains("`runtime.exec`"))
+    #expect(bootstrapMessage.contains("`files.write`"))
+}
+
+@Test
+func agentSessionTextContainingFailedDoesNotForceInterruptedStatus() async throws {
+    let availableModels = [
+        ProviderModelOption(id: "openai:gpt-4.1-mini", title: "openai:gpt-4.1-mini", capabilities: ["tools"])
+    ]
+    let (catalogStore, sessionStore, _) = try makeAgentSessionFixture(
+        agentID: "non-error-failed-agent",
+        selectedModel: "openai:gpt-4.1-mini",
+        availableModels: availableModels
+    )
+    let provider = FixedOutputModelProvider(
+        models: availableModels.map(\.id),
+        output: "Initial inspection hit a tool failure, so I need one more recovery pass before I can claim the workspace has been reviewed."
+    )
+
+    let runtime = RuntimeSystem(modelProvider: provider, defaultModel: "openai:gpt-4.1-mini")
+    let orchestrator = AgentSessionOrchestrator(
+        runtime: runtime,
+        sessionStore: sessionStore,
+        agentCatalogStore: catalogStore,
+        availableModels: availableModels
+    )
+
+    let session = try await orchestrator.createSession(agentID: "non-error-failed-agent", request: AgentSessionCreateRequest())
+    let response = try await orchestrator.postMessage(
+        agentID: "non-error-failed-agent",
+        sessionID: session.id,
+        request: AgentSessionPostMessageRequest(
+            userId: "dashboard",
+            content: "inspect the workspace"
+        )
+    )
+
+    let finalStatus = response.appendedEvents.last(where: { $0.type == .runStatus })?.runStatus?.stage
+    #expect(finalStatus == .done)
+}
+
+@Test
 func agentSessionBootstrapFallsBackWhenPromptComposerFails() async throws {
     let availableModels = [
         ProviderModelOption(id: "openai:gpt-4.1-mini", title: "openai:gpt-4.1-mini", capabilities: ["tools"])
@@ -276,9 +372,10 @@ func agentSessionBootstrapFallsBackWhenPromptComposerFails() async throws {
         $0.userId == "system" && $0.content.contains("[agent_session_context_bootstrap_v1]")
     })?.content ?? ""
 
-    #expect(bootstrapMessage == expectedFallbackBootstrapMessage(
+    let expected = try expectedFallbackBootstrapMessage(
         agentID: "fallback-agent",
         sessionID: session.id,
         documents: documents
-    ))
+    )
+    #expect(bootstrapMessage == expected)
 }

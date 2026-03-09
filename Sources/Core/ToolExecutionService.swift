@@ -10,7 +10,7 @@ final class ToolExecutionService: @unchecked Sendable {
     private let agentCatalogStore: AgentCatalogFileStore
     private let processRegistry: SessionProcessRegistry
     private let channelSessionStore: ChannelSessionFileStore
-    private let store: any PersistenceStore
+    private var store: any PersistenceStore
     private let searchProviderService: SearchProviderService
     private let logger: Logger
     private var workspaceRootURL: URL
@@ -41,6 +41,10 @@ final class ToolExecutionService: @unchecked Sendable {
 
     func updateWorkspaceRootURL(_ url: URL) {
         self.workspaceRootURL = url
+    }
+
+    func updateStore(_ store: any PersistenceStore) {
+        self.store = store
     }
 
     func cleanupSessionProcesses(_ sessionID: String) async {

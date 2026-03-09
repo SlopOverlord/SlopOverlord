@@ -201,6 +201,74 @@ func projectCrudEndpoints() async throws {
     #expect(fetchDeletedResponse.status == 404)
 }
 
+@Test
+func projectCreateEndpointAcceptsPayloadWithoutChannels() async throws {
+    let sqlitePath = FileManager.default.temporaryDirectory
+        .appendingPathComponent("core-projects-onboarding-\(UUID().uuidString).sqlite")
+        .path
+
+    var config = CoreConfig.default
+    config.sqlitePath = sqlitePath
+
+    let service = CoreService(config: config)
+    let router = CoreRouter(service: service)
+
+    let createBody = try JSONSerialization.data(
+        withJSONObject: [
+            "id": "onboarding-project",
+            "name": "Onboarding Project",
+            "description": "Created from a minimal wizard payload"
+        ]
+    )
+
+    let createResponse = await router.handle(method: "POST", path: "/v1/projects", body: createBody)
+    #expect(createResponse.status == 201)
+
+    let decoder = JSONDecoder()
+    decoder.dateDecodingStrategy = .iso8601
+
+    let created = try decoder.decode(ProjectRecord.self, from: createResponse.body)
+    #expect(created.id == "onboarding-project")
+    #expect(created.channels.count == 1)
+    #expect(created.channels.first?.channelId == "onboarding-project-main")
+}
+
+@Test
+func updateConfigSwitchesProjectPersistenceStore() async throws {
+    let root = FileManager.default.temporaryDirectory
+        .appendingPathComponent("core-config-project-store-\(UUID().uuidString)", isDirectory: true)
+    try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+
+    let configPath = root.appendingPathComponent("sloppy.json").path
+    let sqliteA = root.appendingPathComponent("core-a.sqlite").path
+    let sqliteB = root.appendingPathComponent("core-b.sqlite").path
+
+    var initialConfig = CoreConfig.default
+    initialConfig.workspace = .init(name: "workspace-a-\(UUID().uuidString)", basePath: root.path)
+    initialConfig.sqlitePath = sqliteA
+
+    let service = CoreService(config: initialConfig, configPath: configPath)
+
+    var updatedConfig = initialConfig
+    updatedConfig.workspace = .init(name: "workspace-b-\(UUID().uuidString)", basePath: root.path)
+    updatedConfig.sqlitePath = sqliteB
+
+    _ = try await service.updateConfig(updatedConfig)
+    _ = try await service.createProject(
+        ProjectCreateRequest(
+            id: "onboarding-project",
+            name: "Onboarding Project"
+        )
+    )
+
+    let projects = await service.listProjects()
+    #expect(projects.contains(where: { $0.id == "onboarding-project" }))
+
+    let restartedService = CoreService(config: updatedConfig, configPath: configPath)
+    let restartedProjects = await restartedService.listProjects()
+    #expect(restartedProjects.contains(where: { $0.id == "onboarding-project" }))
+}
+
 #if canImport(SQLite3)
 @Test
 func projectMembersMigrateFromLegacyDashboardProjectsSchema() async throws {

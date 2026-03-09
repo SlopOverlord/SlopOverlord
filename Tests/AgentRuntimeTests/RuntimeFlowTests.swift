@@ -359,6 +359,42 @@ func respondInlineAutoToolCallingLoop() async {
 }
 
 @Test
+func respondInlineParsesToolCallEmbeddedInAssistantText() async {
+    let provider = SequencedModelProvider(
+        outputs: [
+            """
+            Initial inspection hit a tool failure, so I need a recovery step.
+
+            {"tool":"agents.list","arguments":{},"reason":"recover after previous tool failure"}
+            """,
+            "Final answer after recovery tool execution."
+        ]
+    )
+    let invocationCounter = ToolInvocationCounter()
+    let system = RuntimeSystem(modelProvider: provider, defaultModel: "mock-model")
+
+    let decision = await system.postMessage(
+        channelId: "tool-loop-inline-json",
+        request: ChannelMessageRequest(userId: "u1", content: "hello"),
+        toolInvoker: { request in
+            await invocationCounter.increment()
+            #expect(request.tool == "agents.list")
+            return ToolInvocationResult(
+                tool: request.tool,
+                ok: true,
+                data: .array([])
+            )
+        }
+    )
+
+    #expect(decision.action == .respond)
+    let snapshot = await system.channelState(channelId: "tool-loop-inline-json")
+    let finalMessage = snapshot?.messages.last(where: { $0.userId == "system" })?.content ?? ""
+    #expect(finalMessage == "Final answer after recovery tool execution.")
+    #expect(await invocationCounter.value() == 1)
+}
+
+@Test
 func respondInlineIncludesBootstrapContextInPrompt() async {
     let provider = PromptCapturingModelProvider()
     let system = RuntimeSystem(modelProvider: provider, defaultModel: "mock-model")

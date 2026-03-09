@@ -31,7 +31,28 @@ func decodeLegacyStringModelsAndPlugins() throws {
     #expect(decoded.gitSync.enabled == false)
     #expect(decoded.gitSync.branch == "main")
     #expect(decoded.gitSync.conflictStrategy == .remoteWins)
+    #expect(decoded.onboarding.completed == false)
     #expect(decoded.sqlitePath == CoreConfig.defaultSQLiteFileName)
+}
+
+@Test
+func missingOnboardingConfigFallsBackToIncompleteState() throws {
+    let json =
+        """
+        {
+          "listen": { "host": "0.0.0.0", "port": 25101 },
+          "auth": { "token": "dev-token" },
+          "models": [],
+          "memory": { "backend": "sqlite-local-vectors" },
+          "nodes": ["local"],
+          "gateways": [],
+          "plugins": [],
+          "sqlitePath": "core.sqlite"
+        }
+        """
+
+    let decoded = try JSONDecoder().decode(CoreConfig.self, from: Data(json.utf8))
+    #expect(decoded.onboarding.completed == false)
 }
 
 @Test
@@ -101,6 +122,13 @@ func defaultConfigPathResolvesInsideWorkspaceRoot() {
     let workspace = CoreConfig.Workspace(name: "workspace-dev", basePath: "/tmp/slop")
     let resolved = CoreConfig.defaultConfigPath(for: workspace, currentDirectory: "/unused")
     #expect(resolved == "/tmp/slop/workspace-dev/sloppy.json")
+}
+
+@Test
+func defaultConfigPathUsesDotSloppyWorkspaceByDefault() {
+    let resolved = CoreConfig.defaultConfigPath(currentDirectory: "/tmp/slop")
+    let homePath = FileManager.default.homeDirectoryForCurrentUser.path
+    #expect(resolved == "\(homePath)/.sloppy/sloppy.json")
 }
 
 @Test

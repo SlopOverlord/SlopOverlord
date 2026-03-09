@@ -13,6 +13,7 @@ export const updateRuntimeConfig = coreApi.updateRuntimeConfig;
 export const fetchSystemLogs = coreApi.fetchSystemLogs;
 export const fetchOpenAIModels = coreApi.fetchOpenAIModels;
 export const fetchOpenAIProviderStatus = coreApi.fetchOpenAIProviderStatus;
+export const probeProvider = coreApi.probeProvider;
 export const fetchSearchProviderStatus = coreApi.fetchSearchProviderStatus;
 export const fetchProjects = coreApi.fetchProjects;
 export const fetchProject = coreApi.fetchProject;

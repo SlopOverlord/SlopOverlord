@@ -219,6 +219,15 @@ public struct ProjectCreateRequest: Codable, Sendable {
     public var actors: [String]?
     public var teams: [String]?
 
+    private enum CodingKeys: String, CodingKey {
+        case id
+        case name
+        case description
+        case channels
+        case actors
+        case teams
+    }
+
     public init(id: String? = nil, name: String, description: String? = nil, channels: [ProjectChannelCreateRequest] = [], actors: [String]? = nil, teams: [String]? = nil) {
         self.id = id
         self.name = name
@@ -226,6 +235,16 @@ public struct ProjectCreateRequest: Codable, Sendable {
         self.channels = channels
         self.actors = actors
         self.teams = teams
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decodeIfPresent(String.self, forKey: .id)
+        name = try container.decode(String.self, forKey: .name)
+        description = try container.decodeIfPresent(String.self, forKey: .description)
+        channels = try container.decodeIfPresent([ProjectChannelCreateRequest].self, forKey: .channels) ?? []
+        actors = try container.decodeIfPresent([String].self, forKey: .actors)
+        teams = try container.decodeIfPresent([String].self, forKey: .teams)
     }
 }
 
@@ -1371,6 +1390,24 @@ public enum ProviderAuthMethod: String, Codable, Sendable {
     case deeplink
 }
 
+public enum ProviderProbeID: String, Codable, Sendable {
+    case openAIAPI = "openai-api"
+    case openAIOAuth = "openai-oauth"
+    case ollama
+}
+
+public struct ProviderProbeRequest: Codable, Sendable {
+    public var providerId: ProviderProbeID
+    public var apiKey: String?
+    public var apiUrl: String?
+
+    public init(providerId: ProviderProbeID, apiKey: String? = nil, apiUrl: String? = nil) {
+        self.providerId = providerId
+        self.apiKey = apiKey
+        self.apiUrl = apiUrl
+    }
+}
+
 public struct OpenAIProviderModelsRequest: Codable, Sendable {
     public var authMethod: ProviderAuthMethod
     public var apiKey: String?
@@ -1443,6 +1480,28 @@ public struct OpenAIProviderStatusResponse: Codable, Sendable {
         self.hasEnvironmentKey = hasEnvironmentKey
         self.hasConfiguredKey = hasConfiguredKey
         self.hasAnyKey = hasAnyKey
+    }
+}
+
+public struct ProviderProbeResponse: Codable, Sendable {
+    public var providerId: ProviderProbeID
+    public var ok: Bool
+    public var usedEnvironmentKey: Bool
+    public var message: String
+    public var models: [ProviderModelOption]
+
+    public init(
+        providerId: ProviderProbeID,
+        ok: Bool,
+        usedEnvironmentKey: Bool,
+        message: String,
+        models: [ProviderModelOption]
+    ) {
+        self.providerId = providerId
+        self.ok = ok
+        self.usedEnvironmentKey = usedEnvironmentKey
+        self.message = message
+        self.models = models
     }
 }
 

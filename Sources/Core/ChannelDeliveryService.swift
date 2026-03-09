@@ -20,7 +20,7 @@ actor ChannelDeliveryService {
         var latestContent: String
     }
 
-    private let store: any PersistenceStore
+    private var store: any PersistenceStore
     private var inProcessPlugins: [String: any GatewayPlugin] = [:]
     private var activeStreams: [UUID: ActiveStream] = [:]
 #if canImport(FoundationNetworking)
@@ -36,6 +36,10 @@ actor ChannelDeliveryService {
         config.timeoutIntervalForRequest = timeoutInterval
         self.session = URLSession(configuration: config)
 #endif
+    }
+
+    func updateStore(_ store: any PersistenceStore) {
+        self.store = store
     }
 
     /// Registers an in-process GatewayPlugin for its declared channel IDs.

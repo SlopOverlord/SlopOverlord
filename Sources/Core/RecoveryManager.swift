@@ -3,7 +3,7 @@ import Foundation
 import Logging
 
 actor RecoveryManager {
-    private let store: any PersistenceStore
+    private var store: any PersistenceStore
     private let runtime: RuntimeSystem
     private let logger: Logger
     private var hasRecovered = false
@@ -12,6 +12,11 @@ actor RecoveryManager {
         self.store = store
         self.runtime = runtime
         self.logger = logger
+    }
+
+    func updateStore(_ store: any PersistenceStore) {
+        self.store = store
+        self.hasRecovered = false
     }
 
     func recoverIfNeeded() async {

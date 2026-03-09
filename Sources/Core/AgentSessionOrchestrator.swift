@@ -571,8 +571,7 @@ actor AgentSessionOrchestrator {
 
         return value.hasPrefix("model provider error:") ||
             value.hasPrefix("error:") ||
-            value.contains(" failed") ||
-            value.contains("exception")
+            value.hasPrefix("exception:")
     }
 
     private func sessionChannelID(agentID: String, sessionID: String) -> String {
@@ -670,7 +669,28 @@ actor AgentSessionOrchestrator {
         sessionID: String,
         documents: AgentDocumentBundle
     ) -> String {
-        """
+        let capabilitiesSection = renderedFallbackPromptPartial(
+            named: "session_capabilities",
+            fallback:
+                """
+                [Runtime capabilities]
+                - This session runs with a persistent channel history and agent bootstrap context.
+                - You can use available tools when the runtime exposes tool calls.
+                """
+        )
+        let runtimeRulesSection = renderedFallbackPromptPartial(
+            named: "runtime_rules",
+            fallback:
+                """
+                [Runtime task-reference rules]
+                - If user mentions task references like #MOBILE-1, call tool `project.task_get` with {"taskId":"MOBILE-1"} before answering.
+                - Use fetched task details (status, priority, description, assignee) in the response.
+                - If task is not found, explicitly say that and ask for a correct task id.
+                - Blend your own concrete suggestions based on the user's goal, not only direct execution.
+                """
+        )
+
+        return """
         \(Self.sessionContextBootstrapMarker)
         Session context initialized.
         Agent: \(agentID)
@@ -688,13 +708,28 @@ actor AgentSessionOrchestrator {
         [Soul.md]
         \(documents.soulMarkdown)
 
-        [Runtime task-reference rules]
-        - If user mentions task references like #MOBILE-1, call tool `project.task_get` with {"taskId":"MOBILE-1"} before answering.
-        - Use fetched task details (status, priority, description, assignee) in the response.
-        - If task is not found, explicitly say that and ask for a correct task id.
-        - If the user needs current web information and tool `web.search` is available, call it with {"tool":"web.search","arguments":{"query":"...","count":5},"reason":"..."} before answering.
-        - Blend your own concrete suggestions based on the user's goal, not only direct execution.
+        \(capabilitiesSection)
+
+        \(runtimeRulesSection)
         """
+    }
+
+    private func renderedFallbackPromptPartial(named name: String, fallback: String) -> String {
+        do {
+            let loader = PromptTemplateLoader()
+            let renderer = PromptTemplateRenderer()
+            let template = try loader.loadPartial(named: name)
+            return try renderer.render(template: template, values: [:])
+        } catch {
+            logger.warning(
+                "Fallback prompt partial rendering failed",
+                metadata: [
+                    "partial": .string(name),
+                    "error": .string(String(describing: error))
+                ]
+            )
+            return fallback
+        }
     }
 
     private func loadInstalledSkills(agentID: String) -> [InstalledSkill] {
