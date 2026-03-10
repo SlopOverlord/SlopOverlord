@@ -131,6 +131,13 @@ func defaultConfigPathUsesDotSloppyWorkspaceByDefault() {
 }
 
 @Test
+func defaultSQLitePathIsInsideMemorySubdirectory() {
+    let config = CoreConfig.default
+    let sqliteURL = config.resolvedSQLiteURL(currentDirectory: "/tmp/slop")
+    #expect(sqliteURL.standardizedFileURL.path == "/tmp/slop/.sloppy/memory/core.sqlite")
+}
+
+@Test
 func loadFallsBackToLegacyConfigFileInCurrentDirectory() throws {
     let fixtureDirectory = FileManager.default.temporaryDirectory
         .appendingPathComponent("core-config-legacy-\(UUID().uuidString)", isDirectory: true)
