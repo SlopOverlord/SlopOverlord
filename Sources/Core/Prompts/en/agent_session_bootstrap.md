@@ -26,3 +26,5 @@ Session: {{session_id}}
 {{worker_rules_section}}
 
 {{tools_instruction_section}}
+
+{{memory_rules_section}}

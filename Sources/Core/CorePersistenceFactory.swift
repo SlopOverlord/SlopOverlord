@@ -298,6 +298,14 @@ enum CorePersistenceFactory {
         SQLiteStore(path: config.sqlitePath, schemaSQL: loadSchemaSQL())
     }
 
+    @discardableResult
+    static func prepareSQLiteDatabaseIfNeeded(config: CoreConfig) -> Bool {
+        guard !FileManager.default.fileExists(atPath: config.sqlitePath) else {
+            return true
+        }
+        return SQLiteStore.prepareDatabase(path: config.sqlitePath, schemaSQL: loadSchemaSQL())
+    }
+
     private static func loadSchemaSQL() -> String {
         let fileManager = FileManager.default
         let executablePath = CommandLine.arguments.first ?? ""

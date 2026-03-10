@@ -72,6 +72,11 @@ struct CoreMain: AsyncParsableCommand {
             let resolvedConfigPath = explicitConfigPath ??
                 workspaceRoot.appendingPathComponent(CoreConfig.defaultConfigFileName).path
             try ensureConfigFileExists(path: resolvedConfigPath, config: config, logger: logger)
+
+            if !CorePersistenceFactory.prepareSQLiteDatabaseIfNeeded(config: config) {
+                logger.warning("SQLite initialization failed at \(config.sqlitePath); runtime will use fallback persistence if needed")
+            }
+
             let service = CoreService(config: config, configPath: resolvedConfigPath)
             let router = CoreRouter(service: service)
             let server = CoreHTTPServer(

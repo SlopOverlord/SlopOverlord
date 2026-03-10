@@ -33,22 +33,20 @@ public actor SQLiteStore: PersistenceStore {
         )
         fallbackProjects = Self.loadFallbackProjects(from: fallbackProjectsFileURL)
 #if canImport(SQLite3)
-        let directory = URL(fileURLWithPath: path).deletingLastPathComponent().path
-        try? FileManager.default.createDirectory(
-            atPath: directory,
-            withIntermediateDirectories: true
-        )
+        db = Self.openDatabase(path: path, schemaSQL: schemaSQL)
+#endif
+    }
 
-        if sqlite3_open(path, &db) == SQLITE_OK {
-            _ = sqlite3_exec(db, schemaSQL, nil, nil, nil)
-            Self.applyRuntimeEventMigrations(db: db)
-            Self.applyProjectTaskMigrations(db: db)
-            Self.applyChannelPluginMigrations(db: db)
-            Self.applyCronTaskMigrations(db: db)
-            Self.applyDashboardProjectsMigrations(db: db)
-        } else {
-            db = nil
+    @discardableResult
+    static func prepareDatabase(path: String, schemaSQL: String) -> Bool {
+#if canImport(SQLite3)
+        guard let db = openDatabase(path: path, schemaSQL: schemaSQL) else {
+            return false
         }
+        sqlite3_close(db)
+        return true
+#else
+        return false
 #endif
     }
 
@@ -1972,6 +1970,32 @@ public actor SQLiteStore: PersistenceStore {
             "ALTER TABLE dashboard_projects ADD COLUMN teams_json TEXT NOT NULL DEFAULT '[]';",
             nil, nil, nil
         )
+    }
+
+    private static func openDatabase(path: String, schemaSQL: String) -> OpaquePointer? {
+        let directory = (path as NSString).deletingLastPathComponent
+        if !directory.isEmpty {
+            try? FileManager.default.createDirectory(
+                atPath: directory,
+                withIntermediateDirectories: true
+            )
+        }
+
+        var db: OpaquePointer?
+        guard sqlite3_open(path, &db) == SQLITE_OK else {
+            if let db {
+                sqlite3_close(db)
+            }
+            return nil
+        }
+
+        _ = sqlite3_exec(db, schemaSQL, nil, nil, nil)
+        applyRuntimeEventMigrations(db: db)
+        applyProjectTaskMigrations(db: db)
+        applyChannelPluginMigrations(db: db)
+        applyCronTaskMigrations(db: db)
+        applyDashboardProjectsMigrations(db: db)
+        return db
     }
 #endif
 }

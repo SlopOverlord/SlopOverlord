@@ -13,6 +13,8 @@
   - `files.write` with `{"path":"path/to/file","content":"..."}`
   - `files.edit` with `{"path":"path/to/file","search":"old","replace":"new"}`
   - `runtime.exec` with `{"command":"mkdir","arguments":["-p","agents/ceo"]}`
+  - `memory.save` with `{"note":"User prefers dark mode","class":"user_preference"}`
+  - `memory.recall` with `{"query":"What are the project goals?"}`
 - Relative paths resolve inside the Sloppy workspace and remain subject to tool policy guardrails.
 - If the user needs current web information and tool `web.search` is available, call it with `{"tool":"web.search","arguments":{"query":"...","count":5},"reason":"..."}` before answering.
 - Installed skills listed above are available as additional knowledge sources, but not automatically expanded inline.

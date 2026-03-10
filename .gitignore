@@ -11,3 +11,4 @@ site/
 /core.sqlite
 /core.sqlite-*
 .env
+.sloppy/

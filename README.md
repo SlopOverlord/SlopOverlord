@@ -82,6 +82,7 @@ swift run Core
 Notes:
 
 - On first start, Sloppy creates a workspace layout and a default `sloppy.json` config if one does not exist.
+- If `sqlitePath` points to a missing file, Sloppy creates `core.sqlite` and applies the schema automatically during startup.
 - Visor scheduling is configured through `sloppy.json` under `visor.scheduler`, and `visor.bootstrapBulletin` controls the immediate boot-time bulletin by default.
 - OpenAI-backed model flows require `OPENAI_API_KEY`.
 - Web search via tool `web.search` can use `BRAVE_API_KEY` or `PERPLEXITY_API_KEY`; environment keys override values saved in `sloppy.json` under `searchTools`.

@@ -15,7 +15,7 @@ services:
     ports:
       - "25101:25101"
     volumes:
-      - ../../.sloppy:/root/.sloppy
+      - sloppy:/root/.sloppy
 
   dashboard:
     build:
@@ -32,5 +32,5 @@ services:
     depends_on:
       - core
 
-# volumes:
-#   core_data:
+volumes:
+  sloppy:

@@ -58,6 +58,10 @@ struct AgentPromptComposer {
             named: "tools_instruction",
             values: [:]
         )
+        let memoryRulesSection = try renderPartial(
+            named: "memory_rules",
+            values: [:]
+        )
         let skillsSection = try renderSkillsSection(skills: context.installedSkills)
         let template = try templateLoader.loadTemplate(for: .agentSessionBootstrap)
 
@@ -76,7 +80,8 @@ struct AgentPromptComposer {
                 "runtime_rules_section": runtimeRulesSection,
                 "branching_rules_section": branchingRulesSection,
                 "worker_rules_section": workerRulesSection,
-                "tools_instruction_section": toolsInstructionSection
+                "tools_instruction_section": toolsInstructionSection,
+                "memory_rules_section": memoryRulesSection
             ]
         )
     }
