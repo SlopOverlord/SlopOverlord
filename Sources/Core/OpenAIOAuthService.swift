@@ -221,6 +221,12 @@ struct OpenAIOAuthService: @unchecked Sendable {
         )
     }
 
+    func currentAccessToken() -> String? {
+        guard let stored = try? loadStoredAuth() else { return nil }
+        let token = stored.tokens.accessToken.trimmingCharacters(in: .whitespacesAndNewlines)
+        return token.isEmpty ? nil : token
+    }
+
     func status() -> OpenAIOAuthStatus {
         guard let stored = try? loadStoredAuth() else {
             return OpenAIOAuthStatus(hasCredentials: false, accountId: nil, planType: nil, expiresAt: nil)

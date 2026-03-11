@@ -34,7 +34,8 @@ let package = Package(
             name: "PluginSDK",
             dependencies: [
                 "Protocols",
-                .product(name: "AnyLanguageModel", package: "AnyLanguageModel")
+                .product(name: "AnyLanguageModel", package: "AnyLanguageModel"),
+                .product(name: "Logging", package: "swift-log")
             ],
             path: "Sources/PluginSDK"
         ),

@@ -223,8 +223,19 @@ public actor CoreService {
         providerProbeService: ProviderProbeService? = nil,
         builtInGatewayPluginFactory: BuiltInGatewayPluginFactory
     ) {
-        let resolvedModels = CoreModelProviderFactory.resolveModelIdentifiers(config: config)
-        let modelProvider = CoreModelProviderFactory.buildModelProvider(config: config, resolvedModels: resolvedModels)
+        self.openAIOAuthService = OpenAIOAuthService(workspaceRootURL: config
+            .resolvedWorkspaceRootURL(currentDirectory: FileManager.default.currentDirectoryPath))
+        let oauthService = self.openAIOAuthService
+        let hasOAuth = oauthService.currentAccessToken() != nil
+        let resolvedModels = CoreModelProviderFactory.resolveModelIdentifiers(
+            config: config,
+            hasOAuthCredentials: hasOAuth
+        )
+        let modelProvider = CoreModelProviderFactory.buildModelProvider(
+            config: config,
+            resolvedModels: resolvedModels,
+            oauthTokenProvider: { oauthService.currentAccessToken() }
+        )
         let runtimeMemoryStore: any MemoryStore
         let hybridMemoryStore: HybridMemoryStore?
         if persistenceBuilder is InMemoryCorePersistenceBuilder {
@@ -248,7 +259,6 @@ public actor CoreService {
         self.workspaceRootURL = config
             .resolvedWorkspaceRootURL(currentDirectory: FileManager.default.currentDirectoryPath)
         self.openAIProviderCatalog = OpenAIProviderCatalogService()
-        self.openAIOAuthService = OpenAIOAuthService(workspaceRootURL: self.workspaceRootURL)
         self.providerProbeService = providerProbeService ?? ProviderProbeService()
         self.searchProviderService = searchProviderService ?? SearchProviderService(config: config.searchTools)
         self.configPath = configPath
@@ -2594,8 +2604,17 @@ public actor CoreService {
         await channelDelivery.updateStore(refreshedStore)
         await recoveryManager.updateStore(refreshedStore)
         await searchProviderService.updateConfig(config.searchTools)
-        let resolvedModels = CoreModelProviderFactory.resolveModelIdentifiers(config: config)
-        let modelProvider = CoreModelProviderFactory.buildModelProvider(config: config, resolvedModels: resolvedModels)
+        let oauthSvc = self.openAIOAuthService
+        let hasOAuth = oauthSvc.currentAccessToken() != nil
+        let resolvedModels = CoreModelProviderFactory.resolveModelIdentifiers(
+            config: config,
+            hasOAuthCredentials: hasOAuth
+        )
+        let modelProvider = CoreModelProviderFactory.buildModelProvider(
+            config: config,
+            resolvedModels: resolvedModels,
+            oauthTokenProvider: { oauthSvc.currentAccessToken() }
+        )
         let defaultModel = modelProvider?.models.first ?? resolvedModels.first
         await runtime.updateModelProvider(modelProvider: modelProvider, defaultModel: defaultModel)
         await sessionOrchestrator.updateAvailableModels(Self.availableAgentModels(config: config))

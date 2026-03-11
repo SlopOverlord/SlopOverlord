@@ -1,5 +1,6 @@
 import AnyLanguageModel
 import Foundation
+import Logging
 import Protocols
 
 /// Bridges Sloppy `ModelProviderPlugin` protocol to AnyLanguageModel backends.
@@ -41,6 +42,7 @@ public struct AnyLanguageModelProviderPlugin: ModelProviderPlugin {
 
     private let openAI: OpenAISettings?
     private let ollama: OllamaSettings?
+    private static let logger = Logger(label: "sloppy.plugin.any-language-model")
 
     public init(
         id: String = "any-language-model",
@@ -63,7 +65,21 @@ public struct AnyLanguageModelProviderPlugin: ModelProviderPlugin {
         maxTokens: Int,
         reasoningEffort: ReasoningEffort? = nil
     ) async throws -> String {
-        switch try backend(for: model) {
+        let resolvedBackend: Backend
+        do {
+            resolvedBackend = try backend(for: model)
+        } catch {
+            logTerminalError(
+                error,
+                operation: "complete",
+                model: model,
+                backend: "resolver",
+                apiVariant: nil
+            )
+            throw error
+        }
+
+        switch resolvedBackend {
         case .openAI(let settings):
             let resolvedModel = normalizeModelName(model, removing: "openai:")
             do {
@@ -77,33 +93,89 @@ public struct AnyLanguageModelProviderPlugin: ModelProviderPlugin {
                 )
             } catch {
                 if shouldRetryOpenAIWithResponses(error: error, currentVariant: settings.apiVariant) {
-                    return try await completeOpenAI(
-                        settings: settings,
-                        model: resolvedModel,
-                        prompt: prompt,
-                        maxTokens: maxTokens,
-                        reasoningEffort: reasoningEffort,
-                        apiVariant: .responses
+                    logRetry(
+                        operation: "complete",
+                        model: model,
+                        fromVariant: settings.apiVariant,
+                        error: error
                     )
+                    do {
+                        return try await completeOpenAI(
+                            settings: settings,
+                            model: resolvedModel,
+                            prompt: prompt,
+                            maxTokens: maxTokens,
+                            reasoningEffort: reasoningEffort,
+                            apiVariant: .responses
+                        )
+                    } catch {
+                        logTerminalError(
+                            error,
+                            operation: "complete",
+                            model: model,
+                            backend: "openai",
+                            apiVariant: .responses
+                        )
+                        throw error
+                    }
                 }
+                logTerminalError(
+                    error,
+                    operation: "complete",
+                    model: model,
+                    backend: "openai",
+                    apiVariant: settings.apiVariant
+                )
                 throw error
             }
-
-        case .ollama(let settings):
+            
+        case .openAIOAuth(let settings):
+            let resolvedModel = normalizeModelName(model, removing: "openai:")
+            let oauthModel = OpenAIOAuthModel(
+                baseURL: settings.baseURL,
+                bearerToken: settings.apiKey(),
+                model: resolvedModel,
+                apiVariant: settings.apiVariant == .chatCompletions ? .chatCompletions : .responses
+            )
+            
             let session = LanguageModelSession(
-                model: OllamaLanguageModel(
-                    baseURL: settings.baseURL,
-                    model: normalizeModelName(model, removing: "ollama:")
-                ),
+                model: oauthModel,
                 instructions: resolvedInstructions
             )
-            let options = GenerationOptions(maximumResponseTokens: maxTokens)
+            let options = openAIGenerationOptions(maxTokens: maxTokens, reasoningEffort: reasoningEffort)
             let response: LanguageModelSession.Response<String> = try await session.respond(
                 to: Prompt(prompt),
                 generating: String.self,
                 options: options
             )
             return response.content
+
+        case .ollama(let settings):
+            do {
+                let session = LanguageModelSession(
+                    model: OllamaLanguageModel(
+                        baseURL: settings.baseURL,
+                        model: normalizeModelName(model, removing: "ollama:")
+                    ),
+                    instructions: resolvedInstructions
+                )
+                let options = GenerationOptions(maximumResponseTokens: maxTokens)
+                let response: LanguageModelSession.Response<String> = try await session.respond(
+                    to: Prompt(prompt),
+                    generating: String.self,
+                    options: options
+                )
+                return response.content
+            } catch {
+                logTerminalError(
+                    error,
+                    operation: "complete",
+                    model: model,
+                    backend: "ollama",
+                    apiVariant: nil
+                )
+                throw error
+            }
         }
     }
 
@@ -117,7 +189,21 @@ public struct AnyLanguageModelProviderPlugin: ModelProviderPlugin {
         AsyncThrowingStream { continuation in
             let task = Task {
                 do {
-                    switch try backend(for: model) {
+                    let resolvedBackend: Backend
+                    do {
+                        resolvedBackend = try backend(for: model)
+                    } catch {
+                        logTerminalError(
+                            error,
+                            operation: "stream",
+                            model: model,
+                            backend: "resolver",
+                            apiVariant: nil
+                        )
+                        throw error
+                    }
+
+                    switch resolvedBackend {
                     case .openAI(let settings):
                         let resolvedModel = normalizeModelName(model, removing: "openai:")
                         do {
@@ -133,6 +219,12 @@ public struct AnyLanguageModelProviderPlugin: ModelProviderPlugin {
                             continuation.finish()
                         } catch {
                             if shouldRetryOpenAIWithResponses(error: error, currentVariant: settings.apiVariant) {
+                                logRetry(
+                                    operation: "stream",
+                                    model: model,
+                                    fromVariant: settings.apiVariant,
+                                    error: error
+                                )
                                 do {
                                     try await streamOpenAI(
                                         settings: settings,
@@ -145,12 +237,47 @@ public struct AnyLanguageModelProviderPlugin: ModelProviderPlugin {
                                     )
                                     continuation.finish()
                                 } catch {
+                                    logTerminalError(
+                                        error,
+                                        operation: "stream",
+                                        model: model,
+                                        backend: "openai",
+                                        apiVariant: .responses
+                                    )
                                     continuation.finish(throwing: error)
                                 }
                             } else {
+                                logTerminalError(
+                                    error,
+                                    operation: "stream",
+                                    model: model,
+                                    backend: "openai",
+                                    apiVariant: settings.apiVariant
+                                )
                                 continuation.finish(throwing: error)
                             }
                         }
+                    
+                    case .openAIOAuth(let settings):
+                        let resolvedModel = normalizeModelName(model, removing: "openai:")
+                        let oauthModel = OpenAIOAuthModel(
+                            baseURL: settings.baseURL,
+                            bearerToken: settings.apiKey(),
+                            model: resolvedModel,
+                            apiVariant: settings.apiVariant == .chatCompletions ? .chatCompletions : .responses
+                        )
+                        
+                        let session = LanguageModelSession(
+                            model: oauthModel,
+                            instructions: resolvedInstructions
+                        )
+                        let options = openAIGenerationOptions(maxTokens: maxTokens, reasoningEffort: reasoningEffort)
+                        
+                        let stream = session.streamResponse(to: Prompt(prompt), generating: String.self, options: options)
+                        for try await snapshot in stream {
+                            continuation.yield(snapshot.content)
+                        }
+                        continuation.finish()
 
                     case .ollama(let settings):
                         let session = LanguageModelSession(
@@ -185,6 +312,13 @@ public struct AnyLanguageModelProviderPlugin: ModelProviderPlugin {
                         continuation.finish()
                     }
                 } catch {
+                    logTerminalError(
+                        error,
+                        operation: "stream",
+                        model: model,
+                        backend: "runtime",
+                        apiVariant: nil
+                    )
                     continuation.finish(throwing: error)
                 }
             }
@@ -344,7 +478,14 @@ public struct AnyLanguageModelProviderPlugin: ModelProviderPlugin {
 
     private enum Backend {
         case openAI(OpenAISettings)
+        case openAIOAuth(OpenAISettings)
         case ollama(OllamaSettings)
+    }
+
+    /// Detects if token is an OAuth token (not an API key)
+    internal func isOAuthToken(_ token: String) -> Bool {
+        // OAuth tokens do not start with 'sk-' (OpenAI API keys)
+        return !token.hasPrefix("sk-") && !token.isEmpty
     }
 
     /// Resolves backend by model prefix (`openai:` / `ollama:`) and validates configuration.
@@ -353,7 +494,12 @@ public struct AnyLanguageModelProviderPlugin: ModelProviderPlugin {
             guard let openAI else {
                 throw PluginError.missingConfiguration("openai")
             }
-            return .openAI(openAI)
+            let token = openAI.apiKey()
+            if isOAuthToken(token) {
+                return .openAIOAuth(openAI)
+            } else {
+                return .openAI(openAI)
+            }
         }
 
         if model.hasPrefix("ollama:") {
@@ -364,7 +510,12 @@ public struct AnyLanguageModelProviderPlugin: ModelProviderPlugin {
         }
 
         if let openAI {
-            return .openAI(openAI)
+            let token = openAI.apiKey()
+            if isOAuthToken(token) {
+                return .openAIOAuth(openAI)
+            } else {
+                return .openAI(openAI)
+            }
         }
 
         if let ollama {
@@ -380,5 +531,38 @@ public struct AnyLanguageModelProviderPlugin: ModelProviderPlugin {
             return String(model.dropFirst(prefix.count))
         }
         return model
+    }
+
+    private func logRetry(
+        operation: String,
+        model: String,
+        fromVariant: OpenAILanguageModel.APIVariant,
+        error: any Error
+    ) {
+        let serializedError = String(describing: error)
+        Self.logger.warning(
+            "anylm.retry_openai_with_responses operation=\(operation) model=\(model) from_variant=\(String(describing: fromVariant)) error=\(serializedError)"
+        )
+    }
+
+    private func logTerminalError(
+        _ error: any Error,
+        operation: String,
+        model: String,
+        backend: String,
+        apiVariant: OpenAILanguageModel.APIVariant?
+    ) {
+        let serializedError = String(describing: error)
+        let variant = apiVariant.map { String(describing: $0) } ?? "n/a"
+        if error is CancellationError {
+            Self.logger.debug(
+                "anylm.cancelled operation=\(operation) model=\(model) backend=\(backend) variant=\(variant) error=\(serializedError)"
+            )
+            return
+        }
+
+        Self.logger.error(
+            "anylm.failed operation=\(operation) model=\(model) backend=\(backend) variant=\(variant) error=\(serializedError)"
+        )
     }
 }

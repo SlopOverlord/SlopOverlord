@@ -4,7 +4,8 @@ import PluginSDK
 enum CoreModelProviderFactory {
     static func buildModelProvider(
         config: CoreConfig,
-        resolvedModels: [String]
+        resolvedModels: [String],
+        oauthTokenProvider: (@Sendable () -> String?)? = nil
     ) -> AnyLanguageModelProviderPlugin? {
         let supportsOpenAI = resolvedModels.contains { $0.hasPrefix("openai:") }
         let supportsOllama = resolvedModels.contains { $0.hasPrefix("ollama:") }
@@ -20,7 +21,11 @@ enum CoreModelProviderFactory {
         if supportsOpenAI {
             let apiKey = ProcessInfo.processInfo.environment["OPENAI_API_KEY"] ?? ""
             let configuredKey = primaryOpenAIConfig?.apiKey.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-            let resolvedKey = configuredKey.isEmpty ? apiKey : configuredKey
+            var resolvedKey = configuredKey.isEmpty ? apiKey : configuredKey
+
+            if resolvedKey.isEmpty, let oauthToken = oauthTokenProvider?() {
+                resolvedKey = oauthToken
+            }
 
             if !resolvedKey.isEmpty {
                 if let baseURL = parseURL(primaryOpenAIConfig?.apiUrl) {
@@ -64,13 +69,16 @@ enum CoreModelProviderFactory {
         )
     }
 
-    static func resolveModelIdentifiers(config: CoreConfig) -> [String] {
+    static func resolveModelIdentifiers(
+        config: CoreConfig,
+        hasOAuthCredentials: Bool = false
+    ) -> [String] {
         var identifiers = config.models.map(resolvedIdentifier(for:))
         let hasOpenAI = identifiers.contains { $0.hasPrefix("openai:") }
         let environmentKey = ProcessInfo.processInfo.environment["OPENAI_API_KEY"]?
             .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
 
-        if !hasOpenAI, !environmentKey.isEmpty {
+        if !hasOpenAI, (!environmentKey.isEmpty || hasOAuthCredentials) {
             identifiers.append("openai:gpt-4.1-mini")
         }
 
