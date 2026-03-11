@@ -565,12 +565,6 @@ export function OnboardingView({ coreApi, initialConfig, onCompleted }: Onboardi
     setIsSubmitting(true);
 
     try {
-      if (providerId === "openai-oauth") {
-        throw new Error(
-          "OpenAI OAuth is connected, but agent runtime still uses the API-key-backed OpenAI path. Finish setup from Config after adding runtime support, or use OpenAI API/Ollama for onboarding."
-        );
-      }
-
       setStatusText("Saving provider configuration...");
       const draftConfig = createConfigWithProvider(
         initialConfig,

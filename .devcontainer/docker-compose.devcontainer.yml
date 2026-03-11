@@ -1,0 +1,6 @@
+# Override for Dev Containers: use dev image (Swift + Node). Ports/volumes from main compose.
+services:
+  core:
+    build:
+      context: ..
+      dockerfile: .devcontainer/Dockerfile

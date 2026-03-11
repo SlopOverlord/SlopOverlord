@@ -1,8 +1,12 @@
 {
   "name": "Sloppy",
-  "dockerComposeFile": "../utils/docker/docker-compose.yml",
+  "dockerComposeFile": [
+    "../utils/docker/docker-compose.yml",
+    "docker-compose.devcontainer.yml"
+  ],
   "service": "core",
-  "workspaceFolder": "/.sloppy",
+  "workspaceFolder": "/workspaces/Sloppy",
+  "postCreateCommand": "swift package resolve && cd Dashboard && npm install",
   "customizations": {
     "vscode": {
       "extensions": [
