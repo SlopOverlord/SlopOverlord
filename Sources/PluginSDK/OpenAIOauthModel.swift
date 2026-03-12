@@ -14,6 +14,7 @@ public struct OpenAIOAuthModel: LanguageModel {
     private let bearerToken: String
     private let modelName: String
     private let apiVariant: APIVariant
+    private let accountId: String?
     
     public enum APIVariant: Sendable {
         case chatCompletions
@@ -31,12 +32,14 @@ public struct OpenAIOAuthModel: LanguageModel {
         baseURL: URL = URL(string: "https://api.openai.com")!,
         bearerToken: String,
         model: String,
-        apiVariant: APIVariant = .chatCompletions
+        apiVariant: APIVariant = .responses,
+        accountId: String? = nil
     ) {
         self.baseURL = baseURL
         self.bearerToken = bearerToken
         self.modelName = model
         self.apiVariant = apiVariant
+        self.accountId = accountId
     }
 }
 
@@ -120,6 +123,9 @@ private extension OpenAIOAuthModel {
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.setValue("application/json", forHTTPHeaderField: "Accept")
         request.setValue("Bearer \(bearerToken)", forHTTPHeaderField: "Authorization")
+        if let accountId, !accountId.isEmpty {
+            request.setValue(accountId, forHTTPHeaderField: "ChatGPT-Account-Id")
+        }
         request.httpBody = body
         
         let (data, response) = try await URLSession.shared.data(for: request)
@@ -154,6 +160,9 @@ private extension OpenAIOAuthModel {
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.setValue("text/event-stream", forHTTPHeaderField: "Accept")
         request.setValue("Bearer \(bearerToken)", forHTTPHeaderField: "Authorization")
+        if let accountId, !accountId.isEmpty {
+            request.setValue(accountId, forHTTPHeaderField: "ChatGPT-Account-Id")
+        }
         request.httpBody = body
         
         #if canImport(FoundationNetworking)
@@ -201,11 +210,14 @@ private extension OpenAIOAuthModel {
     }
     
     func apiEndpoint() -> URL {
+        let base = baseURL.absoluteString.hasSuffix("/v1") || baseURL.absoluteString.hasSuffix("/v1/")
+            ? baseURL
+            : baseURL.appendingPathComponent("v1")
         switch apiVariant {
         case .chatCompletions:
-            return baseURL.appendingPathComponent("/v1/chat/completions")
+            return base.appendingPathComponent("chat/completions")
         case .responses:
-            return baseURL.appendingPathComponent("/v1/responses")
+            return base.appendingPathComponent("responses")
         }
     }
 }

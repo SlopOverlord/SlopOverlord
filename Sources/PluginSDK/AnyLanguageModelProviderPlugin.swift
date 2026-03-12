@@ -10,15 +10,18 @@ public struct AnyLanguageModelProviderPlugin: ModelProviderPlugin {
         public var apiKey: @Sendable () -> String
         public var baseURL: URL
         public var apiVariant: OpenAILanguageModel.APIVariant
+        public var accountId: String?
 
         public init(
             apiKey: @escaping @Sendable () -> String,
             baseURL: URL = OpenAILanguageModel.defaultBaseURL,
-            apiVariant: OpenAILanguageModel.APIVariant = .chatCompletions
+            apiVariant: OpenAILanguageModel.APIVariant = .chatCompletions,
+            accountId: String? = nil
         ) {
             self.apiKey = apiKey
             self.baseURL = baseURL
             self.apiVariant = apiVariant
+            self.accountId = accountId
         }
     }
 
@@ -135,7 +138,8 @@ public struct AnyLanguageModelProviderPlugin: ModelProviderPlugin {
                 baseURL: settings.baseURL,
                 bearerToken: settings.apiKey(),
                 model: resolvedModel,
-                apiVariant: settings.apiVariant == .chatCompletions ? .chatCompletions : .responses
+                apiVariant: .responses,
+                accountId: settings.accountId
             )
             
             let session = LanguageModelSession(
@@ -264,7 +268,8 @@ public struct AnyLanguageModelProviderPlugin: ModelProviderPlugin {
                             baseURL: settings.baseURL,
                             bearerToken: settings.apiKey(),
                             model: resolvedModel,
-                            apiVariant: settings.apiVariant == .chatCompletions ? .chatCompletions : .responses
+                            apiVariant: .responses,
+                            accountId: settings.accountId
                         )
                         
                         let session = LanguageModelSession(

@@ -234,7 +234,8 @@ public actor CoreService {
         let modelProvider = CoreModelProviderFactory.buildModelProvider(
             config: config,
             resolvedModels: resolvedModels,
-            oauthTokenProvider: { oauthService.currentAccessToken() }
+            oauthTokenProvider: { oauthService.currentAccessToken() },
+            oauthAccountId: oauthService.currentAccountId()
         )
         let runtimeMemoryStore: any MemoryStore
         let hybridMemoryStore: HybridMemoryStore?
@@ -279,7 +280,7 @@ public actor CoreService {
         let orchestratorCatalogStore = AgentCatalogFileStore(agentsRootURL: self.agentsRootURL)
         let orchestratorSessionStore = AgentSessionFileStore(agentsRootURL: self.agentsRootURL)
         let orchestratorSkillsStore = AgentSkillsFileStore(agentsRootURL: self.agentsRootURL)
-        let initialAvailableAgentModels = Self.availableAgentModels(config: config)
+        let initialAvailableAgentModels = Self.availableAgentModels(config: config, hasOAuthCredentials: hasOAuth)
         self.sessionOrchestrator = AgentSessionOrchestrator(
             runtime: self.runtime,
             sessionStore: orchestratorSessionStore,
@@ -2613,11 +2614,12 @@ public actor CoreService {
         let modelProvider = CoreModelProviderFactory.buildModelProvider(
             config: config,
             resolvedModels: resolvedModels,
-            oauthTokenProvider: { oauthSvc.currentAccessToken() }
+            oauthTokenProvider: { oauthSvc.currentAccessToken() },
+            oauthAccountId: oauthSvc.currentAccountId()
         )
         let defaultModel = modelProvider?.models.first ?? resolvedModels.first
         await runtime.updateModelProvider(modelProvider: modelProvider, defaultModel: defaultModel)
-        await sessionOrchestrator.updateAvailableModels(Self.availableAgentModels(config: config))
+        await sessionOrchestrator.updateAvailableModels(Self.availableAgentModels(config: config, hasOAuthCredentials: hasOAuth))
 
         if previousChannels.telegram != config.channels.telegram {
             var plugin: (any GatewayPlugin)?
@@ -5523,14 +5525,18 @@ public actor CoreService {
     }
 
     private func availableAgentModels() -> [ProviderModelOption] {
-        Self.availableAgentModels(config: currentConfig)
+        let hasOAuth = openAIOAuthService.currentAccessToken() != nil
+        return Self.availableAgentModels(config: currentConfig, hasOAuthCredentials: hasOAuth)
     }
 
-    private static func availableAgentModels(config: CoreConfig) -> [ProviderModelOption] {
+    private static func availableAgentModels(config: CoreConfig, hasOAuthCredentials: Bool = false) -> [ProviderModelOption] {
         var seen: Set<String> = []
         var options: [ProviderModelOption] = []
 
-        let candidates = CoreModelProviderFactory.resolveModelIdentifiers(config: config) + config.models.map(\.model)
+        let candidates = CoreModelProviderFactory.resolveModelIdentifiers(
+            config: config,
+            hasOAuthCredentials: hasOAuthCredentials
+        ) + config.models.map(\.model)
         for raw in candidates {
             let value = raw.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !value.isEmpty else {

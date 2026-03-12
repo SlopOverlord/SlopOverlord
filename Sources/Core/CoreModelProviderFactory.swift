@@ -5,7 +5,8 @@ enum CoreModelProviderFactory {
     static func buildModelProvider(
         config: CoreConfig,
         resolvedModels: [String],
-        oauthTokenProvider: (@Sendable () -> String?)? = nil
+        oauthTokenProvider: (@Sendable () -> String?)? = nil,
+        oauthAccountId: String? = nil
     ) -> AnyLanguageModelProviderPlugin? {
         let supportsOpenAI = resolvedModels.contains { $0.hasPrefix("openai:") }
         let supportsOllama = resolvedModels.contains { $0.hasPrefix("ollama:") }
@@ -21,17 +22,27 @@ enum CoreModelProviderFactory {
         if supportsOpenAI {
             let apiKey = ProcessInfo.processInfo.environment["OPENAI_API_KEY"] ?? ""
             let configuredKey = primaryOpenAIConfig?.apiKey.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-            var resolvedKey = configuredKey.isEmpty ? apiKey : configuredKey
+            let resolvedKey = configuredKey.isEmpty ? apiKey : configuredKey
 
-            if resolvedKey.isEmpty, let oauthToken = oauthTokenProvider?() {
-                resolvedKey = oauthToken
+            let keyProvider: (@Sendable () -> String)?
+            let isOAuth: Bool
+            if !resolvedKey.isEmpty {
+                keyProvider = { resolvedKey }
+                isOAuth = false
+            } else if let oauthTokenProvider, oauthTokenProvider() != nil {
+                keyProvider = { oauthTokenProvider() ?? "" }
+                isOAuth = true
+            } else {
+                keyProvider = nil
+                isOAuth = false
             }
 
-            if !resolvedKey.isEmpty {
+            if let keyProvider {
+                let resolvedAccountId = isOAuth ? oauthAccountId : nil
                 if let baseURL = parseURL(primaryOpenAIConfig?.apiUrl) {
-                    openAISettings = .init(apiKey: { resolvedKey }, baseURL: baseURL)
+                    openAISettings = .init(apiKey: keyProvider, baseURL: baseURL, accountId: resolvedAccountId)
                 } else {
-                    openAISettings = .init(apiKey: { resolvedKey })
+                    openAISettings = .init(apiKey: keyProvider, accountId: resolvedAccountId)
                 }
             }
         }
