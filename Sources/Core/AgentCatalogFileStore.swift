@@ -33,6 +33,10 @@ final class AgentCatalogFileStore {
     private let fileManager: FileManager
     private var agentsRootURL: URL
 
+    private var systemAgentsRootURL: URL {
+        agentsRootURL.appendingPathComponent(".system", isDirectory: true)
+    }
+
     init(agentsRootURL: URL, fileManager: FileManager = .default) {
         self.fileManager = fileManager
         self.agentsRootURL = agentsRootURL
@@ -45,22 +49,35 @@ final class AgentCatalogFileStore {
     func listAgents() throws -> [AgentSummary] {
         try ensureAgentsRootDirectory()
 
+        var agents: [AgentSummary] = []
+
         let entries = try fileManager.contentsOfDirectory(
             at: agentsRootURL,
             includingPropertiesForKeys: [.isDirectoryKey],
             options: [.skipsHiddenFiles]
         )
-
-        var agents: [AgentSummary] = []
         for entry in entries {
             let values = try? entry.resourceValues(forKeys: [.isDirectoryKey])
-            guard values?.isDirectory == true else {
-                continue
-            }
-
+            guard values?.isDirectory == true else { continue }
             let agentID = entry.lastPathComponent
-            if let summary = try? readAgentSummary(id: agentID) {
+            if let summary = try? readAgentSummary(id: agentID, isSystem: false) {
                 agents.append(summary)
+            }
+        }
+
+        if fileManager.fileExists(atPath: systemAgentsRootURL.path) {
+            let systemEntries = try fileManager.contentsOfDirectory(
+                at: systemAgentsRootURL,
+                includingPropertiesForKeys: [.isDirectoryKey],
+                options: [.skipsHiddenFiles]
+            )
+            for entry in systemEntries {
+                let values = try? entry.resourceValues(forKeys: [.isDirectoryKey])
+                guard values?.isDirectory == true else { continue }
+                let agentID = entry.lastPathComponent
+                if let summary = try? readAgentSummary(id: agentID, isSystem: true) {
+                    agents.append(summary)
+                }
             }
         }
 
@@ -75,11 +92,13 @@ final class AgentCatalogFileStore {
             throw StoreError.invalidID
         }
 
-        guard fileManager.fileExists(atPath: agentDirectoryURL(for: normalizedID).path) else {
-            throw StoreError.notFound
+        if fileManager.fileExists(atPath: agentDirectoryURL(for: normalizedID, isSystem: false).path) {
+            return try readAgentSummary(id: normalizedID, isSystem: false)
         }
-
-        return try readAgentSummary(id: normalizedID)
+        if fileManager.fileExists(atPath: agentDirectoryURL(for: normalizedID, isSystem: true).path) {
+            return try readAgentSummary(id: normalizedID, isSystem: true)
+        }
+        throw StoreError.notFound
     }
 
     func createAgent(_ request: AgentCreateRequest, availableModels: [ProviderModelOption]) throws -> AgentSummary {
@@ -94,8 +113,11 @@ final class AgentCatalogFileStore {
         }
 
         try ensureAgentsRootDirectory()
+        if request.isSystem {
+            try fileManager.createDirectory(at: systemAgentsRootURL, withIntermediateDirectories: true)
+        }
 
-        let directoryURL = agentDirectoryURL(for: normalizedID)
+        let directoryURL = agentDirectoryURL(for: normalizedID, isSystem: request.isSystem)
         if fileManager.fileExists(atPath: directoryURL.path) {
             throw StoreError.alreadyExists
         }
@@ -105,7 +127,8 @@ final class AgentCatalogFileStore {
             id: normalizedID,
             displayName: displayName,
             role: role,
-            createdAt: Date()
+            createdAt: Date(),
+            isSystem: request.isSystem
         )
 
         do {
@@ -127,7 +150,7 @@ final class AgentCatalogFileStore {
         let configFile = try readAgentConfigFile(for: summary, availableModels: availableModels)
         let selectedModel = configFile.selectedModel ?? ""
         let documents = try readAgentDocuments(agentID: normalizedAgentID)
-        let heartbeatStatus = try readHeartbeatStatus(agentID: normalizedAgentID)
+        let heartbeatStatus = try readHeartbeatStatus(agentID: normalizedAgentID, isSystem: summary.isSystem)
 
         return AgentConfigDetail(
             agentId: normalizedAgentID,
@@ -196,10 +219,11 @@ final class AgentCatalogFileStore {
                     selectedModel: selectedModel,
                     heartbeat: heartbeat,
                     channelSessions: channelSessions
-                )
+                ),
+                isSystem: summary.isSystem
             )
 
-            let agentDirectory = agentDirectoryURL(for: normalizedAgentID)
+            let agentDirectory = agentDirectoryURL(for: normalizedAgentID, isSystem: summary.isSystem)
             try writeTextFile(contents: normalizedDocuments.agentsMarkdown, at: agentDirectory.appendingPathComponent("Agents.md"))
             try writeTextFile(contents: normalizedDocuments.userMarkdown, at: agentDirectory.appendingPathComponent("User.md"))
             try writeTextFile(contents: normalizedDocuments.soulMarkdown, at: agentDirectory.appendingPathComponent("Soul.md"))
@@ -219,23 +243,21 @@ final class AgentCatalogFileStore {
             documents: normalizedDocuments,
             heartbeat: heartbeat,
             channelSessions: channelSessions,
-            heartbeatStatus: try readHeartbeatStatus(agentID: normalizedAgentID)
+            heartbeatStatus: try readHeartbeatStatus(agentID: normalizedAgentID, isSystem: summary.isSystem)
         )
     }
 
     func readAgentDocuments(agentID: String) throws -> AgentDocumentBundle {
-        let normalizedID: String
-        if let normalized = self.normalizedAgentID(agentID) {
-            normalizedID = normalized
-        } else {
+        guard let normalizedID = self.normalizedAgentID(agentID) else {
             throw StoreError.invalidID
         }
 
-        let agentDirectory = agentDirectoryURL(for: normalizedID)
+        let summary = try getAgent(id: normalizedID)
+        let agentDirectory = agentDirectoryURL(for: normalizedID, isSystem: summary.isSystem)
         let userMarkdown = try readTextFile(at: agentDirectory.appendingPathComponent("User.md"), fallback: "# User\n")
         let agentsMarkdown = try readTextFile(at: agentDirectory.appendingPathComponent("Agents.md"), fallback: "# Agent\n")
         let soulMarkdown = try readTextFile(at: agentDirectory.appendingPathComponent("Soul.md"), fallback: "# Soul\n")
-        let heartbeatMarkdown = try readHeartbeatFile(agentID: normalizedID)
+        let heartbeatMarkdown = try readHeartbeatFile(agentID: normalizedID, isSystem: summary.isSystem)
 
         let identityMarkdownPath = agentDirectory.appendingPathComponent("Identity.md")
         let identityLegacyPath = agentDirectory.appendingPathComponent("Identity.id")
@@ -258,18 +280,18 @@ final class AgentCatalogFileStore {
         guard let normalizedAgentID = normalizedAgentID(agentID) else {
             throw StoreError.invalidID
         }
-        _ = try getAgent(id: normalizedAgentID)
-        return try readHeartbeatStatus(agentID: normalizedAgentID)
+        let summary = try getAgent(id: normalizedAgentID)
+        return try readHeartbeatStatus(agentID: normalizedAgentID, isSystem: summary.isSystem)
     }
 
     func updateHeartbeatStatus(agentID: String, status: AgentHeartbeatStatus) throws {
         guard let normalizedAgentID = normalizedAgentID(agentID) else {
             throw StoreError.invalidID
         }
-        _ = try getAgent(id: normalizedAgentID)
+        let summary = try getAgent(id: normalizedAgentID)
 
         do {
-            try writeHeartbeatStatus(status, agentID: normalizedAgentID)
+            try writeHeartbeatStatus(status, agentID: normalizedAgentID, isSystem: summary.isSystem)
         } catch {
             throw StoreError.storageFailure
         }
@@ -279,16 +301,17 @@ final class AgentCatalogFileStore {
         try fileManager.createDirectory(at: agentsRootURL, withIntermediateDirectories: true)
     }
 
-    private func agentDirectoryURL(for id: String) -> URL {
-        agentsRootURL.appendingPathComponent(id, isDirectory: true)
+    private func agentDirectoryURL(for id: String, isSystem: Bool) -> URL {
+        let root = isSystem ? systemAgentsRootURL : agentsRootURL
+        return root.appendingPathComponent(id, isDirectory: true)
     }
 
-    private func agentMetadataURL(for id: String) -> URL {
-        agentDirectoryURL(for: id).appendingPathComponent("agent.json")
+    private func agentMetadataURL(for id: String, isSystem: Bool) -> URL {
+        agentDirectoryURL(for: id, isSystem: isSystem).appendingPathComponent("agent.json")
     }
 
-    private func readAgentSummary(id: String) throws -> AgentSummary {
-        let metadataURL = agentMetadataURL(for: id)
+    private func readAgentSummary(id: String, isSystem: Bool) throws -> AgentSummary {
+        let metadataURL = agentMetadataURL(for: id, isSystem: isSystem)
         guard fileManager.fileExists(atPath: metadataURL.path) else {
             throw StoreError.notFound
         }
@@ -304,11 +327,11 @@ final class AgentCatalogFileStore {
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         encoder.dateEncodingStrategy = .iso8601
         let payload = try encoder.encode(summary) + Data("\n".utf8)
-        try payload.write(to: agentMetadataURL(for: summary.id), options: .atomic)
+        try payload.write(to: agentMetadataURL(for: summary.id, isSystem: summary.isSystem), options: .atomic)
     }
 
     private func writeAgentScaffoldFiles(for summary: AgentSummary, availableModels: [ProviderModelOption]) throws {
-        let agentDirectory = agentDirectoryURL(for: summary.id)
+        let agentDirectory = agentDirectoryURL(for: summary.id, isSystem: summary.isSystem)
 
         let agentsMarkdown =
             """
@@ -380,7 +403,8 @@ final class AgentCatalogFileStore {
                 selectedModel: availableModels.first?.id,
                 heartbeat: AgentHeartbeatSettings(),
                 channelSessions: AgentChannelSessionSettings()
-            )
+            ),
+            isSystem: summary.isSystem
         )
 
         try fileManager.createDirectory(
@@ -402,19 +426,19 @@ final class AgentCatalogFileStore {
         let payload = try encoder.encode(toolsPolicy) + Data("\n".utf8)
         try payload.write(to: toolsDirectory.appendingPathComponent("tools.json"), options: .atomic)
 
-        try writeHeartbeatStatus(AgentHeartbeatStatus(), agentID: summary.id)
+        try writeHeartbeatStatus(AgentHeartbeatStatus(), agentID: summary.id, isSystem: summary.isSystem)
     }
 
-    private func agentConfigURL(for id: String) -> URL {
-        agentDirectoryURL(for: id).appendingPathComponent("config.json")
+    private func agentConfigURL(for id: String, isSystem: Bool) -> URL {
+        agentDirectoryURL(for: id, isSystem: isSystem).appendingPathComponent("config.json")
     }
 
-    private func heartbeatStatusURL(for id: String) -> URL {
-        agentDirectoryURL(for: id).appendingPathComponent("heartbeat-status.json")
+    private func heartbeatStatusURL(for id: String, isSystem: Bool) -> URL {
+        agentDirectoryURL(for: id, isSystem: isSystem).appendingPathComponent("heartbeat-status.json")
     }
 
     private func readAgentConfigFile(for summary: AgentSummary, availableModels: [ProviderModelOption]) throws -> AgentConfigFile {
-        let configURL = agentConfigURL(for: summary.id)
+        let configURL = agentConfigURL(for: summary.id, isSystem: summary.isSystem)
         if !fileManager.fileExists(atPath: configURL.path) {
             let fallback = AgentConfigFile(
                 id: summary.id,
@@ -425,7 +449,7 @@ final class AgentCatalogFileStore {
                 heartbeat: AgentHeartbeatSettings(),
                 channelSessions: AgentChannelSessionSettings()
             )
-            try writeAgentConfigFile(fallback)
+            try writeAgentConfigFile(fallback, isSystem: summary.isSystem)
             return fallback
         }
 
@@ -445,7 +469,7 @@ final class AgentCatalogFileStore {
                 heartbeat: decoded.heartbeat ?? AgentHeartbeatSettings(),
                 channelSessions: decoded.channelSessions ?? AgentChannelSessionSettings()
             )
-            try writeAgentConfigFile(decoded)
+            try writeAgentConfigFile(decoded, isSystem: summary.isSystem)
         } else if decoded.heartbeat == nil || decoded.channelSessions == nil {
             decoded = AgentConfigFile(
                 id: decoded.id,
@@ -456,17 +480,17 @@ final class AgentCatalogFileStore {
                 heartbeat: decoded.heartbeat ?? AgentHeartbeatSettings(),
                 channelSessions: decoded.channelSessions ?? AgentChannelSessionSettings()
             )
-            try writeAgentConfigFile(decoded)
+            try writeAgentConfigFile(decoded, isSystem: summary.isSystem)
         }
         return decoded
     }
 
-    private func writeAgentConfigFile(_ configFile: AgentConfigFile) throws {
+    private func writeAgentConfigFile(_ configFile: AgentConfigFile, isSystem: Bool) throws {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         encoder.dateEncodingStrategy = .iso8601
         let configPayload = try encoder.encode(configFile) + Data("\n".utf8)
-        try configPayload.write(to: agentConfigURL(for: configFile.id), options: .atomic)
+        try configPayload.write(to: agentConfigURL(for: configFile.id, isSystem: isSystem), options: .atomic)
     }
 
     private func readTextFile(at url: URL, fallback: String) throws -> String {
@@ -481,8 +505,8 @@ final class AgentCatalogFileStore {
         return normalizedDocumentText(text)
     }
 
-    private func readHeartbeatFile(agentID: String) throws -> String {
-        let url = agentDirectoryURL(for: agentID).appendingPathComponent("HEARTBEAT.md")
+    private func readHeartbeatFile(agentID: String, isSystem: Bool) throws -> String {
+        let url = agentDirectoryURL(for: agentID, isSystem: isSystem).appendingPathComponent("HEARTBEAT.md")
         if !fileManager.fileExists(atPath: url.path) {
             try writeTextFile(contents: "", at: url)
             return ""
@@ -495,11 +519,11 @@ final class AgentCatalogFileStore {
         return normalizedHeartbeatText(text)
     }
 
-    private func readHeartbeatStatus(agentID: String) throws -> AgentHeartbeatStatus {
-        let url = heartbeatStatusURL(for: agentID)
+    private func readHeartbeatStatus(agentID: String, isSystem: Bool) throws -> AgentHeartbeatStatus {
+        let url = heartbeatStatusURL(for: agentID, isSystem: isSystem)
         if !fileManager.fileExists(atPath: url.path) {
             let fallback = AgentHeartbeatStatus()
-            try writeHeartbeatStatus(fallback, agentID: agentID)
+            try writeHeartbeatStatus(fallback, agentID: agentID, isSystem: isSystem)
             return fallback
         }
 
@@ -537,7 +561,7 @@ final class AgentCatalogFileStore {
         try data.write(to: url, options: .atomic)
     }
 
-    private func writeHeartbeatStatus(_ status: AgentHeartbeatStatus, agentID: String) throws {
+    private func writeHeartbeatStatus(_ status: AgentHeartbeatStatus, agentID: String, isSystem: Bool) throws {
         let payload = AgentHeartbeatStatusFile(
             lastRunAt: status.lastRunAt,
             lastSuccessAt: status.lastSuccessAt,
@@ -550,7 +574,7 @@ final class AgentCatalogFileStore {
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         encoder.dateEncodingStrategy = .iso8601
         let data = try encoder.encode(payload) + Data("\n".utf8)
-        try data.write(to: heartbeatStatusURL(for: agentID), options: .atomic)
+        try data.write(to: heartbeatStatusURL(for: agentID, isSystem: isSystem), options: .atomic)
     }
 
     private func normalizedDocumentText(_ raw: String) -> String {

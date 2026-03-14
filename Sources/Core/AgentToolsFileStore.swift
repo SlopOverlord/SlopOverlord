@@ -38,17 +38,31 @@ final class AgentToolsFileStore {
         )
     }
 
+    private func resolvedAgentDirectoryURL(agentID: String) -> URL? {
+        let regular = agentsRootURL.appendingPathComponent(agentID, isDirectory: true)
+        if fileManager.fileExists(atPath: regular.path) {
+            return regular
+        }
+        let system = agentsRootURL.appendingPathComponent(".system", isDirectory: true)
+            .appendingPathComponent(agentID, isDirectory: true)
+        if fileManager.fileExists(atPath: system.path) {
+            return system
+        }
+        return nil
+    }
+
     func getPolicy(agentID: String, knownToolIDs: Set<String>) throws -> AgentToolsPolicy {
         let normalizedAgentID = try normalizedAgentID(agentID)
-        let agentDirectory = agentsRootURL.appendingPathComponent(normalizedAgentID, isDirectory: true)
-        guard fileManager.fileExists(atPath: agentDirectory.path) else {
+        guard let agentDirectory = resolvedAgentDirectoryURL(agentID: normalizedAgentID) else {
             throw StoreError.agentNotFound
         }
 
-        let url = toolsConfigURL(agentID: normalizedAgentID)
+        let url = agentDirectory
+            .appendingPathComponent("tools", isDirectory: true)
+            .appendingPathComponent("tools.json")
         if !fileManager.fileExists(atPath: url.path) {
             let created = defaultPolicy()
-            try writePolicy(created, agentID: normalizedAgentID)
+            try writePolicy(created, agentDirectory: agentDirectory)
             return created
         }
 
@@ -67,8 +81,7 @@ final class AgentToolsFileStore {
         knownToolIDs: Set<String>
     ) throws -> AgentToolsPolicy {
         let normalizedAgentID = try normalizedAgentID(agentID)
-        let agentDirectory = agentsRootURL.appendingPathComponent(normalizedAgentID, isDirectory: true)
-        guard fileManager.fileExists(atPath: agentDirectory.path) else {
+        guard let agentDirectory = resolvedAgentDirectoryURL(agentID: normalizedAgentID) else {
             throw StoreError.agentNotFound
         }
 
@@ -82,24 +95,21 @@ final class AgentToolsFileStore {
         let validated = try validated(policy, knownToolIDs: knownToolIDs)
 
         do {
-            try writePolicy(validated, agentID: normalizedAgentID)
+            try writePolicy(validated, agentDirectory: agentDirectory)
             return validated
         } catch {
             throw StoreError.storageFailure
         }
     }
 
-    func toolsConfigURL(agentID: String) -> URL {
-        agentsRootURL
-            .appendingPathComponent(agentID, isDirectory: true)
+    func toolsConfigURL(agentID: String) -> URL? {
+        resolvedAgentDirectoryURL(agentID: agentID)?
             .appendingPathComponent("tools", isDirectory: true)
             .appendingPathComponent("tools.json")
     }
 
-    private func writePolicy(_ policy: AgentToolsPolicy, agentID: String) throws {
-        let toolsDirectory = agentsRootURL
-            .appendingPathComponent(agentID, isDirectory: true)
-            .appendingPathComponent("tools", isDirectory: true)
+    private func writePolicy(_ policy: AgentToolsPolicy, agentDirectory: URL) throws {
+        let toolsDirectory = agentDirectory.appendingPathComponent("tools", isDirectory: true)
         try fileManager.createDirectory(at: toolsDirectory, withIntermediateDirectories: true)
 
         let url = toolsDirectory.appendingPathComponent("tools.json")

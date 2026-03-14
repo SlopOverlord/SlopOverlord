@@ -352,6 +352,26 @@ function previewText(value, fallback = "No details") {
   return normalized;
 }
 
+const OAUTH_ERROR_PATTERNS = [
+  "oauth token is invalid",
+  "oauth token is expired",
+  "oauth token does not have required permissions",
+  "oauth authentication error"
+];
+
+function containsOAuthError(text) {
+  if (!text) {
+    return false;
+  }
+  const lower = String(text).toLowerCase();
+  return OAUTH_ERROR_PATTERNS.some((pattern) => lower.includes(pattern));
+}
+
+function navigateToOAuthSettings() {
+  window.history.pushState({}, "", "/config/providers");
+  window.dispatchEvent(new PopStateEvent("popstate"));
+}
+
 function formatStructuredData(value) {
   if (value == null) {
     return "";
@@ -801,6 +821,18 @@ function AgentChatEvents({
                             Open sub-session
                           </button>
                         ) : null}
+                        {containsOAuthError(record.detail) || containsOAuthError(record.summary) ? (
+                          <button
+                            type="button"
+                            className="agent-chat-oauth-reauth-button"
+                            onClick={navigateToOAuthSettings}
+                          >
+                            <span className="material-symbols-rounded" aria-hidden="true">
+                              login
+                            </span>
+                            Reconnect OpenAI
+                          </button>
+                        ) : null}
                       </div>
                     </article>
                   ) : null}
@@ -970,6 +1002,18 @@ function AgentChatEvents({
                         reply
                       </span>
                     </button>
+                    {containsOAuthError(messageText) ? (
+                      <button
+                        type="button"
+                        className="agent-chat-oauth-reauth-button"
+                        onClick={navigateToOAuthSettings}
+                      >
+                        <span className="material-symbols-rounded" aria-hidden="true">
+                          login
+                        </span>
+                        Reconnect OpenAI
+                      </button>
+                    ) : null}
                   </div>
                 ) : null}
               </article>

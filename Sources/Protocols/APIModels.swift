@@ -352,11 +352,13 @@ public struct AgentCreateRequest: Codable, Sendable {
     public var id: String
     public var displayName: String
     public var role: String
+    public var isSystem: Bool
 
-    public init(id: String, displayName: String, role: String) {
+    public init(id: String, displayName: String, role: String, isSystem: Bool = false) {
         self.id = id
         self.displayName = displayName
         self.role = role
+        self.isSystem = isSystem
     }
 }
 
@@ -365,12 +367,27 @@ public struct AgentSummary: Codable, Sendable, Equatable {
     public var displayName: String
     public var role: String
     public var createdAt: Date
+    public var isSystem: Bool
 
-    public init(id: String, displayName: String, role: String, createdAt: Date = Date()) {
+    enum CodingKeys: String, CodingKey {
+        case id, displayName, role, createdAt, isSystem
+    }
+
+    public init(id: String, displayName: String, role: String, createdAt: Date = Date(), isSystem: Bool = false) {
         self.id = id
         self.displayName = displayName
         self.role = role
         self.createdAt = createdAt
+        self.isSystem = isSystem
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(String.self, forKey: .id)
+        displayName = try container.decode(String.self, forKey: .displayName)
+        role = try container.decode(String.self, forKey: .role)
+        createdAt = try container.decode(Date.self, forKey: .createdAt)
+        isSystem = try container.decodeIfPresent(Bool.self, forKey: .isSystem) ?? false
     }
 }
 

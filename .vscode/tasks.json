@@ -33,6 +33,47 @@
       "dependsOrder": "sequence",
       "dependsOn": ["Docker: Build", "Docker: Up"],
       "group": "none"
+    },
+    {
+      "label": "Local: Build Core",
+      "type": "shell",
+      "command": "swift",
+      "args": ["build", "--product", "Core"],
+      "options": { "cwd": "${workspaceFolder}" },
+      "group": "build",
+      "presentation": { "reveal": "always", "panel": "shared" }
+    },
+    {
+      "label": "Local: Run Core",
+      "type": "shell",
+      "command": "swift",
+      "args": ["run", "Core"],
+      "options": { "cwd": "${workspaceFolder}" },
+      "group": "none",
+      "isBackground": true,
+      "presentation": { "reveal": "always", "panel": "dedicated" }
+    },
+    {
+      "label": "Local: Dashboard Dev",
+      "type": "shell",
+      "command": "npm",
+      "args": ["run", "dev"],
+      "options": { "cwd": "${workspaceFolder}/Dashboard" },
+      "group": "none",
+      "isBackground": true,
+      "presentation": { "reveal": "always", "panel": "dedicated" }
+    },
+    {
+      "label": "Local: Core + Dashboard",
+      "dependsOn": ["Local: Run Core", "Local: Dashboard Dev"],
+      "group": "none",
+      "presentation": { "reveal": "always" }
+    },
+    {
+      "label": "Local: Build and Run Core + Dashboard",
+      "dependsOrder": "sequence",
+      "dependsOn": ["Local: Build Core", "Local: Core + Dashboard"],
+      "group": "none"
     }
   ]
 }

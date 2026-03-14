@@ -102,6 +102,16 @@
             "target": "ChannelPluginTelegram",
             "configuration": "release",
             "preLaunchTask": "swift: Build Release ChannelPluginTelegram"
+        },
+        {
+            "type": "swift",
+            "request": "launch",
+            "args": [],
+            "cwd": "${workspaceFolder:Sloppy}",
+            "name": "Local: Debug Core + Dashboard",
+            "target": "Core",
+            "configuration": "debug",
+            "preLaunchTask": "Local: Dashboard Dev"
         }
     ]
 }

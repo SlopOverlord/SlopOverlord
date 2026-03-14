@@ -3543,6 +3543,32 @@ body.agent-chat-no-page-scroll .page {
   background: rgba(101, 124, 218, 0.18);
 }
 
+.agent-chat-oauth-reauth-button {
+  all: unset;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  justify-self: start;
+  padding: 5px 12px;
+  font-size: 0.8rem;
+  font-weight: 500;
+  border-radius: 4px;
+  border: 1px solid rgba(245, 180, 80, 0.5);
+  background: rgba(245, 180, 80, 0.12);
+  color: var(--warn, #f5b450);
+  transition: background 0.15s, border-color 0.15s;
+}
+
+.agent-chat-oauth-reauth-button:hover {
+  background: rgba(245, 180, 80, 0.22);
+  border-color: rgba(245, 180, 80, 0.75);
+}
+
+.agent-chat-oauth-reauth-button .material-symbols-rounded {
+  font-size: 16px;
+}
+
 .agent-chat-message-body p {
   margin: 0;
   white-space: pre-wrap;

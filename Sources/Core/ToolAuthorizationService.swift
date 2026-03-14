@@ -105,7 +105,9 @@ actor ToolAuthorizationService {
     }
 
     private func modificationDate(agentID: String) throws -> Date? {
-        let url = store.toolsConfigURL(agentID: agentID)
+        guard let url = store.toolsConfigURL(agentID: agentID) else {
+            return nil
+        }
         let values = try url.resourceValues(forKeys: [.contentModificationDateKey])
         return values.contentModificationDate
     }

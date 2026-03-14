@@ -445,7 +445,7 @@ export function createCoreApi(): CoreApi {
 
     fetchAgents: async () => {
       const response = await requestJson<AnyRecord[]>({
-        path: "/v1/agents"
+        path: "/v1/agents?system=false"
       });
       if (!response.ok || !Array.isArray(response.data)) {
         return null;

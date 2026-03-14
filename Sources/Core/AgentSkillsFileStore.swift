@@ -40,26 +40,40 @@ final class AgentSkillsFileStore {
 
     // MARK: - Directory Paths
 
-    func skillsDirectoryURL(agentID: String) -> URL {
-        agentsRootURL
+    private func resolvedAgentDirectoryURL(agentID: String) -> URL? {
+        let regular = agentsRootURL.appendingPathComponent(agentID, isDirectory: true)
+        if fileManager.fileExists(atPath: regular.path) {
+            return regular
+        }
+        let system = agentsRootURL.appendingPathComponent(".system", isDirectory: true)
             .appendingPathComponent(agentID, isDirectory: true)
+        if fileManager.fileExists(atPath: system.path) {
+            return system
+        }
+        return nil
+    }
+
+    func skillsDirectoryURL(agentID: String) -> URL? {
+        resolvedAgentDirectoryURL(agentID: agentID)?
             .appendingPathComponent("skills", isDirectory: true)
     }
 
-    func skillDirectoryURL(agentID: String, skillID: String) -> URL {
-        skillsDirectoryURL(agentID: agentID)
+    func skillDirectoryURL(agentID: String, skillID: String) -> URL? {
+        skillsDirectoryURL(agentID: agentID)?
             .appendingPathComponent(skillID, isDirectory: true)
     }
 
-    func manifestURL(agentID: String) -> URL {
-        skillsDirectoryURL(agentID: agentID)
+    func manifestURL(agentID: String) -> URL? {
+        skillsDirectoryURL(agentID: agentID)?
             .appendingPathComponent("skills.json")
     }
 
     // MARK: - Manifest Management
 
     func readManifest(agentID: String) throws -> AgentSkillsManifest {
-        let url = manifestURL(agentID: agentID)
+        guard let url = manifestURL(agentID: agentID) else {
+            return AgentSkillsManifest()
+        }
 
         guard fileManager.fileExists(atPath: url.path) else {
             return AgentSkillsManifest()
@@ -74,10 +88,14 @@ final class AgentSkillsFileStore {
     }
 
     func writeManifest(_ manifest: AgentSkillsManifest, agentID: String) throws {
-        let directory = skillsDirectoryURL(agentID: agentID)
+        guard let directory = skillsDirectoryURL(agentID: agentID) else {
+            throw StoreError.agentNotFound
+        }
         try fileManager.createDirectory(at: directory, withIntermediateDirectories: true)
 
-        let url = manifestURL(agentID: agentID)
+        guard let url = manifestURL(agentID: agentID) else {
+            throw StoreError.agentNotFound
+        }
         let data = try encoder.encode(manifest)
         try data.write(to: url, options: .atomic)
     }
@@ -87,9 +105,8 @@ final class AgentSkillsFileStore {
     /// List all installed skills for an agent
     func listSkills(agentID: String) throws -> [InstalledSkill] {
         let normalizedAgentID = try normalizedAgentID(agentID)
-        let agentDirectory = agentsRootURL.appendingPathComponent(normalizedAgentID, isDirectory: true)
 
-        guard fileManager.fileExists(atPath: agentDirectory.path) else {
+        guard resolvedAgentDirectoryURL(agentID: normalizedAgentID) != nil else {
             throw StoreError.agentNotFound
         }
 
@@ -121,14 +138,15 @@ final class AgentSkillsFileStore {
         description: String?
     ) throws -> InstalledSkill {
         let normalizedAgentID = try normalizedAgentID(agentID)
-        let agentDirectory = agentsRootURL.appendingPathComponent(normalizedAgentID, isDirectory: true)
 
-        guard fileManager.fileExists(atPath: agentDirectory.path) else {
+        guard resolvedAgentDirectoryURL(agentID: normalizedAgentID) != nil else {
             throw StoreError.agentNotFound
         }
 
         let skillID = "\(owner)/\(repo)"
-        let skillDirectory = skillDirectoryURL(agentID: normalizedAgentID, skillID: skillID)
+        guard let skillDirectory = skillDirectoryURL(agentID: normalizedAgentID, skillID: skillID) else {
+            throw StoreError.agentNotFound
+        }
 
         // Check if skill already exists
         var manifest = try readManifest(agentID: normalizedAgentID)
@@ -161,19 +179,16 @@ final class AgentSkillsFileStore {
         let normalizedAgentID = try normalizedAgentID(agentID)
         let normalizedSkillID = try normalizedSkillID(skillID)
 
-        // Check skill exists
         var manifest = try readManifest(agentID: normalizedAgentID)
         guard let index = manifest.installedSkills.firstIndex(where: { $0.id == normalizedSkillID }) else {
             throw StoreError.skillNotFound
         }
 
-        // Remove skill directory
-        let skillDirectory = skillDirectoryURL(agentID: normalizedAgentID, skillID: normalizedSkillID)
-        if fileManager.fileExists(atPath: skillDirectory.path) {
+        if let skillDirectory = skillDirectoryURL(agentID: normalizedAgentID, skillID: normalizedSkillID),
+           fileManager.fileExists(atPath: skillDirectory.path) {
             try fileManager.removeItem(at: skillDirectory)
         }
 
-        // Update manifest
         manifest.installedSkills.remove(at: index)
         try writeManifest(manifest, agentID: normalizedAgentID)
     }
@@ -183,18 +198,23 @@ final class AgentSkillsFileStore {
         let normalizedAgentID = try normalizedAgentID(agentID)
         let normalizedSkillID = try normalizedSkillID(skillID)
 
-        let skillDirectory = skillDirectoryURL(agentID: normalizedAgentID, skillID: normalizedSkillID)
+        guard let skillDirectory = skillDirectoryURL(agentID: normalizedAgentID, skillID: normalizedSkillID) else {
+            throw StoreError.agentNotFound
+        }
         return skillDirectory.path
     }
 
     /// Ensure skills directory exists for an agent (called during agent creation)
     func ensureSkillsDirectory(agentID: String) throws {
         let normalizedAgentID = try normalizedAgentID(agentID)
-        let directory = skillsDirectoryURL(agentID: normalizedAgentID)
+        guard let directory = skillsDirectoryURL(agentID: normalizedAgentID) else {
+            throw StoreError.agentNotFound
+        }
         try fileManager.createDirectory(at: directory, withIntermediateDirectories: true)
 
-        // Create empty manifest if it doesn't exist
-        let manifestPath = manifestURL(agentID: normalizedAgentID)
+        guard let manifestPath = manifestURL(agentID: normalizedAgentID) else {
+            throw StoreError.agentNotFound
+        }
         if !fileManager.fileExists(atPath: manifestPath.path) {
             let manifest = AgentSkillsManifest()
             try writeManifest(manifest, agentID: normalizedAgentID)

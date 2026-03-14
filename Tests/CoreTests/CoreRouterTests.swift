@@ -1951,6 +1951,72 @@ func createAgentDuplicateIDReturnsConflict() async throws {
 }
 
 @Test
+func systemAgentStoredInSystemSubdirectory() async throws {
+    let workspaceName = "workspace-system-agent-\(UUID().uuidString)"
+    let sqlitePath = FileManager.default.temporaryDirectory
+        .appendingPathComponent("core-system-agent-\(UUID().uuidString).sqlite")
+        .path
+
+    var config = CoreConfig.default
+    config.workspace = .init(name: workspaceName, basePath: FileManager.default.temporaryDirectory.path)
+    config.sqlitePath = sqlitePath
+
+    let service = CoreService(config: config)
+    let router = CoreRouter(service: service)
+
+    let decoder = JSONDecoder()
+    decoder.dateDecodingStrategy = .iso8601
+
+    let userRequest = AgentCreateRequest(id: "user-agent", displayName: "User Agent", role: "User facing")
+    let userBody = try JSONEncoder().encode(userRequest)
+    let userResponse = await router.handle(method: "POST", path: "/v1/agents", body: userBody)
+    #expect(userResponse.status == 201)
+
+    let systemRequest = AgentCreateRequest(id: "sys-worker", displayName: "System Worker", role: "Background task", isSystem: true)
+    let systemBody = try JSONEncoder().encode(systemRequest)
+    let systemResponse = await router.handle(method: "POST", path: "/v1/agents", body: systemBody)
+    #expect(systemResponse.status == 201)
+    let createdSystem = try decoder.decode(AgentSummary.self, from: systemResponse.body)
+    #expect(createdSystem.isSystem == true)
+
+    let agentsRoot = config.resolvedWorkspaceRootURL().appendingPathComponent("agents", isDirectory: true)
+    let systemDirectory = agentsRoot.appendingPathComponent(".system/sys-worker", isDirectory: true)
+    #expect(FileManager.default.fileExists(atPath: systemDirectory.path))
+
+    let userDirectory = agentsRoot.appendingPathComponent("user-agent", isDirectory: true)
+    #expect(FileManager.default.fileExists(atPath: userDirectory.path))
+
+    let listAllResponse = await router.handle(method: "GET", path: "/v1/agents", body: nil)
+    #expect(listAllResponse.status == 200)
+    let allAgents = try decoder.decode([AgentSummary].self, from: listAllResponse.body)
+    #expect(allAgents.contains(where: { $0.id == "user-agent" && !$0.isSystem }))
+    #expect(allAgents.contains(where: { $0.id == "sys-worker" && $0.isSystem }))
+
+    let listUserResponse = await router.handle(method: "GET", path: "/v1/agents?system=false", body: nil)
+    #expect(listUserResponse.status == 200)
+    let userAgents = try decoder.decode([AgentSummary].self, from: listUserResponse.body)
+    #expect(userAgents.contains(where: { $0.id == "user-agent" }))
+    #expect(!userAgents.contains(where: { $0.id == "sys-worker" }))
+}
+
+@Test
+func agentSummaryBackwardCompatibleDecodingWithoutIsSystem() throws {
+    let json = """
+    {
+        "id": "legacy-agent",
+        "displayName": "Legacy Agent",
+        "role": "Old role",
+        "createdAt": "2024-01-01T00:00:00Z"
+    }
+    """
+    let decoder = JSONDecoder()
+    decoder.dateDecodingStrategy = .iso8601
+    let summary = try decoder.decode(AgentSummary.self, from: Data(json.utf8))
+    #expect(summary.id == "legacy-agent")
+    #expect(summary.isSystem == false)
+}
+
+@Test
 func actorBoardEndpointsSyncSystemActorsAndPersistLayout() async throws {
     let workspaceName = "workspace-actors-\(UUID().uuidString)"
     let sqlitePath = FileManager.default.temporaryDirectory

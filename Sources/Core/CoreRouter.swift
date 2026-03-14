@@ -672,9 +672,10 @@ public actor CoreRouter {
             }
         }
 
-        add(.get, "/v1/agents", metadata: RouteMetadata(summary: "List agents", description: "Returns a list of all available agents", tags: ["Agents"])) { _ in
+        add(.get, "/v1/agents", metadata: RouteMetadata(summary: "List agents", description: "Returns a list of all available agents", tags: ["Agents"])) { request in
+            let includeSystem = request.queryParam("system").map { $0 != "false" } ?? true
             do {
-                let agents = try await service.listAgents()
+                let agents = try await service.listAgents(includeSystem: includeSystem)
                 return Self.encodable(status: HTTPStatus.ok, payload: agents)
             } catch {
                 return Self.json(status: HTTPStatus.internalServerError, payload: ["error": ErrorCode.agentsListFailed])

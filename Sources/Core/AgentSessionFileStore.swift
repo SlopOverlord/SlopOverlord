@@ -107,8 +107,8 @@ final class AgentSessionFileStore {
             throw StoreError.invalidPayload
         }
 
-        let fileURL = sessionFileURL(agentID: normalizedAgentID, sessionID: normalizedSessionID)
-        guard fileManager.fileExists(atPath: fileURL.path) else {
+        guard let fileURL = sessionFileURL(agentID: normalizedAgentID, sessionID: normalizedSessionID),
+              fileManager.fileExists(atPath: fileURL.path) else {
             throw StoreError.sessionNotFound
         }
 
@@ -120,15 +120,15 @@ final class AgentSessionFileStore {
         let normalizedAgentID = try normalizedAgentID(agentID)
         let normalizedSessionID = try normalizedSessionID(sessionID)
 
-        let fileURL = sessionFileURL(agentID: normalizedAgentID, sessionID: normalizedSessionID)
-        guard fileManager.fileExists(atPath: fileURL.path) else {
+        guard let fileURL = sessionFileURL(agentID: normalizedAgentID, sessionID: normalizedSessionID),
+              fileManager.fileExists(atPath: fileURL.path) else {
             throw StoreError.sessionNotFound
         }
 
         try fileManager.removeItem(at: fileURL)
 
-        let assetsDirectory = assetsDirectoryURL(agentID: normalizedAgentID, sessionID: normalizedSessionID)
-        if fileManager.fileExists(atPath: assetsDirectory.path) {
+        if let assetsDirectory = assetsDirectoryURL(agentID: normalizedAgentID, sessionID: normalizedSessionID),
+           fileManager.fileExists(atPath: assetsDirectory.path) {
             try fileManager.removeItem(at: assetsDirectory)
         }
     }
@@ -155,7 +155,9 @@ final class AgentSessionFileStore {
                     throw StoreError.invalidPayload
                 }
 
-                let assetsDirectory = assetsDirectoryURL(agentID: normalizedAgentID, sessionID: normalizedSessionID)
+                guard let assetsDirectory = assetsDirectoryURL(agentID: normalizedAgentID, sessionID: normalizedSessionID) else {
+                    throw StoreError.agentNotFound
+                }
                 try fileManager.createDirectory(at: assetsDirectory, withIntermediateDirectories: true)
 
                 let fileURL = assetsDirectory.appendingPathComponent(fileName)
@@ -196,8 +198,8 @@ final class AgentSessionFileStore {
     }
 
     private func readEvents(agentID: String, sessionID: String) throws -> [AgentSessionEvent] {
-        let fileURL = sessionFileURL(agentID: agentID, sessionID: sessionID)
-        guard fileManager.fileExists(atPath: fileURL.path) else {
+        guard let fileURL = sessionFileURL(agentID: agentID, sessionID: sessionID),
+              fileManager.fileExists(atPath: fileURL.path) else {
             throw StoreError.sessionNotFound
         }
 
@@ -281,9 +283,21 @@ final class AgentSessionFileStore {
         return nil
     }
 
+    private func resolvedAgentDirectoryURL(agentID: String) -> URL? {
+        let regular = agentsRootURL.appendingPathComponent(agentID, isDirectory: true)
+        if fileManager.fileExists(atPath: regular.path) {
+            return regular
+        }
+        let system = agentsRootURL.appendingPathComponent(".system", isDirectory: true)
+            .appendingPathComponent(agentID, isDirectory: true)
+        if fileManager.fileExists(atPath: system.path) {
+            return system
+        }
+        return nil
+    }
+
     private func sessionsDirectoryURL(agentID: String, createIfMissing: Bool) throws -> URL {
-        let agentDirectory = agentsRootURL.appendingPathComponent(agentID, isDirectory: true)
-        guard fileManager.fileExists(atPath: agentDirectory.path) else {
+        guard let agentDirectory = resolvedAgentDirectoryURL(agentID: agentID) else {
             throw StoreError.agentNotFound
         }
 
@@ -294,16 +308,14 @@ final class AgentSessionFileStore {
         return sessionsDirectory
     }
 
-    private func sessionFileURL(agentID: String, sessionID: String) -> URL {
-        agentsRootURL
-            .appendingPathComponent(agentID, isDirectory: true)
+    private func sessionFileURL(agentID: String, sessionID: String) -> URL? {
+        resolvedAgentDirectoryURL(agentID: agentID)?
             .appendingPathComponent("sessions", isDirectory: true)
             .appendingPathComponent("\(sessionID).jsonl")
     }
 
-    private func assetsDirectoryURL(agentID: String, sessionID: String) -> URL {
-        agentsRootURL
-            .appendingPathComponent(agentID, isDirectory: true)
+    private func assetsDirectoryURL(agentID: String, sessionID: String) -> URL? {
+        resolvedAgentDirectoryURL(agentID: agentID)?
             .appendingPathComponent("sessions", isDirectory: true)
             .appendingPathComponent("\(sessionID).assets", isDirectory: true)
     }

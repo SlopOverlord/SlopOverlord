@@ -1032,9 +1032,13 @@ public actor CoreService {
     }
 
     /// Lists all persisted agents from workspace `/agents`.
-    public func listAgents() throws -> [AgentSummary] {
+    public func listAgents(includeSystem: Bool = true) throws -> [AgentSummary] {
         do {
-            return try agentCatalogStore.listAgents()
+            let agents = try agentCatalogStore.listAgents()
+            if includeSystem {
+                return agents
+            }
+            return agents.filter { !$0.isSystem }
         } catch {
             throw mapAgentStorageError(error)
         }
@@ -1462,7 +1466,7 @@ public actor CoreService {
 
         do {
             let skills = try agentSkillsStore.listSkills(agentID: normalizedAgentID)
-            let skillsPath = agentSkillsStore.skillsDirectoryURL(agentID: normalizedAgentID).path
+            let skillsPath = agentSkillsStore.skillsDirectoryURL(agentID: normalizedAgentID)?.path ?? ""
             return AgentSkillsResponse(agentId: normalizedAgentID, skills: skills, skillsPath: skillsPath)
         } catch let error as AgentSkillsFileStore.StoreError {
             throw mapAgentSkillsError(error)
@@ -1494,7 +1498,9 @@ public actor CoreService {
             }
 
             // Download skill from GitHub
-            let skillDestination = agentSkillsStore.skillDirectoryURL(agentID: normalizedAgentID, skillID: skillID)
+            guard let skillDestination = agentSkillsStore.skillDirectoryURL(agentID: normalizedAgentID, skillID: skillID) else {
+                throw AgentSkillsError.storageFailure
+            }
             let downloadedSkill = try await skillsGitHubClient.downloadSkill(
                 owner: owner,
                 repo: repo,

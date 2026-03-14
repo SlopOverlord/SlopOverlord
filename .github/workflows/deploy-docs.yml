@@ -41,28 +41,19 @@ jobs:
         run: npm run build
         working-directory: docs
 
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
         with:
-          name: github-pages
           path: docs/.vitepress/dist
 
   deploy:
     needs: build
     runs-on: ubuntu-latest
     name: Deploy
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-      
-      - name: Download artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: github-pages
-          path: docs/.vitepress/dist
-
       - name: Deploy to GitHub Pages
-        uses: peaceiris/actions-gh-pages@v4
-        with:
-          github_token: ${{ secrets.GITHUB_TOKEN }}
-          publish_dir: docs/.vitepress/dist
+        id: deployment
+        uses: actions/deploy-pages@v4
