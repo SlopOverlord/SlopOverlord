@@ -6,6 +6,7 @@ import { SidebarView } from "./components/SidebarView";
 import { NotificationProvider } from "./features/notifications/NotificationContext";
 import { NotificationBell } from "./features/notifications/NotificationBell";
 import { NotificationToastContainer } from "./features/notifications/NotificationToast";
+import { useNotificationSocket } from "./features/notifications/useNotificationSocket";
 import { OnboardingView } from "./features/onboarding/OnboardingView";
 import { useRuntimeOverview } from "./features/runtime-overview/model/useRuntimeOverview";
 import { AgentsView } from "./views/AgentsView";
@@ -33,6 +34,7 @@ function DashboardShell({ dependencies }: { dependencies: ReturnType<typeof crea
   const { route, setSection, setConfigSection, setProjectRoute, setAgentRoute, setSessionRoute } = useDashboardRoute();
   const [sidebarCompact, setSidebarCompact] = useState(true);
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
+  useNotificationSocket();
 
   useEffect(() => {
     document.body.classList.toggle("mobile-menu-open", mobileSidebarOpen);
@@ -89,6 +91,7 @@ function DashboardShell({ dependencies }: { dependencies: ReturnType<typeof crea
       onNavigateToChannelSession={(sessionId: string) => {
         setSessionRoute(sessionId);
       }}
+      onNavigateToBots={() => setSection("agents")}
     />
   );
 

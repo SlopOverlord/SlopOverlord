@@ -1706,6 +1706,33 @@ public actor CoreRouter {
             )
         )
 
+        routes.append(
+            .init(
+                path: "/v1/notifications/ws",
+                validator: { _ in true },
+                callback: { _, connection in
+                    let stream = await service.notificationService.subscribe()
+                    let encoder = JSONEncoder()
+                    encoder.dateEncodingStrategy = .iso8601
+
+                    for await notification in stream {
+                        guard let data = try? encoder.encode(notification),
+                              let text = String(data: data, encoding: .utf8)
+                        else {
+                            continue
+                        }
+
+                        let sent = await connection.sendText(text)
+                        if !sent {
+                            break
+                        }
+                    }
+
+                    await connection.close()
+                }
+            )
+        )
+
         return routes
     }
 

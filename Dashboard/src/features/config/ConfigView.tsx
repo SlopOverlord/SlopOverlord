@@ -26,18 +26,18 @@ const SETTINGS_ITEMS = [
   { id: "providers", title: "Providers", icon: "hub" },
   { id: "search-tools", title: "Search Tools", icon: "travel_explore" },
   { id: "channels", title: "Channels", icon: "forum" },
-  { id: "approvals", title: "Approvals", icon: "fact_check" },
+  // { id: "approvals", title: "Approvals", icon: "fact_check" },
   { id: "plugins", title: "Plugins", icon: "extension" },
-  { id: "browser", title: "Browser", icon: "open_in_browser" },
-  { id: "ui", title: "UI", icon: "palette" },
+  // { id: "browser", title: "Browser", icon: "open_in_browser" },
+  // { id: "ui", title: "UI", icon: "palette" },
   { id: "nodehost", title: "NodeHost", icon: "dns" },
-  { id: "bindings", title: "Bindings", icon: "cable" },
-  { id: "broadcast", title: "Broadcast", icon: "cell_tower" },
-  { id: "audio", title: "Audio", icon: "volume_up" },
-  { id: "media", title: "Media", icon: "perm_media" },
-  { id: "session", title: "Session", icon: "manage_accounts" },
+  // { id: "bindings", title: "Bindings", icon: "cable" },
+  // { id: "broadcast", title: "Broadcast", icon: "cell_tower" },
+  // { id: "audio", title: "Audio", icon: "volume_up" },
+  // { id: "media", title: "Media", icon: "perm_media" },
+  // { id: "session", title: "Session", icon: "manage_accounts" },
   { id: "git-sync", title: "Git Sync", icon: "sync" },
-  { id: "logging", title: "Logging", icon: "description" }
+  // { id: "logging", title: "Logging", icon: "description" }
 ];
 
 const GIT_SYNC_FREQUENCIES = new Set(["manual", "daily", "weekdays"]);

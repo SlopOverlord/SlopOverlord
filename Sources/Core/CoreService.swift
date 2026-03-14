@@ -198,6 +198,7 @@ public actor CoreService {
     private var recoveryManager: RecoveryManager
     private var liveSessionStreamContinuations: [String: [UUID: AsyncStream<AgentSessionStreamUpdate>.Continuation]] = [:]
     private var liveSessionStreamCursor: [String: Int] = [:]
+    public let notificationService: NotificationService
 
     /// Creates core orchestration service with runtime and persistence backend.
     public init(
@@ -314,6 +315,7 @@ public actor CoreService {
             self.memoryOutboxIndexer = nil
         }
         self.recoveryManager = RecoveryManager(store: self.store, runtime: self.runtime, logger: self.logger)
+        self.notificationService = NotificationService()
         self.currentConfig = config
         self.toolExecution.projectService = self
         Task { [weak self] in
@@ -5465,6 +5467,7 @@ public actor CoreService {
                     await store.persist(event: enrichedEvent)
                     await handleVisorEvent(enrichedEvent)
                     await extractAndPersistTokenUsage(from: enrichedEvent)
+                    await emitNotificationIfNeeded(from: enrichedEvent)
                 }
             }
         }
@@ -5713,6 +5716,41 @@ extension CoreService: InboundMessageReceiver {
             await channelDelivery.deliver(channelId: channelId, userId: "assistant", content: reply)
         }
         return true
+    }
+
+    private func emitNotificationIfNeeded(from event: EventEnvelope) async {
+        switch event.messageType {
+        case .workerFailed:
+            let reason = extractPayloadString(event.payload, key: "reason") ?? "Unknown error"
+            let workerId = event.workerId ?? "unknown"
+            await notificationService.pushAgentError(
+                title: "Worker failed",
+                message: reason,
+                taskId: event.taskId
+            )
+            logger.warning("Notification emitted: worker \(workerId) failed — \(reason)")
+
+        case .branchConclusion:
+            let outcome = extractPayloadString(event.payload, key: "outcome")
+            if outcome == "needs_confirmation" || outcome == "escalated" {
+                let summary = extractPayloadString(event.payload, key: "summary") ?? "Action requires your approval"
+                await notificationService.pushConfirmation(
+                    title: "Approval required",
+                    message: summary,
+                    taskId: event.taskId
+                )
+            }
+
+        default:
+            break
+        }
+    }
+
+    private func extractPayloadString(_ payload: JSONValue, key: String) -> String? {
+        if case .object(let dict) = payload, case .string(let value) = dict[key] {
+            return value
+        }
+        return nil
     }
 }
 

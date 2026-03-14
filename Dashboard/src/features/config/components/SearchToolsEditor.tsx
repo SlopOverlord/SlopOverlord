@@ -66,9 +66,9 @@ export function SearchToolsEditor({ draftConfig, searchProviderStatus, mutateDra
           return (
             <section
               key={provider.id}
-              className={`provider-card provider-list-item ${activeProvider === provider.id ? "configured" : ""}`}
+              className={`provider-card ${activeProvider === provider.id ? "configured" : ""}`}
             >
-              <div className="provider-list-main" style={{ width: "100%" }}>
+                <div className="provider-list-main">
                 <div className="provider-card-head">
                   <h4>{provider.title}</h4>
                   <span className={`provider-state ${badge.tone}`}>{badge.text}</span>

@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { fetchActorsBoard, fetchAgents, fetchProjects, fetchAgentSessions, fetchChannelSessions } from "../api";
+import { fetchActorsBoard, fetchAgents, fetchProjects, fetchAgentSessions, fetchChannelSessions, fetchChannelSession } from "../api";
 import { Breadcrumbs } from "../components/Breadcrumbs/Breadcrumbs";
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -39,6 +39,51 @@ function buildActivityData(sessions, agentId, days = 14) {
   });
 }
 
+const CHANNEL_MESSAGES_LIMIT = 9;
+
+const USER_COLORS = [
+  "#c084fc", "#67e8f9", "#f472b6", "#fbbf24", "#6ee7b7",
+  "#fb923c", "#a78bfa", "#38bdf8", "#f87171", "#a3e635"
+];
+
+function userColor(name) {
+  let hash = 0;
+  for (let i = 0; i < name.length; i++) {
+    hash = name.charCodeAt(i) + ((hash << 5) - hash);
+  }
+  return USER_COLORS[Math.abs(hash) % USER_COLORS.length];
+}
+
+function formatCompactTime(dateValue) {
+  const date = new Date(dateValue);
+  if (Number.isNaN(date.getTime())) return "";
+  let hours = date.getHours();
+  const minutes = String(date.getMinutes()).padStart(2, "0");
+  const suffix = hours >= 12 ? "p" : "a";
+  hours = hours % 12 || 12;
+  return `${hours}:${minutes}${suffix}`;
+}
+
+function extractSessionMessages(sessionDetail) {
+  const events = Array.isArray(sessionDetail?.events) ? sessionDetail.events : [];
+  return events
+    .filter((e) => {
+      const type = String(e?.type || "");
+      return type === "user_message" || type === "assistant_message";
+    })
+    .map((e) => {
+      const type = String(e?.type || "");
+      const isBot = type === "assistant_message";
+      return {
+        id: String(e?.id || ""),
+        userId: isBot ? "bot" : String(e?.userId || "user"),
+        content: String(e?.content || "").replace(/\s+/g, " ").trim(),
+        createdAt: e?.createdAt || "",
+        isBot
+      };
+    });
+}
+
 function agentInitials(name) {
   const parts = String(name || "?")
     .trim()
@@ -55,6 +100,7 @@ function ActiveChannelsSection({
   agents,
   sessions,
   channelSessions,
+  channelSessionDetails,
   projects,
   actorBoard,
   onNavigateToProject,
@@ -121,9 +167,13 @@ function ActiveChannelsSection({
       const channelAgents = agentsByChannel.get(channelId) || [];
       const fallbackAgentId = channelAgents.length === 1 ? String(channelAgents[0]?.id || "").trim() : "";
       const agentId = String(agentSession?.agentId || fallbackAgentId).trim();
+      const sessionId = String(session?.sessionId || "");
+      const detail = channelSessionDetails?.[sessionId] || null;
+      const messages = extractSessionMessages(detail).slice(-CHANNEL_MESSAGES_LIMIT);
+
       return {
-        key: String(session?.sessionId || channelId),
-        sessionId: String(session?.sessionId || ""),
+        key: sessionId || channelId,
+        sessionId,
         agentId,
         channelId,
         channelTitle: projectMeta?.channelTitle || channelId || "Channel",
@@ -134,10 +184,11 @@ function ActiveChannelsSection({
         lastMessagePreview: String(session?.lastMessagePreview || ""),
         agents: channelAgents,
         primaryAgentName: agentNameById.get(agentId) || "",
-        canOpenSession: Boolean(agentId && session?.sessionId)
+        canOpenSession: Boolean(agentId && session?.sessionId),
+        messages
       };
     });
-  }, [actorBoard, agents, channelSessions, projects, sessions]);
+  }, [actorBoard, agents, channelSessions, channelSessionDetails, projects, sessions]);
 
   return (
     <section className="overview-section">
@@ -175,40 +226,32 @@ function ActiveChannelsSection({
               <div className="channel-card-head">
                 <span className="channel-card-dot channel-dot-active" />
                 <span className="channel-card-title">{ch.channelTitle}</span>
-                <span className="channel-card-project">{ch.projectName}</span>
+                <span className="channel-card-members">
+                  {ch.agents.length > 0 ? `${ch.agents.length} active member${ch.agents.length !== 1 ? "s" : ""}` : ""}
+                </span>
               </div>
-              {ch.primaryAgentName ? (
-                <div className="channel-card-meta">
-                  <span className="material-symbols-rounded">smart_toy</span>
-                  <span>{ch.primaryAgentName}</span>
+              <div className="channel-card-sub">
+                {ch.updatedAt ? formatRelativeTime(ch.updatedAt) : "just now"}
+              </div>
+
+              {ch.messages.length > 0 ? (
+                <div className="channel-card-messages">
+                  {ch.messages.map((msg, i) => (
+                    <div key={msg.id || i} className="channel-msg-row">
+                      <span className="channel-msg-time">{formatCompactTime(msg.createdAt)}</span>
+                      <span
+                        className={`channel-msg-user ${msg.isBot ? "channel-msg-bot" : ""}`}
+                        style={msg.isBot ? undefined : { color: userColor(msg.userId) }}
+                      >
+                        {msg.userId}
+                      </span>
+                      <span className="channel-msg-text">{msg.content || "..."}</span>
+                    </div>
+                  ))}
                 </div>
-              ) : null}
-              <div className="channel-card-agents">
-                {ch.agents.slice(0, 5).map((agent, i) => {
-                  const name = String(agent?.name || agent?.id || `Agent ${i + 1}`);
-                  return (
-                    <span key={agent.id || i} className="channel-agent-avatar" title={name}>
-                      {agentInitials(name)}
-                    </span>
-                  );
-                })}
-                {ch.agents.length > 5 && (
-                  <span className="channel-agent-avatar channel-agent-more">
-                    +{ch.agents.length - 5}
-                  </span>
-                )}
-              </div>
-              {ch.lastMessagePreview ? (
+              ) : ch.lastMessagePreview ? (
                 <div className="channel-card-preview">{ch.lastMessagePreview}</div>
               ) : null}
-              <div className="channel-card-footer">
-                <span className="channel-worker-count">
-                  {ch.messageCount} message{ch.messageCount !== 1 ? "s" : ""}
-                </span>
-                <span className="channel-session-time">
-                  {ch.updatedAt ? `Active ${formatRelativeTime(ch.updatedAt)}` : "Active now"}
-                </span>
-              </div>
             </button>
           ))}
         </div>
@@ -296,7 +339,9 @@ function CountersSection({ agents, workers }) {
 
 // ─── Section 3 — Bot Activity ─────────────────────────────────────────────────
 
-function BotActivitySection({ agents, sessions }) {
+const BOT_ACTIVITY_LIMIT = 12;
+
+function BotActivitySection({ agents, sessions, onNavigateToBots }) {
   const agentActivity = useMemo(() => {
     return agents.map((agent) => ({
       ...agent,
@@ -332,7 +377,7 @@ function BotActivitySection({ agents, sessions }) {
         <span className="overview-section-count">{agents.length} bots</span>
       </div>
       <div className="activity-charts-grid">
-        {agentActivity.map((agent) => {
+        {agentActivity.slice(0, BOT_ACTIVITY_LIMIT).map((agent) => {
           const max = Math.max(...agent.activity.map((d) => d.value), 1);
           const first = agent.activity[0]?.dateStr;
           const mid = agent.activity[Math.floor(agent.activity.length / 2)]?.dateStr;
@@ -370,6 +415,16 @@ function BotActivitySection({ agents, sessions }) {
           );
         })}
       </div>
+      {agents.length > BOT_ACTIVITY_LIMIT && (
+        <button
+          type="button"
+          className="overview-show-all-btn"
+          onClick={onNavigateToBots}
+        >
+          All {agents.length} bots
+          <span className="material-symbols-rounded">arrow_forward</span>
+        </button>
+      )}
     </section>
   );
 }
@@ -438,11 +493,12 @@ function ClosedTasksSection({ projects }) {
 
 // ─── Main View ────────────────────────────────────────────────────────────────
 
-export function RuntimeOverviewView({ workers, events, onNavigateToProject, onNavigateToChannelSession }) {
+export function RuntimeOverviewView({ workers, events, onNavigateToProject, onNavigateToChannelSession, onNavigateToBots }) {
   const [agents, setAgents] = useState([]);
   const [projects, setProjects] = useState([]);
   const [sessions, setSessions] = useState([]);
   const [channelSessions, setChannelSessions] = useState([]);
+  const [channelSessionDetails, setChannelSessionDetails] = useState({});
   const [actorBoard, setActorBoard] = useState({ nodes: [], links: [], teams: [] });
   const [isLoading, setIsLoading] = useState(true);
 
@@ -461,7 +517,27 @@ export function RuntimeOverviewView({ workers, events, onNavigateToProject, onNa
       setAgents(loadedAgents);
       setProjects(Array.isArray(projectsRes) ? projectsRes : []);
       setActorBoard(boardRes && Array.isArray(boardRes.nodes) ? boardRes : { nodes: [], links: [], teams: [] });
-      setChannelSessions(Array.isArray(channelSessionsRes) ? channelSessionsRes : []);
+      const loadedChannelSessions = Array.isArray(channelSessionsRes) ? channelSessionsRes : [];
+      setChannelSessions(loadedChannelSessions);
+
+      if (loadedChannelSessions.length > 0) {
+        const detailResults = await Promise.all(
+          loadedChannelSessions.map((cs) => {
+            const sid = String(cs?.sessionId || "").trim();
+            return sid ? fetchChannelSession(sid).catch(() => null) : Promise.resolve(null);
+          })
+        );
+        if (!cancelled) {
+          const details = {};
+          for (let i = 0; i < loadedChannelSessions.length; i++) {
+            const sid = String(loadedChannelSessions[i]?.sessionId || "").trim();
+            if (sid && detailResults[i]) {
+              details[sid] = detailResults[i];
+            }
+          }
+          setChannelSessionDetails(details);
+        }
+      }
 
       // Load sessions for all agents concurrently
       if (loadedAgents.length > 0) {
@@ -495,6 +571,7 @@ export function RuntimeOverviewView({ workers, events, onNavigateToProject, onNa
         agents={agents}
         sessions={sessions}
         channelSessions={channelSessions}
+        channelSessionDetails={channelSessionDetails}
         projects={projects}
         actorBoard={actorBoard}
         onNavigateToProject={onNavigateToProject}
@@ -503,7 +580,7 @@ export function RuntimeOverviewView({ workers, events, onNavigateToProject, onNa
 
       <CountersSection agents={agents} workers={normalizedWorkers} />
 
-      <BotActivitySection agents={agents} sessions={sessions} />
+      <BotActivitySection agents={agents} sessions={sessions} onNavigateToBots={onNavigateToBots} />
 
       <ClosedTasksSection projects={projects} />
     </main>

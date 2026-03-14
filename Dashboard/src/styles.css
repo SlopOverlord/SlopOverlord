@@ -1368,6 +1368,9 @@ body.mobile-menu-open {
   gap: 12px;
   overflow: hidden;
   background: var(--bg);
+  position: sticky;
+  top: 0;
+  height: 100vh;
   transition: width 240ms cubic-bezier(0.22, 0.61, 0.36, 1), padding 240ms cubic-bezier(0.22, 0.61, 0.36, 1);
 }
 
@@ -1457,6 +1460,9 @@ body.mobile-menu-open {
   display: grid;
   gap: 4px;
   align-content: start;
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
 }
 
 .sidebar-item {
@@ -7883,7 +7889,7 @@ pre {
 /* ── Active Channels ── */
 .active-channels-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
   gap: 10px;
 }
 
@@ -7966,6 +7972,65 @@ pre {
 .channel-card-meta .material-symbols-rounded {
   font-size: 14px;
   color: var(--accent);
+}
+
+.channel-card-members {
+  font-size: 0.68rem;
+  color: var(--muted);
+  margin-left: auto;
+  white-space: nowrap;
+}
+
+.channel-card-sub {
+  font-size: 0.68rem;
+  color: var(--muted);
+  margin-top: -4px;
+}
+
+.channel-card-messages {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  border-top: 1px solid var(--line);
+  padding-top: 8px;
+}
+
+.channel-msg-row {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  font-size: 0.74rem;
+  line-height: 1.45;
+  min-width: 0;
+}
+
+.channel-msg-time {
+  flex-shrink: 0;
+  color: var(--muted);
+  font-size: 0.66rem;
+  min-width: 38px;
+  text-align: right;
+}
+
+.channel-msg-user {
+  flex-shrink: 0;
+  font-weight: 600;
+  max-width: 90px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.channel-msg-bot {
+  color: var(--accent) !important;
+}
+
+.channel-msg-text {
+  color: var(--text-secondary, #c9d2e4);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
 }
 
 .channel-card-preview {
@@ -8354,6 +8419,29 @@ pre {
   font-size: 0.72rem;
   color: var(--muted);
   border-top: 1px solid var(--line);
+}
+
+.overview-show-all-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 12px;
+  padding: 8px 16px;
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  color: var(--text);
+  font-size: 0.85rem;
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s;
+}
+
+.overview-show-all-btn:hover {
+  border-color: var(--accent);
+  background: var(--surface-3);
+}
+
+.overview-show-all-btn .material-symbols-rounded {
+  font-size: 1rem;
 }
 
 @media (max-width: 1000px) {
