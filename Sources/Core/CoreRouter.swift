@@ -1652,6 +1652,56 @@ public actor CoreRouter {
             }
         }
 
+        // MARK: - Channel Approvals
+
+        add(.get, "/v1/channel-approvals/pending", metadata: RouteMetadata(summary: "List pending approvals", description: "Returns all pending channel access approval requests", tags: ["Channels"])) { request in
+            let platform = request.queryParam("platform")
+            let pending: [PendingApprovalEntry]
+            if let platform {
+                pending = await service.listPendingApprovals(platform: platform)
+            } else {
+                pending = await service.listPendingApprovals()
+            }
+            return Self.encodable(status: HTTPStatus.ok, payload: pending)
+        }
+
+        add(.get, "/v1/channel-approvals/users", metadata: RouteMetadata(summary: "List access users", description: "Returns approved and blocked channel access users", tags: ["Channels"])) { request in
+            let platform = request.queryParam("platform")
+            let users = await service.listAccessUsers(platform: platform)
+            return Self.encodable(status: HTTPStatus.ok, payload: users)
+        }
+
+        add(.post, "/v1/channel-approvals/:approvalId/approve", metadata: RouteMetadata(summary: "Approve pending request", description: "Approves a pending channel access request with verification code", tags: ["Channels"])) { request in
+            let approvalId = request.pathParam("approvalId") ?? ""
+            guard let body = request.body,
+                  let payload = Self.decode(body, as: ChannelApprovalCodeRequest.self)
+            else {
+                return Self.json(status: HTTPStatus.badRequest, payload: ["error": ErrorCode.invalidBody])
+            }
+            let ok = await service.approvePendingApproval(id: approvalId, code: payload.code)
+            if ok {
+                return Self.json(status: HTTPStatus.ok, payload: ["ok": "true"])
+            } else {
+                return Self.json(status: HTTPStatus.badRequest, payload: ["error": "invalid_code_or_not_found"])
+            }
+        }
+
+        add(.post, "/v1/channel-approvals/:approvalId/reject", metadata: RouteMetadata(summary: "Reject pending request", description: "Rejects and removes a pending channel access request", tags: ["Channels"])) { request in
+            let approvalId = request.pathParam("approvalId") ?? ""
+            await service.rejectPendingApproval(id: approvalId)
+            return Self.json(status: HTTPStatus.ok, payload: ["ok": "true"])
+        }
+
+        add(.post, "/v1/channel-approvals/:approvalId/block", metadata: RouteMetadata(summary: "Block pending request", description: "Blocks a user from a pending channel access request", tags: ["Channels"])) { request in
+            let approvalId = request.pathParam("approvalId") ?? ""
+            let ok = await service.blockPendingApproval(id: approvalId)
+            if ok {
+                return Self.json(status: HTTPStatus.ok, payload: ["ok": "true"])
+            } else {
+                return Self.json(status: HTTPStatus.notFound, payload: ["error": "not_found"])
+            }
+        }
+
         return routes
     }
 

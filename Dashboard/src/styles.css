@@ -1371,6 +1371,7 @@ body.mobile-menu-open {
   position: sticky;
   top: 0;
   height: 100vh;
+  z-index: 100;
   transition: width 240ms cubic-bezier(0.22, 0.61, 0.36, 1), padding 240ms cubic-bezier(0.22, 0.61, 0.36, 1);
 }
 
@@ -6171,11 +6172,8 @@ body.agent-chat-no-page-scroll .page {
   border: none;
   background: transparent;
   color: var(--muted);
+  border: 1px solid var(--danger);
   cursor: pointer;
-}
-
-.tg-modal-cancel:hover {
-  color: var(--text);
 }
 
 .tg-modal-submit {
@@ -6185,13 +6183,9 @@ body.agent-chat-no-page-scroll .page {
   font-weight: 600;
   border: none;
   border-radius: 0;
-  background: var(--accent);
+  border: 1px solid var(--accent);
   color: #fff;
   cursor: pointer;
-}
-
-.tg-modal-submit:hover {
-  filter: brightness(1.1);
 }
 
 .entry-form-grid {

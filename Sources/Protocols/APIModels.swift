@@ -22,6 +22,14 @@ public struct ChannelMessageRequest: Codable, Sendable {
     }
 }
 
+public struct ChannelApprovalCodeRequest: Codable, Sendable {
+    public var code: String
+
+    public init(code: String) {
+        self.code = code
+    }
+}
+
 public struct ChannelRouteRequest: Codable, Sendable {
     public var message: String
 

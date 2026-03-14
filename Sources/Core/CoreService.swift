@@ -199,6 +199,7 @@ public actor CoreService {
     private var liveSessionStreamContinuations: [String: [UUID: AsyncStream<AgentSessionStreamUpdate>.Continuation]] = [:]
     private var liveSessionStreamCursor: [String: Int] = [:]
     public let notificationService: NotificationService
+    public let pendingApprovalService: PendingApprovalService
 
     /// Creates core orchestration service with runtime and persistence backend.
     public init(
@@ -316,6 +317,10 @@ public actor CoreService {
         }
         self.recoveryManager = RecoveryManager(store: self.store, runtime: self.runtime, logger: self.logger)
         self.notificationService = NotificationService()
+        self.pendingApprovalService = PendingApprovalService(
+            workspaceDirectory: config
+                .resolvedWorkspaceRootURL(currentDirectory: FileManager.default.currentDirectoryPath).path
+        )
         self.currentConfig = config
         self.toolExecution.projectService = self
         Task { [weak self] in
@@ -5614,6 +5619,55 @@ private extension JSONValue {
     }
 }
 
+// MARK: - Channel Access Approvals
+
+extension CoreService {
+    public func listPendingApprovals() async -> [PendingApprovalEntry] {
+        await pendingApprovalService.listPending()
+    }
+
+    public func listPendingApprovals(platform: String) async -> [PendingApprovalEntry] {
+        await pendingApprovalService.listPending(platform: platform)
+    }
+
+    public func approvePendingApproval(id: String, code: String) async -> Bool {
+        guard let entry = await pendingApprovalService.findById(id) else { return false }
+        guard entry.code.uppercased() == code.uppercased() else { return false }
+        let user = ChannelAccessUser(
+            id: UUID().uuidString,
+            platform: entry.platform,
+            platformUserId: entry.platformUserId,
+            displayName: entry.displayName,
+            status: "approved"
+        )
+        await store.saveChannelAccessUser(user)
+        await pendingApprovalService.removePending(id: id)
+        return true
+    }
+
+    public func rejectPendingApproval(id: String) async {
+        await pendingApprovalService.removePending(id: id)
+    }
+
+    public func blockPendingApproval(id: String) async -> Bool {
+        guard let entry = await pendingApprovalService.findById(id) else { return false }
+        let user = ChannelAccessUser(
+            id: UUID().uuidString,
+            platform: entry.platform,
+            platformUserId: entry.platformUserId,
+            displayName: entry.displayName,
+            status: "blocked"
+        )
+        await store.saveChannelAccessUser(user)
+        await pendingApprovalService.removePending(id: id)
+        return true
+    }
+
+    public func listAccessUsers(platform: String?) async -> [ChannelAccessUser] {
+        await store.listChannelAccessUsers(platform: platform)
+    }
+}
+
 // MARK: - InboundMessageReceiver
 
 private actor ResponseCollector {
@@ -5623,6 +5677,49 @@ private actor ResponseCollector {
 }
 
 extension CoreService: InboundMessageReceiver {
+    /// Checks whether a platform user is allowed to interact.
+    /// Priority: config allowlist (fast path) -> DB blocked -> DB approved -> pending approval flow.
+    public func checkAccess(
+        platform: String,
+        platformUserId: String,
+        displayName: String,
+        chatId: String
+    ) async -> ChannelAccessResult {
+        // Check DB for existing blocked entry
+        if let existing = await store.channelAccessUser(platform: platform, platformUserId: platformUserId) {
+            if existing.status == "blocked" {
+                return .blocked
+            }
+            if existing.status == "approved" {
+                return .allowed
+            }
+        }
+
+        // Already pending — return existing code
+        if let pending = await pendingApprovalService.findByUser(platform: platform, platformUserId: platformUserId) {
+            let msg = "Your access request is pending.\n\nVerification code: \(pending.code)\n\nShare this code with an admin to get approved."
+            return .pendingApproval(code: pending.code, message: msg)
+        }
+
+        // New user — create pending entry and notify Dashboard
+        let entry = await pendingApprovalService.addPending(
+            platform: platform,
+            platformUserId: platformUserId,
+            displayName: displayName,
+            chatId: chatId
+        )
+        await notificationService.pushPendingApproval(
+            title: "Access Request",
+            message: "\(displayName) (@\(platformUserId)) wants access via \(platform)",
+            approvalId: entry.id,
+            platform: platform,
+            userId: platformUserId,
+            channelId: entry.channelId
+        )
+        let msg = "Access requested.\n\nVerification code: \(entry.code)\n\nShare this code with an admin to get approved."
+        return .pendingApproval(code: entry.code, message: msg)
+    }
+
     /// Called by in-process channel plugins when a message arrives from an external platform.
     /// Routes through the runtime, collects the response, persists to channel session,
     /// and delivers it back to the channel plugin.

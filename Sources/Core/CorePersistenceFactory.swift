@@ -211,6 +211,29 @@ public actor InMemoryPersistenceStore: PersistenceStore {
         channelPlugins[id] = nil
     }
 
+    private var accessUsers: [String: ChannelAccessUser] = [:]
+
+    public func listChannelAccessUsers(platform: String?) async -> [ChannelAccessUser] {
+        let all = accessUsers.values.sorted { $0.createdAt < $1.createdAt }
+        guard let platform else { return all }
+        return all.filter { $0.platform == platform }
+    }
+
+    public func channelAccessUser(platform: String, platformUserId: String) async -> ChannelAccessUser? {
+        accessUsers.values.first { $0.platform == platform && $0.platformUserId == platformUserId }
+    }
+
+    public func saveChannelAccessUser(_ user: ChannelAccessUser) async {
+        if let existing = accessUsers.values.first(where: { $0.platform == user.platform && $0.platformUserId == user.platformUserId }) {
+            accessUsers[existing.id] = nil
+        }
+        accessUsers[user.id] = user
+    }
+
+    public func deleteChannelAccessUser(id: String) async {
+        accessUsers[id] = nil
+    }
+
     private func upsertChannel(from event: EventEnvelope) {
         if var existing = channels[event.channelId] {
             existing.updatedAt = max(existing.updatedAt, event.ts)

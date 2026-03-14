@@ -4,6 +4,7 @@ export interface NotificationEvent {
   type: NotificationType;
   title: string;
   message: string;
+  metadata?: Record<string, string>;
 }
 
 type Listener = (event: NotificationEvent) => void;
@@ -15,8 +16,8 @@ export function subscribeNotificationBus(listener: Listener): () => void {
   return () => listeners.delete(listener);
 }
 
-export function emitNotification(type: NotificationType, title: string, message: string) {
+export function emitNotification(type: NotificationType, title: string, message: string, metadata?: Record<string, string>) {
   for (const listener of listeners) {
-    listener({ type, title, message });
+    listener({ type, title, message, metadata });
   }
 }

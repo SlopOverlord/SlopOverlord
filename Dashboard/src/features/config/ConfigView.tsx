@@ -799,7 +799,6 @@ export function ConfigView({ sectionId = "providers", onSectionChange = null }) 
       apiUrl: initial.apiUrl,
       model: initial.model
     });
-    setProviderOAuthCallbackURL("");
     setProviderModelMenuOpen(false);
   }
 
@@ -810,7 +809,6 @@ export function ConfigView({ sectionId = "providers", onSectionChange = null }) 
     }
     setProviderModalId(null);
     setProviderForm(null);
-    setProviderOAuthCallbackURL("");
     setProviderModelMenuOpen(false);
     setProviderModelMenuRect(null);
   }

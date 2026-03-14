@@ -1,11 +1,13 @@
 import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useNotifications } from "./NotificationContext";
 import type { Notification, NotificationType } from "./NotificationContext";
+import { ApprovalDialog } from "../config/components/ApprovalDialog";
 
 const TYPE_META: Record<NotificationType, { icon: string; color: string; label: string }> = {
   confirmation: { icon: "help_outline", color: "var(--warn)", label: "CONFIRM" },
   agent_error: { icon: "error_outline", color: "var(--danger)", label: "AGENT" },
-  system_error: { icon: "warning", color: "var(--danger)", label: "SYSTEM" }
+  system_error: { icon: "warning", color: "var(--danger)", label: "SYSTEM" },
+  pending_approval: { icon: "person_add", color: "var(--accent)", label: "APPROVAL" }
 };
 
 function formatTime(ts: number): string {
@@ -19,18 +21,27 @@ function formatTime(ts: number): string {
 function NotificationItem({
   notification,
   onDismiss,
-  onRead
+  onRead,
+  onApprovalClick
 }: {
   notification: Notification;
   onDismiss: (id: string) => void;
   onRead: (id: string) => void;
+  onApprovalClick?: (approvalId: string) => void;
 }) {
   const meta = TYPE_META[notification.type];
+
+  function handleClick() {
+    onRead(notification.id);
+    if (notification.type === "pending_approval" && notification.metadata?.approvalId) {
+      onApprovalClick?.(notification.metadata.approvalId);
+    }
+  }
 
   return (
     <div
       className={`notif-item ${notification.read ? "notif-read" : ""}`}
-      onClick={() => onRead(notification.id)}
+      onClick={handleClick}
     >
       <span className="material-symbols-rounded notif-item-icon" style={{ color: meta.color }}>
         {meta.icon}
@@ -63,6 +74,7 @@ function NotificationItem({
 export function NotificationBell({ isCompact = false }: { isCompact?: boolean }) {
   const { notifications, unreadCount, markRead, markAllRead, dismiss, clearAll } = useNotifications();
   const [open, setOpen] = useState(false);
+  const [approvalId, setApprovalId] = useState<string | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
 
@@ -121,11 +133,24 @@ export function NotificationBell({ isCompact = false }: { isCompact?: boolean })
               <div className="notif-dropdown-empty">NO NOTIFICATIONS</div>
             ) : (
               notifications.map((n) => (
-                <NotificationItem key={n.id} notification={n} onDismiss={dismiss} onRead={markRead} />
+                <NotificationItem
+                  key={n.id}
+                  notification={n}
+                  onDismiss={dismiss}
+                  onRead={markRead}
+                  onApprovalClick={(id) => { setOpen(false); setApprovalId(id); }}
+                />
               ))
             )}
           </div>
         </div>
+      )}
+
+      {approvalId && (
+        <ApprovalDialog
+          approvalId={approvalId}
+          onClose={() => setApprovalId(null)}
+        />
       )}
     </div>
   );

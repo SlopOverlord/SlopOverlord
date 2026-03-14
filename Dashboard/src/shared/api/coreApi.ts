@@ -122,6 +122,11 @@ export interface CoreApi {
   createAgentCronTask: (agentId: string, payload: AnyRecord) => Promise<AnyRecord | null>;
   updateAgentCronTask: (agentId: string, cronId: string, payload: AnyRecord) => Promise<AnyRecord | null>;
   deleteAgentCronTask: (agentId: string, cronId: string) => Promise<boolean>;
+  fetchPendingApprovals: (platform?: string) => Promise<AnyRecord[] | null>;
+  approvePendingApproval: (approvalId: string, code: string) => Promise<boolean>;
+  rejectPendingApproval: (approvalId: string) => Promise<boolean>;
+  blockPendingApproval: (approvalId: string) => Promise<boolean>;
+  fetchAccessUsers: (platform?: string) => Promise<AnyRecord[] | null>;
 }
 
 export function createCoreApi(): CoreApi {
@@ -1001,6 +1006,53 @@ export function createCoreApi(): CoreApi {
         method: "DELETE"
       });
       return response.ok;
+    },
+
+    fetchPendingApprovals: async (platform) => {
+      const params = new URLSearchParams();
+      if (platform) params.set("platform", platform);
+      const qs = params.toString();
+      const response = await requestJson<AnyRecord[]>({
+        path: `/v1/channel-approvals/pending${qs ? `?${qs}` : ""}`
+      });
+      if (!response.ok || !Array.isArray(response.data)) return null;
+      return response.data;
+    },
+
+    approvePendingApproval: async (approvalId, code) => {
+      const response = await requestJson<AnyRecord, AnyRecord>({
+        path: `/v1/channel-approvals/${encodeURIComponent(approvalId)}/approve`,
+        method: "POST",
+        body: { code }
+      });
+      return response.ok;
+    },
+
+    rejectPendingApproval: async (approvalId) => {
+      const response = await requestJson<AnyRecord>({
+        path: `/v1/channel-approvals/${encodeURIComponent(approvalId)}/reject`,
+        method: "POST"
+      });
+      return response.ok;
+    },
+
+    blockPendingApproval: async (approvalId) => {
+      const response = await requestJson<AnyRecord>({
+        path: `/v1/channel-approvals/${encodeURIComponent(approvalId)}/block`,
+        method: "POST"
+      });
+      return response.ok;
+    },
+
+    fetchAccessUsers: async (platform) => {
+      const params = new URLSearchParams();
+      if (platform) params.set("platform", platform);
+      const qs = params.toString();
+      const response = await requestJson<AnyRecord[]>({
+        path: `/v1/channel-approvals/users${qs ? `?${qs}` : ""}`
+      });
+      if (!response.ok || !Array.isArray(response.data)) return null;
+      return response.data;
     }
   };
 }

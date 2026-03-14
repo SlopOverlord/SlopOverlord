@@ -8,7 +8,8 @@ const MAX_VISIBLE_TOASTS = 3;
 const TYPE_META: Record<NotificationType, { icon: string; color: string }> = {
   confirmation: { icon: "help_outline", color: "var(--warn)" },
   agent_error: { icon: "error_outline", color: "var(--danger)" },
-  system_error: { icon: "warning", color: "var(--danger)" }
+  system_error: { icon: "warning", color: "var(--danger)" },
+  pending_approval: { icon: "person_add", color: "var(--accent)" }
 };
 
 interface ToastEntry {

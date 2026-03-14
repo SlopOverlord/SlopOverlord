@@ -55,11 +55,33 @@ actor TelegramPoller {
 
         logger.info("Incoming message: userId=\(userId) chatId=\(chatId)\(chatTitle) from=\(displayName) length=\(text.count)")
 
-        if !config.isAllowed(userId: userId, chatId: chatId) {
-            logger.warning("Blocked: userId=\(userId) chatId=\(chatId) — not in allow list. allowedUsers=\(config.allowedUserIds) allowedChats=\(config.allowedChatIds)")
-            let hint = "Access denied.\n\nTo allow this chat, add the following IDs to your config:\n• User ID: \(userId)\n• Chat ID: \(chatId)"
-            _ = try? await bot.sendMessage(chatId: chatId, text: hint)
-            return
+        // Fast-path: config allowlist takes priority when non-empty
+        if !config.allowedUserIds.isEmpty || !config.allowedChatIds.isEmpty {
+            if !config.isAllowed(userId: userId, chatId: chatId) {
+                logger.warning("Blocked: userId=\(userId) chatId=\(chatId) — not in allow list. allowedUsers=\(config.allowedUserIds) allowedChats=\(config.allowedChatIds)")
+                let hint = "Access denied.\n\nTo allow this chat, add the following IDs to your config:\n• User ID: \(userId)\n• Chat ID: \(chatId)"
+                _ = try? await bot.sendMessage(chatId: chatId, text: hint)
+                return
+            }
+        } else {
+            let accessResult = await receiver.checkAccess(
+                platform: "telegram",
+                platformUserId: String(userId),
+                displayName: displayName,
+                chatId: String(chatId)
+            )
+            switch accessResult {
+            case .allowed:
+                break
+            case .pendingApproval(_, let message):
+                logger.info("Access pending: userId=\(userId) chatId=\(chatId)")
+                _ = try? await bot.sendMessage(chatId: chatId, text: message)
+                return
+            case .blocked:
+                logger.warning("Access blocked: userId=\(userId) chatId=\(chatId)")
+                _ = try? await bot.sendMessage(chatId: chatId, text: "Access denied.")
+                return
+            }
         }
 
         guard let channelId = config.channelId(forChatId: chatId) else {

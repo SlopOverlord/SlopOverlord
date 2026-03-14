@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { fetchAgents, fetchActorsBoard } from "../../../api";
+import { PendingApprovalList } from "./PendingApprovalList";
 
 function DiscordIcon() {
     return (
@@ -312,6 +313,8 @@ export function DiscordEditor({ draftConfig, mutateDraft }) {
                                     );
                                 })}
                             </div>
+
+                            <PendingApprovalList platform="discord" />
 
                             <div className="tg-footer">
                                 <button type="button" className="tg-disconnect-btn" onClick={disconnect}>

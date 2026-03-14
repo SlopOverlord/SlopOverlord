@@ -1,7 +1,7 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
 import { subscribeNotificationBus } from "./notificationBus";
 
-export type NotificationType = "confirmation" | "agent_error" | "system_error";
+export type NotificationType = "confirmation" | "agent_error" | "system_error" | "pending_approval";
 
 export interface Notification {
   id: string;
@@ -10,12 +10,13 @@ export interface Notification {
   message: string;
   timestamp: number;
   read: boolean;
+  metadata?: Record<string, string>;
 }
 
 interface NotificationContextValue {
   notifications: Notification[];
   unreadCount: number;
-  push: (type: NotificationType, title: string, message: string) => void;
+  push: (type: NotificationType, title: string, message: string, metadata?: Record<string, string>) => void;
   markRead: (id: string) => void;
   markAllRead: () => void;
   dismiss: (id: string) => void;
@@ -29,14 +30,15 @@ let nextId = 1;
 export function NotificationProvider({ children }: { children: React.ReactNode }) {
   const [notifications, setNotifications] = useState<Notification[]>([]);
 
-  const push = useCallback((type: NotificationType, title: string, message: string) => {
+  const push = useCallback((type: NotificationType, title: string, message: string, metadata?: Record<string, string>) => {
     const notification: Notification = {
       id: `notif-${nextId++}-${Date.now()}`,
       type,
       title,
       message,
       timestamp: Date.now(),
-      read: false
+      read: false,
+      metadata
     };
     setNotifications((prev) => [notification, ...prev]);
   }, []);
@@ -66,7 +68,7 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
 
   useEffect(() => {
     return subscribeNotificationBus((event) => {
-      push(event.type, event.title, event.message);
+      push(event.type, event.title, event.message, event.metadata);
     });
   }, [push]);
 

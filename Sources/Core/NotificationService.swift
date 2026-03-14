@@ -6,6 +6,7 @@ public struct DashboardNotification: Codable, Sendable {
         case confirmation
         case agentError = "agent_error"
         case systemError = "system_error"
+        case pendingApproval = "pending_approval"
     }
 
     public var id: String
@@ -62,6 +63,23 @@ public actor NotificationService {
 
     public func pushSystemError(title: String, message: String) {
         push(DashboardNotification(type: .systemError, title: title, message: message))
+    }
+
+    public func pushPendingApproval(
+        title: String,
+        message: String,
+        approvalId: String,
+        platform: String,
+        userId: String,
+        channelId: String?
+    ) {
+        var metadata: [String: String] = [
+            "approvalId": approvalId,
+            "platform": platform,
+            "userId": userId
+        ]
+        if let channelId { metadata["channelId"] = channelId }
+        push(DashboardNotification(type: .pendingApproval, title: title, message: message, metadata: metadata))
     }
 
     public func pushConfirmation(title: String, message: String, taskId: String? = nil) {

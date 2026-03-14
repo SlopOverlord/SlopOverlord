@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { fetchAgents, fetchActorsBoard } from "../../../api";
+import { PendingApprovalList } from "./PendingApprovalList";
 
 function TelegramIcon() {
   return (
@@ -113,10 +114,10 @@ function AddBindingModal({ agents, agentChannels, onClose, onAdd }) {
         </div>
 
         <div className="tg-modal-actions">
-          <button type="button" className="tg-modal-cancel" onClick={onClose}>
+          <button type="button" className="tg-modal-cancel hover-levitate" onClick={onClose}>
             Cancel
           </button>
-          <button type="button" className="tg-modal-submit" onClick={handleSubmit}>
+          <button type="button" className="tg-modal-submit hover-levitate" onClick={handleSubmit}>
             Add Binding
           </button>
         </div>
@@ -337,6 +338,8 @@ export function TelegramEditor({ draftConfig, mutateDraft }) {
                   );
                 })}
               </div>
+
+              <PendingApprovalList platform="telegram" />
 
               <div className="tg-section">
                 <div className="tg-section-title">Access Control</div>

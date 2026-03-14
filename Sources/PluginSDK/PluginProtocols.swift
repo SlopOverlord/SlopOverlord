@@ -1,10 +1,37 @@
 import Foundation
 import Protocols
 
+/// Result of an access check for an incoming message from an external platform user.
+public enum ChannelAccessResult: Sendable {
+    case allowed
+    case pendingApproval(code: String, message: String)
+    case blocked
+}
+
 /// Receives inbound messages from external channels and routes them into Core.
 /// Implementations bridge external platforms (Telegram, Slack, etc.) to channel runtime.
 public protocol InboundMessageReceiver: Sendable {
     func postMessage(channelId: String, userId: String, content: String) async -> Bool
+
+    /// Checks whether a user is allowed to interact with the given channel.
+    /// Returns `.allowed` by default; override in CoreService to enforce allowlists and pending approval.
+    func checkAccess(
+        platform: String,
+        platformUserId: String,
+        displayName: String,
+        chatId: String
+    ) async -> ChannelAccessResult
+}
+
+public extension InboundMessageReceiver {
+    func checkAccess(
+        platform: String,
+        platformUserId: String,
+        displayName: String,
+        chatId: String
+    ) async -> ChannelAccessResult {
+        .allowed
+    }
 }
 
 /// In-process gateway plugin for direct integration.

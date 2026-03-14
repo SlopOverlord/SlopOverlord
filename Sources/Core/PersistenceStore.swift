@@ -63,6 +63,34 @@ public struct PersistedEventCursor: Sendable, Equatable {
     }
 }
 
+public struct ChannelAccessUser: Codable, Sendable, Equatable {
+    public var id: String
+    public var platform: String
+    public var platformUserId: String
+    public var displayName: String
+    public var status: String
+    public var createdAt: Date
+    public var updatedAt: Date
+
+    public init(
+        id: String,
+        platform: String,
+        platformUserId: String,
+        displayName: String,
+        status: String,
+        createdAt: Date = Date(),
+        updatedAt: Date = Date()
+    ) {
+        self.id = id
+        self.platform = platform
+        self.platformUserId = platformUserId
+        self.displayName = displayName
+        self.status = status
+        self.createdAt = createdAt
+        self.updatedAt = updatedAt
+    }
+}
+
 public protocol PersistenceStore: Sendable {
     /// Persists protocol-level event envelopes emitted by the runtime.
     func persist(event: EventEnvelope) async
@@ -144,4 +172,16 @@ public protocol PersistenceStore: Sendable {
 
     /// Deletes one cron task record.
     func deleteCronTask(id: String) async
+
+    /// Lists all channel access user records, optionally filtered by platform.
+    func listChannelAccessUsers(platform: String?) async -> [ChannelAccessUser]
+
+    /// Returns one channel access user record by platform + platformUserId.
+    func channelAccessUser(platform: String, platformUserId: String) async -> ChannelAccessUser?
+
+    /// Creates or replaces one channel access user record.
+    func saveChannelAccessUser(_ user: ChannelAccessUser) async
+
+    /// Deletes one channel access user record.
+    func deleteChannelAccessUser(id: String) async
 }

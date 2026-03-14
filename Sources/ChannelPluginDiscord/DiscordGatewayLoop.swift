@@ -250,28 +250,50 @@ actor DiscordGatewayLoop {
             "Incoming Discord message: userId=\(message.author.id) channelId=\(message.channelId) guildId=\(message.guildId ?? "none") from=\(message.author.displayName) length=\(content.count)"
         )
 
-        if !config.isAllowed(
-            userId: message.author.id,
-            guildId: message.guildId,
-            channelId: message.channelId
-        ) {
-            logger.warning(
-                "Blocked Discord message: userId=\(message.author.id) channelId=\(message.channelId) guildId=\(message.guildId ?? "none")"
-            )
-            _ = try? await client.sendMessage(
-                channelId: message.channelId,
-                content: trimmedContent(
-                    """
-                    Access denied.
-
-                    Allow one or more of these IDs in your Discord config:
-                    User ID: \(message.author.id)
-                    Channel ID: \(message.channelId)
-                    Guild ID: \(message.guildId ?? "n/a")
-                    """
+        // Fast-path: config allowlist takes priority when non-empty
+        if !config.allowedUserIds.isEmpty || !config.allowedGuildIds.isEmpty || !config.allowedChannelIds.isEmpty {
+            if !config.isAllowed(
+                userId: message.author.id,
+                guildId: message.guildId,
+                channelId: message.channelId
+            ) {
+                logger.warning(
+                    "Blocked Discord message: userId=\(message.author.id) channelId=\(message.channelId) guildId=\(message.guildId ?? "none")"
                 )
+                _ = try? await client.sendMessage(
+                    channelId: message.channelId,
+                    content: trimmedContent(
+                        """
+                        Access denied.
+
+                        Allow one or more of these IDs in your Discord config:
+                        User ID: \(message.author.id)
+                        Channel ID: \(message.channelId)
+                        Guild ID: \(message.guildId ?? "n/a")
+                        """
+                    )
+                )
+                return
+            }
+        } else {
+            let accessResult = await receiver.checkAccess(
+                platform: "discord",
+                platformUserId: message.author.id,
+                displayName: message.author.displayName,
+                chatId: message.channelId
             )
-            return
+            switch accessResult {
+            case .allowed:
+                break
+            case .pendingApproval(_, let msg):
+                logger.info("Access pending: userId=\(message.author.id) channelId=\(message.channelId)")
+                _ = try? await client.sendMessage(channelId: message.channelId, content: trimmedContent(msg))
+                return
+            case .blocked:
+                logger.warning("Access blocked: userId=\(message.author.id) channelId=\(message.channelId)")
+                _ = try? await client.sendMessage(channelId: message.channelId, content: "Access denied.")
+                return
+            }
         }
 
         guard let sloppyChannelId = config.channelId(forDiscordChannelId: message.channelId) else {

@@ -13,7 +13,7 @@ interface ServerNotification {
 }
 
 const RECONNECT_DELAY_MS = 3000;
-const VALID_TYPES: NotificationType[] = ["confirmation", "agent_error", "system_error"];
+const VALID_TYPES: NotificationType[] = ["confirmation", "agent_error", "system_error", "pending_approval"];
 
 function mapServerType(raw: string): NotificationType {
   if (VALID_TYPES.includes(raw as NotificationType)) return raw as NotificationType;
@@ -41,7 +41,8 @@ export function useNotificationSocket() {
         try {
           const payload = JSON.parse(String(event.data)) as ServerNotification;
           if (payload && typeof payload.title === "string") {
-            pushRef.current(mapServerType(payload.type), payload.title, payload.message || "");
+            const metadata = payload.metadata && typeof payload.metadata === "object" ? payload.metadata : undefined;
+            pushRef.current(mapServerType(payload.type), payload.title, payload.message || "", metadata);
           }
         } catch {
           // ignore malformed
