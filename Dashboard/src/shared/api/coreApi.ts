@@ -49,6 +49,7 @@ export interface CoreApi {
   completeOpenAIOAuth: (payload: AnyRecord) => Promise<AnyRecord | null>;
   startOpenAIDeviceCode: () => Promise<AnyRecord | null>;
   pollOpenAIDeviceCode: (payload: AnyRecord) => Promise<AnyRecord | null>;
+  disconnectOpenAIOAuth: () => Promise<boolean>;
   probeProvider: (payload: AnyRecord) => Promise<AnyRecord | null>;
   fetchSearchProviderStatus: () => Promise<AnyRecord | null>;
   fetchProjects: () => Promise<AnyRecord[] | null>;
@@ -321,6 +322,14 @@ export function createCoreApi(): CoreApi {
         body: payload
       });
       return response.data;
+    },
+
+    disconnectOpenAIOAuth: async () => {
+      const response = await requestJson<AnyRecord>({
+        path: "/v1/providers/openai/oauth/disconnect",
+        method: "POST"
+      });
+      return response.ok;
     },
 
     probeProvider: async (payload) => {

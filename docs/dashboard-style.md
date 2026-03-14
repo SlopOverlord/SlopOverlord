@@ -11,19 +11,22 @@ The docs portal mirrors the Dashboard UI tokens so product docs and runtime UI r
 
 | Token | Value |
 | --- | --- |
-| Background | `#090b10` |
-| Surface | `#10131a` |
-| Surface 2 | `#141923` |
-| Surface 3 | `#0e1117` |
-| Border | `#232938` |
-| Strong border | `#30384b` |
-| Text | `#e6e9f2` |
-| Muted text | `#97a0b3` |
-| Accent | `#a277ff` |
+| Background | `#000000` |
+| Surface | `#0a0a0a` |
+| Surface 2 | `#111111` |
+| Surface 3 | `#1a1a1a` |
+| Border | `#333333` |
+| Text | `#f0f0f0` |
+| Muted text | `#888888` |
+| Accent | `#ccff00` |
+| Success | `#00ffff` |
+| Warning | `#ffcc00` |
+| Danger | `#ff00ff` |
 
 ## Rules
 
-- Docs reuse the Dashboard dark palette and accent color.
-- Cards, code blocks, tables, and sidebars use the same surface and border hierarchy.
-- Typography stays on the same `"Space Grotesk"`-first stack used by the Dashboard.
-- API reference can be added later without changing the docs shell theme.
+- Docs reuse the live Dashboard dark palette and acid-lime accent color.
+- Cards, code blocks, tables, and sidebars stay square, with the same hard-border hierarchy.
+- Typography stays on the same `"Fira Code"`-first stack used by the Dashboard.
+- Accent is reserved for active state, calls to action, and key runtime status.
+- API reference lives inside the same shell instead of branching into a separate visual system.

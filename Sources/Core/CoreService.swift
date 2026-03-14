@@ -2407,6 +2407,10 @@ public actor CoreService {
         try await openAIOAuthService.pollDeviceToken(deviceAuthId: request.deviceAuthId, userCode: request.userCode)
     }
 
+    public func disconnectOpenAIOAuth() throws {
+        try openAIOAuthService.disconnect()
+    }
+
     /// Returns search provider key availability for configured web search providers.
     public func searchProviderStatus() async -> SearchToolsStatusResponse {
         await searchProviderService.status()

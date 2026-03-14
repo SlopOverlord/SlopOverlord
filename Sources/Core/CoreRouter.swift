@@ -673,6 +673,15 @@ public actor CoreRouter {
             }
         }
 
+        add(.post, "/v1/providers/openai/oauth/disconnect", metadata: RouteMetadata(summary: "Disconnect OpenAI OAuth", description: "Removes stored OpenAI OAuth credentials", tags: ["Providers"])) { _ in
+            do {
+                try await service.disconnectOpenAIOAuth()
+                return Self.json(status: HTTPStatus.ok, payload: ["ok": "true"])
+            } catch {
+                return Self.json(status: HTTPStatus.badRequest, payload: ["error": error.localizedDescription])
+            }
+        }
+
         add(.get, "/v1/providers/search/status", metadata: RouteMetadata(summary: "Search status", description: "Returns the current status of the search provider", tags: ["Providers"])) { _ in
             let status = await service.searchProviderStatus()
             return Self.encodable(status: HTTPStatus.ok, payload: status)

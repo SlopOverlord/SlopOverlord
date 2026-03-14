@@ -5,25 +5,39 @@ export default defineConfig({
   description: "Runtime specifications, ADRs, and implementation notes for Sloppy.",
   base: "/",
   lang: "en-US",
+  markdown: {
+    theme: {
+      light: "vesper",
+      dark: "vesper"
+    }
+  },
   cleanUrls: true,
   lastUpdated: true,
   appearance: false,
   ignoreDeadLinks: false,
+  head: [
+    ["link", { rel: "preconnect", href: "https://fonts.googleapis.com" }],
+    ["link", { rel: "preconnect", href: "https://fonts.gstatic.com", crossorigin: "" }],
+    ["link", { rel: "icon", type: "image/svg+xml", href: "/so_logo.svg" }],
+    ["link", { rel: "stylesheet", href: "https://fonts.googleapis.com/css2?family=Fira+Code:wght@300..700&display=swap" }]
+  ],
   themeConfig: {
     logo: "/so_logo.svg",
     nav: [
       { text: "Guides", link: "/guides/build-from-terminal" },
+      { text: "API", link: "/api/reference" },
       { text: "Design", link: "/architecture/project-design" },
       { text: "Specs", link: "/specs/protocol-v1" },
       { text: "ADR", link: "/adr/0001-runtime-architecture" },
-      { text: "Dashboard", link: "/dashboard-style" }
+      { text: "Dashboard UI", link: "/dashboard-style" }
     ],
     sidebar: [
       {
         text: "Overview",
         items: [
           { text: "Home", link: "/" },
-          { text: "Dashboard Style", link: "/dashboard-style" }
+          { text: "Dashboard Style", link: "/dashboard-style" },
+          { text: "API Reference", link: "/api/reference" }
         ]
       },
       {
@@ -45,10 +59,8 @@ export default defineConfig({
         text: "Specifications",
         items: [
           { text: "Protocol v1", link: "/specs/protocol-v1" },
-          { text: "Runtime v1", link: "/specs/runtime-v1" },
           { text: "Channel Plugin Protocol v1", link: "/specs/channel-plugin-protocol" },
-          { text: "PRD Runtime v1", link: "/specs/prd-runtime-v1" },
-          { text: "Runtime v1 Gap Analysis", link: "/specs/runtime-v1-gap-analysis" }
+          { text: "PRD Runtime v1", link: "/specs/prd-runtime-v1" }
         ]
       }
     ],
@@ -63,7 +75,7 @@ export default defineConfig({
       provider: "local"
     },
     footer: {
-      message: "Built from docs/ and styled to match the Dashboard palette.",
+      message: "Built from docs/ and styled to match the live Dashboard shell.",
       copyright: "Sloppy"
     }
   }

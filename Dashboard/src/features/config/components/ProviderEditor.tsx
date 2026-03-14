@@ -32,7 +32,10 @@ export function ProviderEditor({
   onUpdateProviderForm,
   onOpenOAuth,
   onCancelDeviceCode,
+  onCopyDeviceCode,
+  onOpenDeviceCodeLoginPage,
   deviceCode,
+  deviceCodeCopied,
   isDeviceCodePolling,
   onRemoveProvider,
   onSaveProvider,
@@ -161,31 +164,50 @@ export function ProviderEditor({
             {providerModalMeta.supportsModelCatalog ? (
               <div className="provider-modal-catalog">
                 <p className="placeholder-text">{activeProviderStatus || "Model catalog is loading automatically."}</p>
-                {providerModalMeta.id === "openai-oauth" ? (
-                  <div className="provider-modal-actions">
+                {providerModalMeta.id === "openai-oauth" && deviceCode ? (
+                  <div className="provider-device-code-card">
+                    <div className="provider-device-code-step">
+                      <span className="provider-device-code-step-number">1</span>
+                      <span>Copy this device code</span>
+                    </div>
+                    <div className="provider-device-code-row">
+                      <code className="provider-device-code-value">{deviceCode.userCode}</code>
+                      <button type="button" onClick={onCopyDeviceCode}>
+                        {deviceCodeCopied ? "Copied" : "Copy"}
+                      </button>
+                    </div>
+
+                    <div className={`provider-device-code-step ${deviceCodeCopied ? "" : "disabled"}`}>
+                      <span className="provider-device-code-step-number">2</span>
+                      <span>Open OpenAI and paste the code</span>
+                    </div>
+                    <button type="button" disabled={!deviceCodeCopied} onClick={onOpenDeviceCodeLoginPage}>
+                      Open login page
+                    </button>
+
                     {isDeviceCodePolling ? (
-                      <button type="button" onClick={onCancelDeviceCode}>
-                        Cancel
-                      </button>
-                    ) : (
-                      <button type="button" onClick={onOpenOAuth}>
-                        {openAIProviderStatus.hasOAuthCredentials ? "Reconnect OpenAI" : "Connect OpenAI"}
-                      </button>
-                    )}
+                      <div className="provider-device-code-waiting">
+                        <span className="onboarding-device-code-dot" />
+                        <span>Waiting for sign-in confirmation...</span>
+                      </div>
+                    ) : null}
+
+                    <div className="provider-modal-actions">
+                      <button type="button" onClick={onCancelDeviceCode}>Cancel</button>
+                      <button type="button" onClick={onOpenOAuth}>Get new code</button>
+                    </div>
+                  </div>
+                ) : providerModalMeta.id === "openai-oauth" ? (
+                  <div className="provider-modal-actions">
+                    <button type="button" onClick={onOpenOAuth}>
+                      {openAIProviderStatus.hasOAuthCredentials ? "Reconnect OpenAI" : "Connect OpenAI"}
+                    </button>
                   </div>
                 ) : null}
-                {providerModalMeta.id === "openai-oauth" && deviceCode ? (
-                  <div className="provider-modal-form">
-                    <p className="placeholder-text">
-                      Open <a href={deviceCode.verificationURL} target="_blank" rel="noopener noreferrer"><strong>{deviceCode.verificationURL}</strong></a> and enter the code:
-                    </p>
-                    <div style={{ fontSize: "1.5em", fontWeight: "bold", textAlign: "center", padding: "8px 0", letterSpacing: "0.15em" }}>
-                      {deviceCode.userCode}
-                    </div>
-                    <p className="placeholder-text">
-                      {isDeviceCodePolling ? "Waiting for authorization..." : "Authorization check stopped."}
-                    </p>
-                  </div>
+                {providerModalMeta.id === "openai-oauth" ? (
+                  <p className="placeholder-text">
+                    You must first <a href="https://chatgpt.com/security-settings" target="_blank" rel="noopener noreferrer">enable device code login</a> in your ChatGPT security settings.
+                  </p>
                 ) : null}
                 {providerModalMeta.id === "openai-oauth" && openAIProviderStatus.hasOAuthCredentials ? (
                   <p className="placeholder-text">

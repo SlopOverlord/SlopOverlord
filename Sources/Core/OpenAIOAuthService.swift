@@ -366,6 +366,15 @@ struct OpenAIOAuthService: @unchecked Sendable {
         }
     }
 
+    func disconnect() throws {
+        try? removePendingSession()
+        let url = authFileURL()
+        if fileManager.fileExists(atPath: url.path) {
+            try fileManager.removeItem(at: url)
+        }
+        Self.logger.info("openai_oauth.disconnected")
+    }
+
     func ensureValidToken() async throws {
         _ = try await validCredentials()
     }
@@ -389,7 +398,7 @@ struct OpenAIOAuthService: @unchecked Sendable {
             throw Error.tokenExchangeFailed(httpErrorMessage(data: data, statusCode: response.statusCode))
         }
 
-        let decoded = try JSONDecoder().decode(DeviceCodeAPIResponse.self, from: data)
+        let decoded = try DeviceCodeAPIResponse.decode(from: data)
         let verificationURL = decoded.verificationUrl?
             .trimmingCharacters(in: .whitespacesAndNewlines)
             .isEmpty == false

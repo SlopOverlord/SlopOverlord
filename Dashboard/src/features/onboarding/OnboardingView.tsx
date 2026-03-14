@@ -295,6 +295,7 @@ export function OnboardingView({ coreApi, initialConfig, onCompleted }: Onboardi
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [deviceCode, setDeviceCode] = useState<{ deviceAuthId: string; userCode: string; verificationURL: string } | null>(null);
   const [isDeviceCodePolling, setIsDeviceCodePolling] = useState(false);
+  const [deviceCodeCopied, setDeviceCodeCopied] = useState(false);
   const deviceCodePollingRef = useRef(false);
 
   const activeProvider = useMemo(
@@ -354,6 +355,7 @@ export function OnboardingView({ coreApi, initialConfig, onCompleted }: Onboardi
   async function startDeviceCodeFlow() {
     setProbeStatus("Requesting device code from OpenAI...");
     setDeviceCode(null);
+    setDeviceCodeCopied(false);
     deviceCodePollingRef.current = false;
 
     const response = await coreApi.startOpenAIDeviceCode();
@@ -368,10 +370,27 @@ export function OnboardingView({ coreApi, initialConfig, onCompleted }: Onboardi
       verificationURL: String(response.verificationURL || "https://auth.openai.com/codex/device")
     };
     setDeviceCode(info);
-    setProbeStatus(`Open the link and enter code: ${info.userCode}`);
-    window.open(info.verificationURL, "_blank", "noopener,noreferrer");
+    setProbeStatus("Copy the code below, then open the login page to authorize.");
 
     pollDeviceCode(info);
+  }
+
+  function copyDeviceCode() {
+    if (!deviceCode) return;
+    navigator.clipboard.writeText(deviceCode.userCode).then(() => {
+      setDeviceCodeCopied(true);
+    }).catch(() => {
+      setDeviceCodeCopied(true);
+    });
+  }
+
+  function openDeviceCodeLoginPage() {
+    if (!deviceCode) return;
+    const width = 640;
+    const height = 860;
+    const left = Math.max(0, Math.round(window.screenX + (window.outerWidth - width) / 2));
+    const top = Math.max(0, Math.round(window.screenY + (window.outerHeight - height) / 2));
+    window.open(deviceCode.verificationURL, "sloppy-openai-device-code", `popup=yes,width=${width},height=${height},left=${left},top=${top}`);
   }
 
   async function pollDeviceCode(info: { deviceAuthId: string; userCode: string; verificationURL: string }) {
@@ -426,6 +445,7 @@ export function OnboardingView({ coreApi, initialConfig, onCompleted }: Onboardi
     deviceCodePollingRef.current = false;
     setIsDeviceCodePolling(false);
     setDeviceCode(null);
+    setDeviceCodeCopied(false);
     setProbeStatus("Device code authorization cancelled.");
   }
 
@@ -706,36 +726,69 @@ export function OnboardingView({ coreApi, initialConfig, onCompleted }: Onboardi
                 />
               </label>
 
-              <div className="onboarding-provider-actions">
-                {activeProvider.id === "openai-oauth" ? (
-                  isDeviceCodePolling ? (
-                    <button type="button" className="onboarding-ghost-button hover-levitate" onClick={cancelDeviceCodePolling}>
-                      Cancel
+              {activeProvider.id === "openai-oauth" ? (
+                deviceCode ? (
+                  <div className="onboarding-device-code-card">
+                    <div className="onboarding-device-code-step">
+                      <span className="onboarding-device-code-step-number">1</span>
+                      <span>Copy this device code</span>
+                    </div>
+                    <div className="onboarding-device-code-row">
+                      <code className="onboarding-device-code-value">{deviceCode.userCode}</code>
+                      <button type="button" className="onboarding-ghost-button" onClick={copyDeviceCode}>
+                        {deviceCodeCopied ? "Copied" : "Copy"}
+                      </button>
+                    </div>
+
+                    <div className={`onboarding-device-code-step ${deviceCodeCopied ? "" : "disabled"}`}>
+                      <span className="onboarding-device-code-step-number">2</span>
+                      <span>Open OpenAI and paste the code</span>
+                    </div>
+                    <button
+                      type="button"
+                      className="onboarding-ghost-button hover-levitate"
+                      disabled={!deviceCodeCopied}
+                      onClick={openDeviceCodeLoginPage}
+                    >
+                      Open login page
                     </button>
-                  ) : (
+
+                    {isDeviceCodePolling ? (
+                      <div className="onboarding-device-code-waiting">
+                        <span className="onboarding-device-code-dot" />
+                        <span>Waiting for sign-in confirmation...</span>
+                      </div>
+                    ) : null}
+
+                    <div className="onboarding-provider-actions">
+                      <button type="button" className="onboarding-ghost-button" onClick={cancelDeviceCodePolling}>
+                        Cancel
+                      </button>
+                      <button type="button" className="onboarding-ghost-button hover-levitate" onClick={() => void startDeviceCodeFlow()}>
+                        Get new code
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="onboarding-provider-actions">
                     <button type="button" className="onboarding-ghost-button hover-levitate" onClick={() => void startDeviceCodeFlow()}>
                       Connect OpenAI
                     </button>
-                  )
-                ) : null}
+                  </div>
+                )
+              ) : null}
+
+              {activeProvider.id === "openai-oauth" ? (
+                <div className="onboarding-inline-note">
+                  You must first <a href="https://chatgpt.com/security-settings" target="_blank" rel="noopener noreferrer">enable device code login</a> in your ChatGPT security settings.
+                </div>
+              ) : null}
+
+              <div className="onboarding-provider-actions">
                 <button type="button" className="onboarding-primary-button hover-levitate" onClick={() => void testProviderConnection()} disabled={isProbing}>
                   {isProbing ? "Testing..." : "Test connection"}
                 </button>
               </div>
-
-              {activeProvider.id === "openai-oauth" && deviceCode ? (
-                <div className="onboarding-form-block">
-                  <div className="onboarding-inline-note">
-                    Open <a href={deviceCode.verificationURL} target="_blank" rel="noopener noreferrer"><strong>{deviceCode.verificationURL}</strong></a> and enter code:
-                  </div>
-                  <div className="onboarding-device-code">
-                    <strong>{deviceCode.userCode}</strong>
-                  </div>
-                  <div className="onboarding-inline-note">
-                    {isDeviceCodePolling ? "Waiting for authorization..." : "Authorization check stopped."}
-                  </div>
-                </div>
-              ) : null}
 
               <div className={`onboarding-provider-status ${probeOk ? "ok" : "warn"}`}>
                 <strong>{probeOk ? "Ready" : "Pending"}</strong>

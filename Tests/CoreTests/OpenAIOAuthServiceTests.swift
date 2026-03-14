@@ -360,6 +360,52 @@ func openAIOAuthStartDeviceCodeHandles404() async throws {
     }
 }
 
+@Test
+func openAIOAuthDisconnectRemovesCredentials() async throws {
+    let workspaceRootURL = FileManager.default.temporaryDirectory
+        .appendingPathComponent("openai-oauth-disconnect-\(UUID().uuidString)", isDirectory: true)
+
+    let accessToken = try makeJWT(
+        claims: [
+            "exp": NSNumber(value: 2_000_000_000),
+            "https://api.openai.com/auth": [
+                "chatgpt_account_id": "acct_test_dc",
+                "chatgpt_plan_type": "plus"
+            ]
+        ]
+    )
+
+    let service = OpenAIOAuthService(
+        workspaceRootURL: workspaceRootURL,
+        transport: { request in
+            let body =
+                """
+                {
+                  "access_token": "\(accessToken)",
+                  "refresh_token": "refresh_dc",
+                  "id_token": "id_dc"
+                }
+                """
+            return (Data(body.utf8), makeOAuthHTTPResponse(url: request.url!))
+        }
+    )
+
+    let start = try service.startLogin(redirectURI: "http://127.0.0.1:4173/config")
+    _ = try await service.completeLogin(
+        request: OpenAIOAuthCompleteRequest(
+            callbackURL: "http://127.0.0.1:4173/config?code=test-code&state=\(start.state)"
+        )
+    )
+
+    #expect(service.currentAccessToken() != nil)
+    #expect(service.status().hasCredentials == true)
+
+    try service.disconnect()
+
+    #expect(service.currentAccessToken() == nil)
+    #expect(service.status().hasCredentials == false)
+}
+
 private final class SendableFlag: @unchecked Sendable {
     private var _value = false
     var value: Bool { _value }

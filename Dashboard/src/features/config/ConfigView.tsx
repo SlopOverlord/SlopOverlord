@@ -3,6 +3,7 @@ import ReactDiffViewer, { DiffMethod } from "react-diff-viewer-continued";
 import Prism from "prismjs";
 import "prismjs/components/prism-json";
 import {
+  disconnectOpenAIOAuth,
   fetchOpenAIModels,
   fetchOpenAIProviderStatus,
   fetchRuntimeConfig,
@@ -462,7 +463,9 @@ export function ConfigView({ sectionId = "providers", onSectionChange = null }) 
   const [providerForm, setProviderForm] = useState(null);
   const [configDeviceCode, setConfigDeviceCode] = useState(null);
   const [configDeviceCodePolling, setConfigDeviceCodePolling] = useState(false);
+  const [configDeviceCodeCopied, setConfigDeviceCodeCopied] = useState(false);
   const configDeviceCodePollingRef = useRef(false);
+  const [pendingOAuthDisconnect, setPendingOAuthDisconnect] = useState(false);
   const [providerModelOptions, setProviderModelOptions] = useState({});
   const [providerModelStatus, setProviderModelStatus] = useState({});
   const [providerModelMenuOpen, setProviderModelMenuOpen] = useState(false);
@@ -598,6 +601,7 @@ export function ConfigView({ sectionId = "providers", onSectionChange = null }) 
     const normalized = clone(savedConfig);
     setDraftConfig(normalized);
     setRawConfig(JSON.stringify(normalized, null, 2));
+    setPendingOAuthDisconnect(false);
     setStatusText("Changes cancelled");
   }
 
@@ -608,6 +612,11 @@ export function ConfigView({ sectionId = "providers", onSectionChange = null }) 
       if (!response) {
         setStatusText("Failed to save config");
         return;
+      }
+
+      if (pendingOAuthDisconnect) {
+        await disconnectOpenAIOAuth();
+        setPendingOAuthDisconnect(false);
       }
 
       localStorage.removeItem(DRAFT_CONFIG_KEY);
@@ -678,6 +687,7 @@ export function ConfigView({ sectionId = "providers", onSectionChange = null }) 
   async function openOpenAIPlatform() {
     setProviderStatus("openai-oauth", "Requesting device code from OpenAI...");
     setConfigDeviceCode(null);
+    setConfigDeviceCodeCopied(false);
     configDeviceCodePollingRef.current = false;
 
     const response = await startOpenAIDeviceCode();
@@ -692,8 +702,7 @@ export function ConfigView({ sectionId = "providers", onSectionChange = null }) 
       verificationURL: String(response.verificationURL || "https://auth.openai.com/codex/device")
     };
     setConfigDeviceCode(info);
-    setProviderStatus("openai-oauth", `Open ${info.verificationURL} and enter code: ${info.userCode}`);
-    window.open(info.verificationURL, "_blank", "noopener,noreferrer");
+    setProviderStatus("openai-oauth", "Copy the code below, then open the login page to authorize.");
 
     configDeviceCodePollingRef.current = true;
     setConfigDeviceCodePolling(true);
@@ -736,10 +745,29 @@ export function ConfigView({ sectionId = "providers", onSectionChange = null }) 
     setConfigDeviceCodePolling(false);
   }
 
+  function copyConfigDeviceCode() {
+    if (!configDeviceCode) return;
+    navigator.clipboard.writeText(configDeviceCode.userCode).then(() => {
+      setConfigDeviceCodeCopied(true);
+    }).catch(() => {
+      setConfigDeviceCodeCopied(true);
+    });
+  }
+
+  function openConfigDeviceCodeLoginPage() {
+    if (!configDeviceCode) return;
+    const width = 640;
+    const height = 860;
+    const left = Math.max(0, Math.round(window.screenX + (window.outerWidth - width) / 2));
+    const top = Math.max(0, Math.round(window.screenY + (window.outerHeight - height) / 2));
+    window.open(configDeviceCode.verificationURL, "sloppy-openai-device-code", `popup=yes,width=${width},height=${height},left=${left},top=${top}`);
+  }
+
   function cancelConfigDeviceCodePolling() {
     configDeviceCodePollingRef.current = false;
     setConfigDeviceCodePolling(false);
     setConfigDeviceCode(null);
+    setConfigDeviceCodeCopied(false);
     setProviderStatus("openai-oauth", "Device code authorization cancelled.");
   }
 
@@ -996,6 +1024,10 @@ export function ConfigView({ sectionId = "providers", onSectionChange = null }) 
     }
 
     const provider = providerModalMeta;
+    if (provider.id === "openai-oauth") {
+      setPendingOAuthDisconnect(true);
+    }
+
     mutateDraft((draft) => {
       const index = findProviderModelIndex(draft.models, provider.id);
       if (index >= 0) {
@@ -1028,7 +1060,10 @@ export function ConfigView({ sectionId = "providers", onSectionChange = null }) 
           onUpdateProviderForm={updateProviderForm}
           onOpenOAuth={openOpenAIPlatform}
           onCancelDeviceCode={cancelConfigDeviceCodePolling}
+          onCopyDeviceCode={copyConfigDeviceCode}
+          onOpenDeviceCodeLoginPage={openConfigDeviceCodeLoginPage}
           deviceCode={configDeviceCode}
+          deviceCodeCopied={configDeviceCodeCopied}
           isDeviceCodePolling={configDeviceCodePolling}
           onRemoveProvider={removeProviderFromModal}
           onSaveProvider={saveProviderFromModal}
