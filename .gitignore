@@ -12,4 +12,3 @@ site/
 /core.sqlite-*
 .env
 .sloppy/
-memory/

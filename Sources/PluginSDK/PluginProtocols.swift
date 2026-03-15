@@ -44,7 +44,11 @@ public protocol GatewayPlugin: Sendable {
     var channelIds: [String] { get }
     /// Start the plugin, supplying a receiver for inbound messages from the platform.
     func start(inboundReceiver: any InboundMessageReceiver) async throws
+
+    /// Stop the plugin.
     func stop() async
+
+    /// Send a message to a channel.
     func send(channelId: String, message: String) async throws
 }
 

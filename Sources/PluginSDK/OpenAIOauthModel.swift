@@ -4,6 +4,7 @@ import Foundation
 import FoundationNetworking
 #endif
 
+/// OpenAI OAuth model implementation.
 public struct OpenAIOAuthModel: LanguageModel {
     public typealias UnavailableReason = String
     public typealias CustomGenerationOptions = Never
