@@ -103,6 +103,16 @@ export function normalizeProject(project, index = 0) {
     ? project.tasks.map((task, taskIndex) => normalizeTask(task, taskIndex)).filter((task) => task.title.length > 0)
     : [];
 
+  const heartbeatRaw = project?.heartbeat;
+  const heartbeat = heartbeatRaw && typeof heartbeatRaw === "object"
+    ? {
+      enabled: Boolean(heartbeatRaw.enabled),
+      intervalMinutes: Number.isFinite(Number(heartbeatRaw.intervalMinutes))
+        ? Number(heartbeatRaw.intervalMinutes)
+        : 5
+    }
+    : { enabled: false, intervalMinutes: 5 };
+
   return {
     id,
     name,
@@ -112,7 +122,10 @@ export function normalizeProject(project, index = 0) {
     chats,
     tasks,
     actors: Array.isArray(project?.actors) ? project.actors : [],
-    teams: Array.isArray(project?.teams) ? project.teams : []
+    teams: Array.isArray(project?.teams) ? project.teams : [],
+    models: Array.isArray(project?.models) ? project.models : [],
+    agentFiles: Array.isArray(project?.agentFiles) ? project.agentFiles : [],
+    heartbeat
   };
 }
 

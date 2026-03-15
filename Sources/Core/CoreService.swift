@@ -186,6 +186,7 @@ public actor CoreService {
     private let logger: Logger
     private let configPath: String
     private let builtInGatewayPluginFactory: BuiltInGatewayPluginFactory
+    private let channelModelStore: ChannelModelStore
     private var workspaceRootURL: URL
     private var agentsRootURL: URL
     private var currentConfig: CoreConfig
@@ -274,6 +275,7 @@ public actor CoreService {
         self.channelDelivery = ChannelDeliveryService(store: self.store)
         self.actorBoardStore = ActorBoardFileStore(workspaceRootURL: self.workspaceRootURL)
         self.channelSessionStore = ChannelSessionFileStore(workspaceRootURL: self.workspaceRootURL)
+        self.channelModelStore = ChannelModelStore(workspaceRootURL: self.workspaceRootURL)
         self.agentSkillsStore = AgentSkillsFileStore(agentsRootURL: self.agentsRootURL)
         self.skillsRegistryService = SkillsRegistryService()
         self.skillsGitHubClient = SkillsGitHubClient()
@@ -819,6 +821,15 @@ public actor CoreService {
         }
         if let nextTeams = request.teams {
             project.teams = nextTeams
+        }
+        if let nextModels = request.models {
+            project.models = nextModels.map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
+        }
+        if let nextAgentFiles = request.agentFiles {
+            project.agentFiles = nextAgentFiles.map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
+        }
+        if let nextHeartbeat = request.heartbeat {
+            project.heartbeat = nextHeartbeat
         }
 
         project.updatedAt = Date()
@@ -2618,6 +2629,7 @@ public actor CoreService {
         agentCatalogStore.updateAgentsRootURL(agentsRootURL)
         sessionStore.updateAgentsRootURL(agentsRootURL)
         actorBoardStore.updateWorkspaceRootURL(workspaceRootURL)
+        await channelModelStore.updateWorkspaceRootURL(workspaceRootURL)
         await sessionOrchestrator.updateAgentsRootURL(agentsRootURL)
         await toolsAuthorization.updateAgentsRootURL(agentsRootURL)
         toolExecution.updateWorkspaceRootURL(workspaceRootURL)
@@ -5673,6 +5685,62 @@ extension CoreService {
         await store.deleteChannelAccessUser(id: id)
         return true
     }
+
+    // MARK: - Channel Model
+
+    public func getChannelModel(channelId: String) async -> ChannelModelResponse {
+        let selected = await channelModelStore.get(channelId: channelId)
+        return ChannelModelResponse(
+            channelId: channelId,
+            selectedModel: selected,
+            availableModels: availableAgentModels()
+        )
+    }
+
+    public func setChannelModel(channelId: String, model: String) async throws -> ChannelModelResponse {
+        let trimmed = model.trimmingCharacters(in: .whitespacesAndNewlines)
+        let available = availableAgentModels()
+        guard !trimmed.isEmpty, available.contains(where: { $0.id == trimmed }) else {
+            throw AgentConfigError.invalidModel
+        }
+        await channelModelStore.set(channelId: channelId, model: trimmed)
+        return ChannelModelResponse(channelId: channelId, selectedModel: trimmed, availableModels: available)
+    }
+
+    public func removeChannelModel(channelId: String) async {
+        await channelModelStore.remove(channelId: channelId)
+    }
+
+    private func handleModelCommand(channelId: String, content: String) async -> String? {
+        let trimmed = content.trimmingCharacters(in: .whitespacesAndNewlines)
+        let lower = trimmed.lowercased()
+
+        guard lower == "/model" || lower.hasPrefix("/model ") else {
+            return nil
+        }
+
+        let available = availableAgentModels()
+        let current = await channelModelStore.get(channelId: channelId)
+
+        if lower == "/model" {
+            let currentLine = current.map { "Current model: \($0)" } ?? "Current model: default (not set)"
+            let list = available.map { "  \($0.id)" }.joined(separator: "\n")
+            return "\(currentLine)\n\nAvailable models:\n\(list)\n\nUse /model <model_id> to switch."
+        }
+
+        let modelId = String(trimmed.dropFirst("/model ".count)).trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !modelId.isEmpty else {
+            return "Usage: /model <model_id>"
+        }
+
+        guard available.contains(where: { $0.id == modelId }) else {
+            let list = available.map { "  \($0.id)" }.joined(separator: "\n")
+            return "Unknown model: \(modelId)\n\nAvailable models:\n\(list)"
+        }
+
+        await channelModelStore.set(channelId: channelId, model: modelId)
+        return "Model set to: \(modelId)"
+    }
 }
 
 // MARK: - InboundMessageReceiver
@@ -5731,6 +5799,11 @@ extension CoreService: InboundMessageReceiver {
     /// Routes through the runtime, collects the response, persists to channel session,
     /// and delivers it back to the channel plugin.
     public func postMessage(channelId: String, userId: String, content: String) async -> Bool {
+        if let modelCommandReply = await handleModelCommand(channelId: channelId, content: content) {
+            await deliverToChannelPlugin(channelId: channelId, content: modelCommandReply)
+            return true
+        }
+
         do {
             try await prepareChannelSession(channelId: channelId)
         } catch {
@@ -5748,7 +5821,8 @@ extension CoreService: InboundMessageReceiver {
             logger.warning("Failed to persist user message to channel session: \(error)")
         }
 
-        let request = ChannelMessageRequest(userId: userId, content: content)
+        let modelOverride = await channelModelStore.get(channelId: channelId)
+        let request = ChannelMessageRequest(userId: userId, content: content, model: modelOverride)
         let collector = ResponseCollector()
         let outboundStreamID = await channelDelivery.beginStream(channelId: channelId, userId: "assistant")
 

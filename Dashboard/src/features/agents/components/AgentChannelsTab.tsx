@@ -1,5 +1,6 @@
-import React, { useEffect, useState } from "react";
+import React, { useCallback, useEffect, useState } from "react";
 import { createActorNode, deleteActorNode, fetchActorsBoard, fetchChannelSessions } from "../../../api";
+import { ChannelModelSelector } from "./ChannelModelSelector";
 
 function slugify(value: string) {
   return value
@@ -198,14 +199,17 @@ export function AgentChannelsTab({ agentId, agentDisplayName }) {
                       </span>
                       <span className="agent-channel-node-id">actor node · {node.id}</span>
                     </div>
-                    <button
-                      type="button"
-                      className="agent-channel-remove"
-                      onClick={() => void removeChannel(node.id)}
-                      title="Remove channel"
-                    >
-                      <span className="material-symbols-rounded">delete</span>
-                    </button>
+                    <div className="agent-channel-actions">
+                      <ChannelModelSelector channelId={channelId} />
+                      <button
+                        type="button"
+                        className="agent-channel-remove"
+                        onClick={() => void removeChannel(node.id)}
+                        title="Remove channel"
+                      >
+                        <span className="material-symbols-rounded">delete</span>
+                      </button>
+                    </div>
                   </div>
                 );
               })}

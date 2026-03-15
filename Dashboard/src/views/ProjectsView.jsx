@@ -1297,15 +1297,17 @@ export function ProjectsView({
     return (
       <ProjectSettingsTab
         project={project}
-        projectNameDraft={projectNameDraft}
-        setProjectNameDraft={setProjectNameDraft}
-        saveProjectSettings={saveProjectSettings}
-        saveProjectMembers={saveProjectMembers}
+        onUpdateProject={async (payload) => {
+          const updated = await updateProjectRequest(project.id, payload);
+          if (!updated) {
+            return null;
+          }
+          replaceProjectInState(updated);
+          return updated;
+        }}
         deleteProject={deleteProject}
         openAddChannelModal={openAddChannelModal}
         removeProjectChannel={removeProjectChannel}
-        actors={createModalActors}
-        teams={createModalTeams}
       />
     );
   }

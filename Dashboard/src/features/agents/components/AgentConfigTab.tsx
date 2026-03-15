@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from "react";
-import { fetchAgentConfig, updateAgentConfig } from "../../../api";
+import { fetchActorsBoard, fetchAgentConfig, updateAgentConfig } from "../../../api";
+import { ChannelModelSelector } from "./ChannelModelSelector";
 
 function emptyAgentConfigDraft(agentId) {
   return {
@@ -92,6 +93,7 @@ export function AgentConfigTab({ agentId }) {
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const [statusText, setStatusText] = useState("Loading agent config...");
+  const [channelNodes, setChannelNodes] = useState([]);
 
   useEffect(() => {
     let isCancelled = false;
@@ -99,9 +101,16 @@ export function AgentConfigTab({ agentId }) {
     async function load() {
       setIsLoading(true);
       setStatusText("Loading agent config...");
-      const response = await fetchAgentConfig(agentId);
+      const [response, board] = await Promise.all([
+        fetchAgentConfig(agentId),
+        fetchActorsBoard()
+      ]);
       if (isCancelled) {
         return;
+      }
+
+      if (board && Array.isArray(board.nodes)) {
+        setChannelNodes(board.nodes.filter((n) => n.linkedAgentId === agentId));
       }
 
       if (!response) {
@@ -244,6 +253,37 @@ export function AgentConfigTab({ agentId }) {
               ))}
             </select>
           </label>
+
+          {channelNodes.length > 0 && (
+            <section className="agent-config-heartbeat">
+              <div className="agent-config-head">
+                <div className="agent-tools-head-copy">
+                  <h4>Channel Models</h4>
+                  <p className="placeholder-text">
+                    Override the model used for specific channels. Channels without an override use the agent default above.
+                  </p>
+                </div>
+              </div>
+              <div className="agent-channels-list">
+                {channelNodes.map((node) => {
+                  const channelId = node.channelId || node.id;
+                  return (
+                    <div key={node.id} className="agent-channel-row">
+                      <div className="agent-channel-info">
+                        <span className="agent-channel-id">
+                          <span className="material-symbols-rounded agent-channel-icon">forum</span>
+                          {channelId}
+                        </span>
+                      </div>
+                      <div className="agent-channel-actions">
+                        <ChannelModelSelector channelId={channelId} />
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </section>
+          )}
 
           <div className="agent-config-docs">
             <label>

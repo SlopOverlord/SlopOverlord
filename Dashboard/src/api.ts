@@ -80,3 +80,6 @@ export const rejectPendingApproval = coreApi.rejectPendingApproval;
 export const blockPendingApproval = coreApi.blockPendingApproval;
 export const fetchAccessUsers = coreApi.fetchAccessUsers;
 export const deleteAccessUser = coreApi.deleteAccessUser;
+export const fetchChannelModel = coreApi.fetchChannelModel;
+export const updateChannelModel = coreApi.updateChannelModel;
+export const clearChannelModel = coreApi.clearChannelModel;

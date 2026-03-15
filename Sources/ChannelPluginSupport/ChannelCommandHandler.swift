@@ -17,9 +17,11 @@ public struct ChannelCommandHandler: Sendable {
             Sloppy Channel Plugin (\(platformName))
 
             Available commands:
-            /help   — show this message
-            /status — check plugin connectivity
+            /help              — show this message
+            /status            — check plugin connectivity
             /task <description> — create a task via Core
+            /model             — show current model and available options
+            /model <model_id>  — switch to a specific model
 
             Any other message is forwarded to the linked Sloppy channel.
             """
@@ -30,6 +32,10 @@ public struct ChannelCommandHandler: Sendable {
         }
 
         if lower.hasPrefix("/task ") {
+            return nil
+        }
+
+        if lower == "/model" || lower.hasPrefix("/model ") {
             return nil
         }
 

@@ -22,6 +22,26 @@ public struct ChannelMessageRequest: Codable, Sendable {
     }
 }
 
+public struct ChannelModelResponse: Codable, Sendable {
+    public var channelId: String
+    public var selectedModel: String?
+    public var availableModels: [ProviderModelOption]
+
+    public init(channelId: String, selectedModel: String?, availableModels: [ProviderModelOption]) {
+        self.channelId = channelId
+        self.selectedModel = selectedModel
+        self.availableModels = availableModels
+    }
+}
+
+public struct ChannelModelUpdateRequest: Codable, Sendable {
+    public var model: String
+
+    public init(model: String) {
+        self.model = model
+    }
+}
+
 public struct ChannelApprovalCodeRequest: Codable, Sendable {
     public var code: String
 
@@ -211,6 +231,16 @@ public extension ProjectTask {
     }
 }
 
+public struct ProjectHeartbeatSettings: Codable, Sendable, Equatable {
+    public var enabled: Bool
+    public var intervalMinutes: Int
+
+    public init(enabled: Bool = false, intervalMinutes: Int = 5) {
+        self.enabled = enabled
+        self.intervalMinutes = intervalMinutes
+    }
+}
+
 public struct ProjectRecord: Codable, Sendable, Equatable {
     public var id: String
     public var name: String
@@ -219,6 +249,9 @@ public struct ProjectRecord: Codable, Sendable, Equatable {
     public var tasks: [ProjectTask]
     public var actors: [String]
     public var teams: [String]
+    public var models: [String]
+    public var agentFiles: [String]
+    public var heartbeat: ProjectHeartbeatSettings
     public var createdAt: Date
     public var updatedAt: Date
 
@@ -230,6 +263,9 @@ public struct ProjectRecord: Codable, Sendable, Equatable {
         tasks: [ProjectTask],
         actors: [String] = [],
         teams: [String] = [],
+        models: [String] = [],
+        agentFiles: [String] = [],
+        heartbeat: ProjectHeartbeatSettings = ProjectHeartbeatSettings(),
         createdAt: Date = Date(),
         updatedAt: Date = Date()
     ) {
@@ -240,6 +276,9 @@ public struct ProjectRecord: Codable, Sendable, Equatable {
         self.tasks = tasks
         self.actors = actors
         self.teams = teams
+        self.models = models
+        self.agentFiles = agentFiles
+        self.heartbeat = heartbeat
         self.createdAt = createdAt
         self.updatedAt = updatedAt
     }
@@ -287,12 +326,26 @@ public struct ProjectUpdateRequest: Codable, Sendable {
     public var description: String?
     public var actors: [String]?
     public var teams: [String]?
+    public var models: [String]?
+    public var agentFiles: [String]?
+    public var heartbeat: ProjectHeartbeatSettings?
 
-    public init(name: String? = nil, description: String? = nil, actors: [String]? = nil, teams: [String]? = nil) {
+    public init(
+        name: String? = nil,
+        description: String? = nil,
+        actors: [String]? = nil,
+        teams: [String]? = nil,
+        models: [String]? = nil,
+        agentFiles: [String]? = nil,
+        heartbeat: ProjectHeartbeatSettings? = nil
+    ) {
         self.name = name
         self.description = description
         self.actors = actors
         self.teams = teams
+        self.models = models
+        self.agentFiles = agentFiles
+        self.heartbeat = heartbeat
     }
 }
 

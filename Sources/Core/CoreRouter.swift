@@ -1385,6 +1385,34 @@ public actor CoreRouter {
             return Self.encodable(status: HTTPStatus.ok, payload: decision)
         }
 
+        add(.get, "/v1/channels/:channelId/model", metadata: RouteMetadata(summary: "Get channel model", description: "Returns the current model override and available models for a channel", tags: ["Channels"])) { request in
+            let channelId = request.pathParam("channelId") ?? ""
+            let response = await service.getChannelModel(channelId: channelId)
+            return Self.encodable(status: HTTPStatus.ok, payload: response)
+        }
+
+        add(.put, "/v1/channels/:channelId/model", metadata: RouteMetadata(summary: "Set channel model", description: "Sets the model override for a channel", tags: ["Channels"])) { request in
+            let channelId = request.pathParam("channelId") ?? ""
+            guard let body = request.body,
+                  let payload = Self.decode(body, as: ChannelModelUpdateRequest.self)
+            else {
+                return Self.json(status: HTTPStatus.badRequest, payload: ["error": ErrorCode.invalidBody])
+            }
+
+            do {
+                let response = try await service.setChannelModel(channelId: channelId, model: payload.model)
+                return Self.encodable(status: HTTPStatus.ok, payload: response)
+            } catch {
+                return Self.json(status: HTTPStatus.badRequest, payload: ["error": ErrorCode.invalidAgentModel])
+            }
+        }
+
+        add(.delete, "/v1/channels/:channelId/model", metadata: RouteMetadata(summary: "Clear channel model", description: "Removes the model override for a channel, reverting to default", tags: ["Channels"])) { request in
+            let channelId = request.pathParam("channelId") ?? ""
+            await service.removeChannelModel(channelId: channelId)
+            return Self.json(status: HTTPStatus.ok, payload: [:] as [String: String])
+        }
+
         add(.post, "/v1/actors/route", metadata: RouteMetadata(summary: "Route actor request", description: "Resolves the routing for an actor request", tags: ["Actors"])) { request in
             guard let body = request.body,
                   let payload = Self.decode(body, as: ActorRouteRequest.self)

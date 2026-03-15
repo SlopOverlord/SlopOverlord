@@ -128,6 +128,9 @@ export interface CoreApi {
   blockPendingApproval: (approvalId: string) => Promise<boolean>;
   fetchAccessUsers: (platform?: string) => Promise<AnyRecord[] | null>;
   deleteAccessUser: (userId: string) => Promise<boolean>;
+  fetchChannelModel: (channelId: string) => Promise<AnyRecord | null>;
+  updateChannelModel: (channelId: string, model: string) => Promise<AnyRecord | null>;
+  clearChannelModel: (channelId: string) => Promise<boolean>;
 }
 
 export function createCoreApi(): CoreApi {
@@ -1059,6 +1062,32 @@ export function createCoreApi(): CoreApi {
     deleteAccessUser: async (userId) => {
       const response = await requestJson({
         path: `/v1/channel-approvals/users/${encodeURIComponent(userId)}`,
+        method: "DELETE"
+      });
+      return response.ok;
+    },
+
+    fetchChannelModel: async (channelId) => {
+      const response = await requestJson<AnyRecord>({
+        path: `/v1/channels/${encodeURIComponent(channelId)}/model`
+      });
+      if (!response.ok) return null;
+      return response.data;
+    },
+
+    updateChannelModel: async (channelId, model) => {
+      const response = await requestJson<AnyRecord, AnyRecord>({
+        path: `/v1/channels/${encodeURIComponent(channelId)}/model`,
+        method: "PUT",
+        body: { model }
+      });
+      if (!response.ok) return null;
+      return response.data;
+    },
+
+    clearChannelModel: async (channelId) => {
+      const response = await requestJson({
+        path: `/v1/channels/${encodeURIComponent(channelId)}/model`,
         method: "DELETE"
       });
       return response.ok;

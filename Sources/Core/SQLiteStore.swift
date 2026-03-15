@@ -516,7 +516,9 @@ public actor SQLiteStore: PersistenceStore {
 
         let sql =
             """
-            SELECT id, name, description, actors_json, teams_json, created_at, updated_at
+            SELECT id, name, description, actors_json, teams_json,
+                   models_json, agent_files_json, heartbeat_json,
+                   created_at, updated_at
             FROM dashboard_projects
             ORDER BY created_at ASC;
             """
@@ -535,8 +537,8 @@ public actor SQLiteStore: PersistenceStore {
                 let descriptionPtr = sqlite3_column_text(statement, 2),
                 let actorsPtr = sqlite3_column_text(statement, 3),
                 let teamsPtr = sqlite3_column_text(statement, 4),
-                let createdAtPtr = sqlite3_column_text(statement, 5),
-                let updatedAtPtr = sqlite3_column_text(statement, 6)
+                let createdAtPtr = sqlite3_column_text(statement, 8),
+                let updatedAtPtr = sqlite3_column_text(statement, 9)
             else {
                 continue
             }
@@ -546,10 +548,16 @@ public actor SQLiteStore: PersistenceStore {
             let description = String(cString: descriptionPtr)
             let actorsJSON = String(cString: actorsPtr)
             let teamsJSON = String(cString: teamsPtr)
+            let modelsJSON = sqlite3_column_text(statement, 5).map { String(cString: $0) } ?? "[]"
+            let agentFilesJSON = sqlite3_column_text(statement, 6).map { String(cString: $0) } ?? "[]"
+            let heartbeatJSON = sqlite3_column_text(statement, 7).map { String(cString: $0) } ?? "{}"
             let createdAt = isoFormatter.date(from: String(cString: createdAtPtr)) ?? Date()
             let updatedAt = isoFormatter.date(from: String(cString: updatedAtPtr)) ?? createdAt
             let actors = (try? JSONDecoder().decode([String].self, from: Data(actorsJSON.utf8))) ?? []
             let teams = (try? JSONDecoder().decode([String].self, from: Data(teamsJSON.utf8))) ?? []
+            let models = (try? JSONDecoder().decode([String].self, from: Data(modelsJSON.utf8))) ?? []
+            let agentFiles = (try? JSONDecoder().decode([String].self, from: Data(agentFilesJSON.utf8))) ?? []
+            let heartbeat = (try? JSONDecoder().decode(ProjectHeartbeatSettings.self, from: Data(heartbeatJSON.utf8))) ?? ProjectHeartbeatSettings()
             let channels = loadProjectChannels(db: db, projectID: id)
             let tasks = loadProjectTasks(db: db, projectID: id)
             result.append(
@@ -561,6 +569,9 @@ public actor SQLiteStore: PersistenceStore {
                     tasks: tasks,
                     actors: actors,
                     teams: teams,
+                    models: models,
+                    agentFiles: agentFiles,
+                    heartbeat: heartbeat,
                     createdAt: createdAt,
                     updatedAt: updatedAt
                 )
@@ -578,7 +589,9 @@ public actor SQLiteStore: PersistenceStore {
         if let db {
             let sql =
                 """
-                SELECT id, name, description, actors_json, teams_json, created_at, updated_at
+                SELECT id, name, description, actors_json, teams_json,
+                       models_json, agent_files_json, heartbeat_json,
+                       created_at, updated_at
                 FROM dashboard_projects
                 WHERE id = ?
                 LIMIT 1;
@@ -597,15 +610,21 @@ public actor SQLiteStore: PersistenceStore {
                let descriptionPtr = sqlite3_column_text(statement, 2),
                let actorsPtr = sqlite3_column_text(statement, 3),
                let teamsPtr = sqlite3_column_text(statement, 4),
-               let createdAtPtr = sqlite3_column_text(statement, 5),
-               let updatedAtPtr = sqlite3_column_text(statement, 6) {
+               let createdAtPtr = sqlite3_column_text(statement, 8),
+               let updatedAtPtr = sqlite3_column_text(statement, 9) {
                 let projectID = String(cString: idPtr)
                 let actorsJSON = String(cString: actorsPtr)
                 let teamsJSON = String(cString: teamsPtr)
+                let modelsJSON = sqlite3_column_text(statement, 5).map { String(cString: $0) } ?? "[]"
+                let agentFilesJSON = sqlite3_column_text(statement, 6).map { String(cString: $0) } ?? "[]"
+                let heartbeatJSON = sqlite3_column_text(statement, 7).map { String(cString: $0) } ?? "{}"
                 let createdAt = isoFormatter.date(from: String(cString: createdAtPtr)) ?? Date()
                 let updatedAt = isoFormatter.date(from: String(cString: updatedAtPtr)) ?? createdAt
                 let actors = (try? JSONDecoder().decode([String].self, from: Data(actorsJSON.utf8))) ?? []
                 let teams = (try? JSONDecoder().decode([String].self, from: Data(teamsJSON.utf8))) ?? []
+                let models = (try? JSONDecoder().decode([String].self, from: Data(modelsJSON.utf8))) ?? []
+                let agentFiles = (try? JSONDecoder().decode([String].self, from: Data(agentFilesJSON.utf8))) ?? []
+                let heartbeat = (try? JSONDecoder().decode(ProjectHeartbeatSettings.self, from: Data(heartbeatJSON.utf8))) ?? ProjectHeartbeatSettings()
                 return ProjectRecord(
                     id: projectID,
                     name: String(cString: namePtr),
@@ -614,6 +633,9 @@ public actor SQLiteStore: PersistenceStore {
                     tasks: loadProjectTasks(db: db, projectID: projectID),
                     actors: actors,
                     teams: teams,
+                    models: models,
+                    agentFiles: agentFiles,
+                    heartbeat: heartbeat,
                     createdAt: createdAt,
                     updatedAt: updatedAt
                 )
@@ -640,9 +662,12 @@ public actor SQLiteStore: PersistenceStore {
                 description,
                 actors_json,
                 teams_json,
+                models_json,
+                agent_files_json,
+                heartbeat_json,
                 created_at,
                 updated_at
-            ) VALUES(?, ?, ?, ?, ?, ?, ?);
+            ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
             """
 
         var projectStatement: OpaquePointer?
@@ -653,14 +678,20 @@ public actor SQLiteStore: PersistenceStore {
 
         let actorsJSON = (try? String(data: JSONEncoder().encode(project.actors), encoding: .utf8)) ?? "[]"
         let teamsJSON = (try? String(data: JSONEncoder().encode(project.teams), encoding: .utf8)) ?? "[]"
+        let modelsJSON = (try? String(data: JSONEncoder().encode(project.models), encoding: .utf8)) ?? "[]"
+        let agentFilesJSON = (try? String(data: JSONEncoder().encode(project.agentFiles), encoding: .utf8)) ?? "[]"
+        let heartbeatJSON = (try? String(data: JSONEncoder().encode(project.heartbeat), encoding: .utf8)) ?? "{}"
 
         bindText(project.id, at: 1, statement: projectStatement)
         bindText(project.name, at: 2, statement: projectStatement)
         bindText(project.description, at: 3, statement: projectStatement)
         bindText(actorsJSON, at: 4, statement: projectStatement)
         bindText(teamsJSON, at: 5, statement: projectStatement)
-        bindText(isoFormatter.string(from: project.createdAt), at: 6, statement: projectStatement)
-        bindText(isoFormatter.string(from: project.updatedAt), at: 7, statement: projectStatement)
+        bindText(modelsJSON, at: 6, statement: projectStatement)
+        bindText(agentFilesJSON, at: 7, statement: projectStatement)
+        bindText(heartbeatJSON, at: 8, statement: projectStatement)
+        bindText(isoFormatter.string(from: project.createdAt), at: 9, statement: projectStatement)
+        bindText(isoFormatter.string(from: project.updatedAt), at: 10, statement: projectStatement)
         guard sqlite3_step(projectStatement) == SQLITE_DONE else {
             return
         }
@@ -2083,6 +2114,21 @@ public actor SQLiteStore: PersistenceStore {
         _ = sqlite3_exec(
             db,
             "ALTER TABLE dashboard_projects ADD COLUMN teams_json TEXT NOT NULL DEFAULT '[]';",
+            nil, nil, nil
+        )
+        _ = sqlite3_exec(
+            db,
+            "ALTER TABLE dashboard_projects ADD COLUMN models_json TEXT NOT NULL DEFAULT '[]';",
+            nil, nil, nil
+        )
+        _ = sqlite3_exec(
+            db,
+            "ALTER TABLE dashboard_projects ADD COLUMN agent_files_json TEXT NOT NULL DEFAULT '[]';",
+            nil, nil, nil
+        )
+        _ = sqlite3_exec(
+            db,
+            "ALTER TABLE dashboard_projects ADD COLUMN heartbeat_json TEXT NOT NULL DEFAULT '{\"enabled\":false,\"intervalMinutes\":5}';",
             nil, nil, nil
         )
     }

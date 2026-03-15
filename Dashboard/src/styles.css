@@ -4355,6 +4355,84 @@ body.agent-chat-no-page-scroll .page {
   font-variation-settings: "FILL" 0, "wght" 300, "GRAD" 0, "opsz" 20;
 }
 
+.agent-channel-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.channel-model-selector {
+  position: relative;
+}
+
+.channel-model-toggle {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  min-width: auto;
+  height: 32px;
+  padding: 0 8px;
+  background: transparent;
+  border: 1px solid var(--line);
+  border-radius: 0;
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 0.75rem;
+}
+
+.channel-model-toggle:hover {
+  border-color: var(--accent);
+  color: var(--fg);
+}
+
+.channel-model-toggle .material-symbols-rounded {
+  font-size: 15px;
+  font-variation-settings: "FILL" 0, "wght" 300, "GRAD" 0, "opsz" 20;
+}
+
+.channel-model-badge {
+  font-family: "Fira Code", monospace;
+  font-size: 0.7rem;
+  max-width: 120px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.channel-model-badge-default {
+  color: var(--muted);
+  font-style: italic;
+}
+
+.channel-model-popover {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 4px);
+  z-index: 20;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  padding: 10px 12px;
+  min-width: 220px;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+}
+
+.channel-model-label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 0.75rem;
+  color: var(--muted);
+}
+
+.channel-model-label select {
+  font-size: 0.8rem;
+  padding: 4px 6px;
+  border: 1px solid var(--line);
+  background: var(--surface);
+  color: var(--fg);
+}
+
 .agent-channel-form {
   border: 1px solid var(--line);
   border-radius: 0;
