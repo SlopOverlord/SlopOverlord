@@ -280,6 +280,7 @@ final class AgentCatalogFileStore {
             soulMarkdown: normalizedDocumentText(request.documents.soulMarkdown),
             identityMarkdown: normalizedIdentityMarkdown,
             heartbeatMarkdown: normalizedHeartbeatText(request.documents.heartbeatMarkdown),
+            friendReminderMarkdown: normalizedOptionalDocumentText(request.documents.friendReminderMarkdown),
             memoryMarkdown: normalizedDocumentText(request.documents.memoryMarkdown)
         )
 
@@ -330,6 +331,7 @@ final class AgentCatalogFileStore {
             try writeTextFile(contents: normalizedDocuments.identityMarkdown, at: agentDirectory.appendingPathComponent("IDENTITY.md"))
             try writeTextFile(contents: normalizedDocuments.identityMarkdown, at: agentDirectory.appendingPathComponent("IDENTITY.id"))
             try writeTextFile(contents: normalizedDocuments.heartbeatMarkdown, at: agentDirectory.appendingPathComponent("HEARTBEAT.md"))
+            try writeTextFile(contents: normalizedDocuments.friendReminderMarkdown, at: agentDirectory.appendingPathComponent("FRIEND_REMINDER.md"))
             try writeTextFile(contents: normalizedDocuments.memoryMarkdown, at: agentDirectory.appendingPathComponent("MEMORY.md"))
         } catch {
             throw StoreError.storageFailure
@@ -394,6 +396,7 @@ final class AgentCatalogFileStore {
         let agentsMarkdown = try readTextFile(at: agentDirectory.appendingPathComponent("AGENTS.md"), fallback: "# Agent\n")
         let soulMarkdown = try readTextFile(at: agentDirectory.appendingPathComponent("SOUL.md"), fallback: "# Soul\n")
         let heartbeatMarkdown = try readHeartbeatFile(agentID: normalizedID, isSystem: summary.isSystem)
+        let friendReminderMarkdown = try readOptionalTextFile(at: agentDirectory.appendingPathComponent("FRIEND_REMINDER.md"), fallback: "")
         let memoryMarkdown = try readTextFile(at: agentDirectory.appendingPathComponent("MEMORY.md"), fallback: "")
 
         let identityMarkdown = try readIdentityMarkdown(
@@ -408,6 +411,7 @@ final class AgentCatalogFileStore {
             soulMarkdown: soulMarkdown,
             identityMarkdown: identityMarkdown,
             heartbeatMarkdown: heartbeatMarkdown,
+            friendReminderMarkdown: friendReminderMarkdown,
             memoryMarkdown: memoryMarkdown
         )
     }
@@ -630,6 +634,10 @@ final class AgentCatalogFileStore {
         )
         try writeTextFile(
             contents: "",
+            at: agentDirectory.appendingPathComponent("FRIEND_REMINDER.md")
+        )
+        try writeTextFile(
+            contents: "",
             at: agentDirectory.appendingPathComponent("MEMORY.md")
         )
 
@@ -777,6 +785,18 @@ final class AgentCatalogFileStore {
         return normalizedDocumentText(text)
     }
 
+    private func readOptionalTextFile(at url: URL, fallback: String) throws -> String {
+        guard fileManager.fileExists(atPath: url.path) else {
+            return fallback
+        }
+
+        let data = try Data(contentsOf: url)
+        guard let text = String(data: data, encoding: .utf8) else {
+            return fallback
+        }
+        return normalizedOptionalDocumentText(text)
+    }
+
     private func readHeartbeatFile(agentID: String, isSystem: Bool) throws -> String {
         let url = agentDirectoryURL(for: agentID, isSystem: isSystem).appendingPathComponent("HEARTBEAT.md")
         if !fileManager.fileExists(atPath: url.path) {
@@ -920,6 +940,17 @@ final class AgentCatalogFileStore {
 
     private func normalizedDocumentText(_ raw: String) -> String {
         let normalized = raw.replacingOccurrences(of: "\r\n", with: "\n")
+        if normalized.hasSuffix("\n") {
+            return normalized
+        }
+        return normalized + "\n"
+    }
+
+    private func normalizedOptionalDocumentText(_ raw: String) -> String {
+        let normalized = raw.replacingOccurrences(of: "\r\n", with: "\n")
+        guard !normalized.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            return ""
+        }
         if normalized.hasSuffix("\n") {
             return normalized
         }

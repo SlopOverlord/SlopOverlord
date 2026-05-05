@@ -52,7 +52,7 @@ struct ProjectChannelLinkTool: CoreTool {
             return toolFailure(tool: name, code: "project_not_found", message: "Project not found.", retryable: false)
         }
 
-        let channelId = arguments["channelId"]?.asString?.trimmingCharacters(in: .whitespacesAndNewlines) ?? context.sessionID
+        let channelId = stringArgument(arguments, "channelId", default: context.sessionID)
         guard !channelId.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             return toolFailure(tool: name, code: "channel_required", message: "Channel ID is required.", retryable: false)
         }

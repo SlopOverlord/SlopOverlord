@@ -1,6 +1,11 @@
 import Foundation
 import TauTUI
 
+enum SloppyTUIAutocompleteFeatureFlags {
+    static let editorAutocompleteEnabled = false
+    static let projectPathAutocompleteEnabled = false
+}
+
 struct SloppyTUISlashCommand: SlashCommand {
     let name: String
     let description: String?
@@ -62,7 +67,8 @@ final class SloppyTUIAutocompleteProvider: AutocompleteProvider {
         let safePrefixCount = min(prefix.count, cursorCol)
         let start = currentLine.index(currentLine.startIndex, offsetBy: cursorCol - safePrefixCount)
         let end = currentLine.index(start, offsetBy: safePrefixCount)
-        let replacement = item.value.hasPrefix("@") ? item.value + " " : "@" + item.value + " "
+        let value = item.value.hasPrefix("@") ? String(item.value.dropFirst()) : item.value
+        let replacement = "@\(SloppyTUIProjectPathTokens.escapedTokenValue(value)) "
         currentLine.replaceSubrange(start..<end, with: replacement)
         mutableLines[cursorLine] = currentLine
         let newCursor = cursorCol - safePrefixCount + replacement.count
@@ -87,17 +93,10 @@ final class SloppyTUIAutocompleteProvider: AutocompleteProvider {
     }
 
     private func isAttachmentTokenAtCursor(lines: [String], cursorLine: Int, cursorCol: Int) -> Bool {
-        guard lines.indices.contains(cursorLine) else {
-            return false
-        }
-
-        let currentLine = lines[cursorLine]
-        let prefixIndex = currentLine.index(currentLine.startIndex, offsetBy: min(cursorCol, currentLine.count))
-        let textBeforeCursor = String(currentLine[..<prefixIndex])
-        let tokenStart = textBeforeCursor.rangeOfCharacter(
-            from: .whitespacesAndNewlines,
-            options: .backwards
-        )?.upperBound ?? textBeforeCursor.startIndex
-        return textBeforeCursor[tokenStart...].hasPrefix("@")
+        SloppyTUIProjectPathTokens.tokenBeforeCursor(
+            lines: lines,
+            cursorLine: cursorLine,
+            cursorColumn: cursorCol
+        ) != nil
     }
 }

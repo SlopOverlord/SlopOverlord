@@ -3,6 +3,7 @@ import Foundation
 /// Character limits for agent markdown files (`String.count`, extended grapheme clusters).
 public enum AgentMarkdownLimits: Sendable {
     public static let userMarkdownMaxCharacters = 2000
+    public static let friendReminderMarkdownMaxCharacters = 2000
     public static let memoryMarkdownMaxCharacters = 3000
     public static let projectMetaMemoryMarkdownMaxCharacters = 3000
 
@@ -18,6 +19,12 @@ public enum AgentMarkdownLimits: Sendable {
         }
     }
 
+    public static func validateFriendReminderMarkdown(_ text: String) throws {
+        if text.count > friendReminderMarkdownMaxCharacters {
+            throw AgentDocumentLengthError.exceeded(resource: "FRIEND_REMINDER.md", limit: friendReminderMarkdownMaxCharacters)
+        }
+    }
+
     public static func validateProjectMetaMemoryMarkdown(_ text: String) throws {
         if text.count > projectMetaMemoryMarkdownMaxCharacters {
             throw AgentDocumentLengthError.exceeded(
@@ -29,6 +36,7 @@ public enum AgentMarkdownLimits: Sendable {
 
     public static func validateAgentDocumentBundle(_ documents: AgentDocumentBundle) throws {
         try validateUserMarkdown(documents.userMarkdown)
+        try validateFriendReminderMarkdown(documents.friendReminderMarkdown)
         try validateMemoryMarkdown(documents.memoryMarkdown)
     }
 }

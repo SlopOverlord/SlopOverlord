@@ -74,6 +74,38 @@
       "dependsOrder": "sequence",
       "dependsOn": ["Local: Build Core", "Local: Core + Dashboard"],
       "group": "none"
+    },
+    {
+      "label": "swift: Build Debug Sloppy TUI",
+      "type": "process",
+      "command": "/usr/bin/swift",
+      "args": ["build", "--product", "sloppy"],
+      "options": { "cwd": "${workspaceFolder}" },
+      "group": "build",
+      "presentation": { "reveal": "always", "panel": "shared" }
+    },
+    {
+      "label": "swift: Build Release Sloppy TUI",
+      "type": "process",
+      "command": "/usr/bin/swift",
+      "args": ["build", "-c", "release", "--product", "sloppy"],
+      "options": { "cwd": "${workspaceFolder}" },
+      "group": "build",
+      "presentation": { "reveal": "always", "panel": "shared" }
+    },
+    {
+      "label": "swift: Run Debug Sloppy TUI in Terminal.app",
+      "type": "process",
+      "command": "/bin/bash",
+      "args": [
+        "-lc",
+        "set -euo pipefail\npidfile=\"${workspaceFolder}/.build/sloppy-tui.pid\"\nlldbfile=\"${workspaceFolder}/.build/sloppy-tui-attach.lldb\"\n/bin/rm -f \"$pidfile\" \"$lldbfile\"\n/usr/bin/osascript -e 'tell application \"Terminal\" to do script \"cd \" & quoted form of \"${workspaceFolder}\" & \" && printf %s $$ > .build/sloppy-tui.pid && exec ./.build/debug/sloppy tui\"'\nfor _ in {1..80}; do\n  if [[ -s \"$pidfile\" ]]; then\n    pid=\"$(/bin/cat \"$pidfile\")\"\n    if kill -0 \"$pid\" 2>/dev/null && /bin/ps -p \"$pid\" -o command= | /usr/bin/grep -q 'sloppy tui'; then\n      printf 'target create \"%s/.build/debug/sloppy\"\\nprocess attach --pid %s\\n' \"${workspaceFolder}\" \"$pid\" > \"$lldbfile\"\n      exit 0\n    fi\n  fi\n  /bin/sleep 0.1\ndone\necho \"Timed out waiting for sloppy tui to start in Terminal.app\" >&2\nexit 1"
+      ],
+      "options": { "cwd": "${workspaceFolder}" },
+      "dependsOrder": "sequence",
+      "dependsOn": ["swift: Build Debug Sloppy TUI"],
+      "group": "none",
+      "presentation": { "reveal": "always", "panel": "shared" }
     }
   ]
 }

@@ -7,7 +7,7 @@ import Protocols
 
 actor AgentSessionOrchestrator {
     private static let sessionContextBootstrapMarker = "[agent_session_context_bootstrap_v1]"
-    typealias ToolInvoker = @Sendable (String, String, ToolInvocationRequest) async -> ToolInvocationResult
+    typealias ToolInvoker = @Sendable (String, String, ToolInvocationRequest, AgentChatMode?) async -> ToolInvocationResult
     typealias ResponseChunkObserver = @Sendable (String, String, String) async -> Void
     typealias EventAppendObserver = @Sendable (String, String, AgentSessionSummary, [AgentSessionEvent]) async -> Void
 
@@ -40,6 +40,7 @@ actor AgentSessionOrchestrator {
     private var streamedAssistantByChannel: [String: String] = [:]
     private var streamedAssistantLastPersistedByChannel: [String: String] = [:]
     private var streamedAssistantLastPersistedAtByChannel: [String: Date] = [:]
+    private var pausedInputRequestByChannel: [String: String] = [:]
 
     init(
         runtime: RuntimeSystem,
@@ -302,7 +303,11 @@ actor AgentSessionOrchestrator {
             throw mapSessionStoreError(error)
         }
 
-        let runtimeContent = Self.runtimeContent(content, mode: request.mode)
+        let runtimeContent = Self.contentWithFriendReminder(
+            Self.runtimeContent(content, mode: request.mode),
+            documents: agentConfig.documents
+        )
+        let requestMode = request.mode ?? .ask
         let runtimeOutcome: SessionRuntimeOutcome
         switch agentConfig.runtime.type {
         case .native:
@@ -312,7 +317,8 @@ actor AgentSessionOrchestrator {
                 userID: request.userId,
                 content: runtimeContent,
                 selectedModel: selectedModel,
-                reasoningEffort: reasoningEffort
+                reasoningEffort: reasoningEffort,
+                mode: requestMode
             )
         case .acp:
             guard let acpSessionManager else {
@@ -353,7 +359,8 @@ actor AgentSessionOrchestrator {
                     assistantText: result.assistantText.isEmpty ? "Done." : result.assistantText,
                     routeDecision: nil,
                     wasInterrupted: result.stopReason == .cancelled,
-                    didResetContext: result.didResetContext
+                    didResetContext: result.didResetContext,
+                    pausedInputRequestID: nil
                 )
             } catch {
                 throw OrchestratorError.storageFailure
@@ -361,6 +368,13 @@ actor AgentSessionOrchestrator {
         }
 
         var finalEvents: [AgentSessionEvent] = []
+        if runtimeOutcome.pausedInputRequestID != nil {
+            return AgentSessionMessageResponse(
+                summary: summary,
+                appendedEvents: initialEvents,
+                routeDecision: runtimeOutcome.routeDecision
+            )
+        }
         if runtimeOutcome.didResetContext {
             finalEvents.append(
                 AgentSessionEvent(
@@ -675,6 +689,7 @@ actor AgentSessionOrchestrator {
         var routeDecision: ChannelRouteDecision?
         var wasInterrupted: Bool
         var didResetContext: Bool
+        var pausedInputRequestID: String?
     }
 
     static func runtimeContent(_ content: String, mode: AgentChatMode?) -> String {
@@ -696,13 +711,22 @@ actor AgentSessionOrchestrator {
         return "\(instruction)\n\nUser request:\n\(trimmed)"
     }
 
+    static func contentWithFriendReminder(_ content: String, documents: AgentDocumentBundle) -> String {
+        let reminder = documents.friendReminderMarkdown.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !reminder.isEmpty else {
+            return content
+        }
+        return "\(content)\n\n#[FRIEND_REMINDER.md]\n\(reminder)"
+    }
+
     private func postNativeMessage(
         agentID: String,
         sessionID: String,
         userID: String,
         content: String,
         selectedModel: String?,
-        reasoningEffort: ReasoningEffort?
+        reasoningEffort: ReasoningEffort?,
+        mode: AgentChatMode
     ) async -> SessionRuntimeOutcome {
         let channelID = sessionChannelID(agentID: agentID, sessionID: sessionID)
         activeSessionRunChannels.insert(channelID)
@@ -775,7 +799,13 @@ actor AgentSessionOrchestrator {
                     events: [toolCallStatusEvent, toolCallEvent]
                 )
 
-                let result = await self.invokeTool(agentID: agentID, sessionID: sessionID, request: toolRequest)
+                let result = await self.invokeTool(agentID: agentID, sessionID: sessionID, request: toolRequest, mode: mode)
+                if result.ok,
+                   result.tool == "planning.request_input",
+                   result.data?.asObject?["paused"]?.asBool == true,
+                   let requestID = result.data?.asObject?["requestId"]?.asString {
+                    await self.rememberPausedInputRequest(channelID: channelID, requestID: requestID)
+                }
 
                 let toolResultEvent = AgentSessionEvent(
                     agentId: agentID,
@@ -801,11 +831,21 @@ actor AgentSessionOrchestrator {
                     )
                 )
 
-                await self.appendEventsSafely(
-                    agentID: agentID,
-                    sessionID: sessionID,
-                    events: [toolResultEvent, toolResultStatusEvent]
-                )
+                if result.ok,
+                   result.tool == "planning.request_input",
+                   result.data?.asObject?["paused"]?.asBool == true {
+                    await self.appendEventsSafely(
+                        agentID: agentID,
+                        sessionID: sessionID,
+                        events: [toolResultEvent]
+                    )
+                } else {
+                    await self.appendEventsSafely(
+                        agentID: agentID,
+                        sessionID: sessionID,
+                        events: [toolResultEvent, toolResultStatusEvent]
+                    )
+                }
 
                 return result
             },
@@ -836,7 +876,8 @@ actor AgentSessionOrchestrator {
                 : (!assistantTextFromSnapshot.isEmpty ? assistantTextFromSnapshot : "Done."),
             routeDecision: routeDecision,
             wasInterrupted: interruptedSessionRunChannels.contains(channelID),
-            didResetContext: false
+            didResetContext: false,
+            pausedInputRequestID: pausedInputRequestByChannel[channelID]
         )
     }
 
@@ -920,6 +961,11 @@ actor AgentSessionOrchestrator {
         streamedAssistantByChannel.removeValue(forKey: channelID)
         streamedAssistantLastPersistedByChannel.removeValue(forKey: channelID)
         streamedAssistantLastPersistedAtByChannel.removeValue(forKey: channelID)
+        pausedInputRequestByChannel.removeValue(forKey: channelID)
+    }
+
+    private func rememberPausedInputRequest(channelID: String, requestID: String) {
+        pausedInputRequestByChannel[channelID] = requestID
     }
 
     private func appendEventsSafely(agentID: String, sessionID: String, events: [AgentSessionEvent]) {
@@ -970,7 +1016,8 @@ actor AgentSessionOrchestrator {
     private func invokeTool(
         agentID: String,
         sessionID: String,
-        request: ToolInvocationRequest
+        request: ToolInvocationRequest,
+        mode: AgentChatMode?
     ) async -> ToolInvocationResult {
         guard let toolInvoker else {
             return ToolInvocationResult(
@@ -983,7 +1030,7 @@ actor AgentSessionOrchestrator {
                 )
             )
         }
-        return await toolInvoker(agentID, sessionID, request)
+        return await toolInvoker(agentID, sessionID, request, mode)
     }
 
     private func ensureSessionContextLoaded(agentID: String, sessionID: String) async throws {
@@ -1075,6 +1122,7 @@ actor AgentSessionOrchestrator {
                 "user_md_chars": .stringConvertible(documents.userMarkdown.count),
                 "identity_md_chars": .stringConvertible(documents.identityMarkdown.count),
                 "soul_md_chars": .stringConvertible(documents.soulMarkdown.count),
+                "friend_reminder_md_chars": .stringConvertible(documents.friendReminderMarkdown.count),
                 "memory_md_chars": .stringConvertible(documents.memoryMarkdown.count),
                 "agent_directory": .string(agentDirectoryPath ?? ""),
                 "skills_count": .stringConvertible(installedSkills.count),

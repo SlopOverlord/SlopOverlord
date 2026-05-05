@@ -219,6 +219,7 @@ public actor CoreService {
     let configPath: String
     let builtInGatewayPluginFactory: BuiltInGatewayPluginFactory
     let channelModelStore: ChannelModelStore
+    let channelChatModeStore: ChannelChatModeStore
     var workspaceRootURL: URL
     var agentsRootURL: URL
     let workspaceCurrentDirectory: String
@@ -370,6 +371,7 @@ public actor CoreService {
         self.actorBoardStore = ActorBoardFileStore(workspaceRootURL: self.workspaceRootURL)
         self.channelSessionStore = ChannelSessionFileStore(workspaceRootURL: self.workspaceRootURL)
         self.channelModelStore = ChannelModelStore(workspaceRootURL: self.workspaceRootURL)
+        self.channelChatModeStore = ChannelChatModeStore(workspaceRootURL: self.workspaceRootURL)
         self.agentSkillsStore = AgentSkillsFileStore(agentsRootURL: self.agentsRootURL)
         self.skillsRegistryService = SkillsRegistryService()
         let githubAuth = self.githubAuthService
@@ -471,7 +473,7 @@ public actor CoreService {
                     }
                 )
             )
-            await self.sessionOrchestrator.updateToolInvoker { [weak self] agentID, sessionID, request in
+            await self.sessionOrchestrator.updateToolInvoker { [weak self] agentID, sessionID, request, mode in
                 guard let self else {
                     return ToolInvocationResult(
                         tool: request.tool,
@@ -487,7 +489,8 @@ public actor CoreService {
                     agentID: agentID,
                     sessionID: sessionID,
                     request: request,
-                    recordSessionEvents: false
+                    recordSessionEvents: false,
+                    chatMode: mode
                 )
             }
             await self.sessionOrchestrator.updateResponseChunkObserver { [weak self] agentID, sessionID, chunk in

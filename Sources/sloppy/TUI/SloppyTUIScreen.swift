@@ -119,7 +119,7 @@ final class SloppyTUIScreen: @preconcurrency Component, @unchecked Sendable {
     private var projectFileIndex: ProjectFileIndex?
     private var projectFileRootURL: URL?
     private var projectFileSearchSelection = 0
-    private var suppressedProjectFileToken: String?
+    private var suppressedProjectFileSearch: SloppyTUIProjectPathSearchSuppression?
     private var projectFileIndexGeneration = 0
     private var projectFileSearchCache: (generation: Int, token: String, items: [SloppyTUIPickerItem])?
     private var liveAssistantDraft: String?
@@ -156,7 +156,9 @@ final class SloppyTUIScreen: @preconcurrency Component, @unchecked Sendable {
         self.terminal = terminal
 
         editor.apply(theme: SloppyTUITheme.palette)
-        editor.setAutocompleteProvider(SloppyTUIAutocompleteProvider(basePath: runtime.cwd))
+        if SloppyTUIAutocompleteFeatureFlags.editorAutocompleteEnabled {
+            editor.setAutocompleteProvider(SloppyTUIAutocompleteProvider(basePath: runtime.cwd))
+        }
         editor.onSubmit = { [weak self] value in
             guard let self else { return }
             Task { @MainActor in await self.submit(value) }
@@ -165,9 +167,9 @@ final class SloppyTUIScreen: @preconcurrency Component, @unchecked Sendable {
             self?.persistDraft(value)
             self?.projectFileSearchSelection = 0
             self?.projectFileSearchCache = nil
-            if let suppressed = self?.suppressedProjectFileToken,
-               self?.currentProjectFileToken()?.rawToken != suppressed {
-                self?.suppressedProjectFileToken = nil
+            if let suppressed = self?.suppressedProjectFileSearch,
+               !suppressed.matches(self?.currentProjectFileToken()) {
+                self?.suppressedProjectFileSearch = nil
             }
         }
         let draftKey = SloppyTUIStateStore.draftKey(
@@ -369,6 +371,9 @@ final class SloppyTUIScreen: @preconcurrency Component, @unchecked Sendable {
     }
 
     private func handleProjectFileSearchInput(_ input: TerminalInput) -> Bool {
+        guard SloppyTUIAutocompleteFeatureFlags.projectPathAutocompleteEnabled else {
+            return false
+        }
         guard case let .key(key, _) = input else { return false }
         switch key {
         case .arrowUp, .arrowDown, .enter, .tab, .escape:
@@ -391,7 +396,9 @@ final class SloppyTUIScreen: @preconcurrency Component, @unchecked Sendable {
             applyProjectFileSearchItem(picker.items[picker.selectedIndex])
             return true
         case .escape:
-            suppressedProjectFileToken = currentProjectFileToken()?.rawToken
+            if let token = currentProjectFileToken() {
+                suppressedProjectFileSearch = SloppyTUIProjectPathSearchSuppression(token: token)
+            }
             requestRender()
             return true
         default:
@@ -505,10 +512,15 @@ final class SloppyTUIScreen: @preconcurrency Component, @unchecked Sendable {
     }
 
     private func projectFileSearchPicker() -> SloppyTUIPicker? {
+        guard SloppyTUIAutocompleteFeatureFlags.projectPathAutocompleteEnabled else {
+            return nil
+        }
         guard let index = projectFileIndex,
-              let token = currentProjectFileToken(),
-              token.rawToken != suppressedProjectFileToken
+              let token = currentProjectFileToken()
         else {
+            return nil
+        }
+        guard suppressedProjectFileSearch?.matches(token) != true else {
             return nil
         }
 
@@ -610,12 +622,17 @@ final class SloppyTUIScreen: @preconcurrency Component, @unchecked Sendable {
         let start = line.index(line.startIndex, offsetBy: token.startColumn)
         let end = line.index(line.startIndex, offsetBy: token.endColumn)
         let insertedToken = "@\(SloppyTUIProjectPathTokens.escapedTokenValue(item.value))"
+        let suppression = SloppyTUIProjectPathSearchSuppression(
+            rawToken: insertedToken,
+            line: token.line,
+            startColumn: token.startColumn
+        )
         line.replaceSubrange(start..<end, with: insertedToken + " ")
         lines[token.line] = line
         editor.handle(input: .key(.escape))
         projectFileSearchSelection = 0
         editor.setText(lines.joined(separator: "\n"))
-        suppressedProjectFileToken = insertedToken
+        suppressedProjectFileSearch = suppression
         requestRender()
     }
 

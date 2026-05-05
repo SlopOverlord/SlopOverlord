@@ -1316,7 +1316,7 @@ func createListAndGetAgentsEndpoints() async throws {
         .appendingPathComponent("agent-dev", isDirectory: true)
     #expect(FileManager.default.fileExists(atPath: workspaceAgentsURL.path))
 
-    let scaffoldFiles = ["AGENTS.md", "USER.md", "SOUL.md", "IDENTITY.id", "IDENTITY.md", "config.json", "agent.json", "pet-state.json"]
+    let scaffoldFiles = ["AGENTS.md", "USER.md", "SOUL.md", "IDENTITY.id", "IDENTITY.md", "HEARTBEAT.md", "FRIEND_REMINDER.md", "MEMORY.md", "config.json", "agent.json", "pet-state.json"]
     for file in scaffoldFiles {
         let fileURL = workspaceAgentsURL.appendingPathComponent(file)
         #expect(FileManager.default.fileExists(atPath: fileURL.path))
@@ -1607,6 +1607,7 @@ func agentConfigEndpointsReadAndUpdate() async throws {
     #expect(fetched.channelSessions.allowedChannelIds.isEmpty)
     #expect(fetched.channelSessions.excludedChannelIds.isEmpty)
     #expect(fetched.documents.heartbeatMarkdown.isEmpty)
+    #expect(fetched.documents.friendReminderMarkdown.isEmpty)
     #expect(fetched.heartbeatStatus.lastRunAt == nil)
 
     let nextModel = fetched.availableModels.last?.id ?? fetched.selectedModel ?? ""
@@ -1618,7 +1619,8 @@ func agentConfigEndpointsReadAndUpdate() async throws {
             agentsMarkdown: "# Agent\nUpdated orchestration guidance\n",
             soulMarkdown: "# Soul\nUpdated values and boundaries\n",
             identityMarkdown: "# Identity\nagent-config-v2\n",
-            heartbeatMarkdown: "- verify onboarding checklist\n"
+            heartbeatMarkdown: "- verify onboarding checklist\n",
+            friendReminderMarkdown: "- Keep it friendly\n"
         ),
         heartbeat: AgentHeartbeatSettings(enabled: true, intervalMinutes: 15),
         channelSessions: AgentChannelSessionSettings(
@@ -1639,6 +1641,7 @@ func agentConfigEndpointsReadAndUpdate() async throws {
     #expect(updated.documents.soulMarkdown.contains("Updated values and boundaries"))
     #expect(updated.documents.identityMarkdown.contains("agent-config-v2"))
     #expect(updated.documents.heartbeatMarkdown.contains("verify onboarding checklist"))
+    #expect(updated.documents.friendReminderMarkdown.contains("Keep it friendly"))
     #expect(updated.heartbeat.enabled == true)
     #expect(updated.heartbeat.intervalMinutes == 15)
     #expect(updated.channelSessions.autoCloseEnabled == true)

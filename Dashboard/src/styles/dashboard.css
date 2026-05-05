@@ -427,15 +427,7 @@
   gap: 12px;
   min-height: 280px;
   border: 1px dashed rgba(255, 255, 255, 0.12);
-  background:
-    linear-gradient(180deg, rgba(82, 229, 255, 0.08), rgba(255, 255, 255, 0.01)),
-    repeating-linear-gradient(
-      0deg,
-      rgba(255, 255, 255, 0.02),
-      rgba(255, 255, 255, 0.02) 2px,
-      transparent 2px,
-      transparent 8px
-    );
+  background: rgba(255, 255, 255, 0.01);
 }
 
 .agent-pet-stage-meta {

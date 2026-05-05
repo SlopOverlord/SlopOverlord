@@ -20,10 +20,17 @@ extension CoreService {
         }
 
         await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
-            eventTask = Task {
+            let runtime = self.runtime
+            eventTask = Task { [weak self, runtime] in
                 let stream = await runtime.eventBus.subscribe()
                 continuation.resume()
                 for await event in stream {
+                    guard !Task.isCancelled else {
+                        break
+                    }
+                    guard let self else {
+                        break
+                    }
                     _ = await withSpan("runtime.event.persist", ofKind: .consumer) { span in
                         span.attributes["channel_id"] = "\(event.channelId)"
                         span.attributes["message_type"] = "\(event.messageType.rawValue)"
@@ -188,4 +195,3 @@ extension CoreService {
         return TokenUsage(prompt: Int(p), completion: Int(c))
     }
 }
-

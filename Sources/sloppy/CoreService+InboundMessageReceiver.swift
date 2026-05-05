@@ -381,7 +381,7 @@ extension CoreService {
                 } else {
                     input = nil
                 }
-            case .sessionCreated, .subSession, .runControl:
+            case .sessionCreated, .subSession, .runControl, .inputRequest, .inputResponse:
                 input = nil
             }
 
@@ -408,7 +408,7 @@ private actor ResponseCollector {
 }
 
 extension CoreService {
-    fileprivate func offerInboundChannelPluginMessage(
+    func offerInboundChannelPluginMessage(
         channelId: String,
         userId: String,
         contentForModel: String,
@@ -481,10 +481,16 @@ extension CoreService {
         let bindingChannelId = ChannelGatewayScope.parse(channelId).baseChannelId
         let board = try? getActorBoard()
         let linkedAgentID = linkedAgentID(forChannelID: bindingChannelId, board: board)
+        let mode = await channelChatModeStore.get(channelId: bindingChannelId)
+        let modeContent = AgentSessionOrchestrator.runtimeContent(contentForModel, mode: mode)
+        let contentForRuntime = contentWithFriendReminderIfNeeded(
+            modeContent,
+            linkedAgentID: linkedAgentID
+        )
         let modelOverride = await channelModelStore.get(channelId: bindingChannelId)
         let request = ChannelMessageRequest(
             userId: userId,
-            content: contentForModel,
+            content: contentForRuntime,
             topicId: topicId,
             model: modelOverride
         )
@@ -524,7 +530,8 @@ extension CoreService {
                     agentID: agentID,
                     channelID: channelId,
                     request: toolRequest,
-                    topicID: topicId
+                    topicID: topicId,
+                    chatMode: mode
                 )
             }
         } else {
@@ -600,6 +607,7 @@ extension CoreService {
         )
 
         let reply = await collector.get().trimmingCharacters(in: .whitespacesAndNewlines)
+        let waitingForPlanInput = (try? await channelSessionStore.hasPendingInputRequest(channelId: channelId)) == true
         if !reply.isEmpty {
             do {
                 try await channelSessionStore.recordAssistantMessage(
@@ -620,7 +628,7 @@ extension CoreService {
             } catch {
                 logger.warning("Failed to persist assistant message to channel session: \(error)")
             }
-        } else {
+        } else if !waitingForPlanInput {
             await applyPetProgressForExternalChannel(
                 channelID: channelId,
                 event: AgentPetProgressionInput(
@@ -646,6 +654,15 @@ extension CoreService {
                 topicId: topicId
             )
         }
+    }
+
+    fileprivate func contentWithFriendReminderIfNeeded(_ content: String, linkedAgentID: String?) -> String {
+        guard let linkedAgentID,
+              let config = try? getAgentConfig(agentID: linkedAgentID)
+        else {
+            return content
+        }
+        return AgentSessionOrchestrator.contentWithFriendReminder(content, documents: config.documents)
     }
 }
 
@@ -757,6 +774,11 @@ extension CoreService: InboundMessageReceiver {
             return true
         }
 
+        if let modeCommandReply = await handleModeCommand(channelId: sessionChannelId, content: content) {
+            await deliverToChannelPlugin(channelId: sessionChannelId, content: modeCommandReply, topicId: topicId)
+            return true
+        }
+
         if let contextReply = await handleContextCommand(channelId: sessionChannelId, content: content) {
             await deliverToChannelPlugin(channelId: sessionChannelId, content: contextReply, topicId: topicId)
             return true
@@ -847,6 +869,30 @@ extension CoreService: InboundMessageReceiver {
             return true
         }
 
+        if !trimmed.hasPrefix("/"),
+           let pending = try? await channelSessionStore.pendingInputRequest(channelId: sessionChannelId),
+           let customAnswers = customPlanInputAnswers(from: trimmed, request: pending.request) {
+            do {
+                _ = try await answerChannelPlanInput(
+                    sessionID: pending.sessionId,
+                    requestID: pending.request.id,
+                    payload: PlanInputAnswerRequest(
+                        answers: customAnswers,
+                        userId: userId
+                    )
+                )
+                return true
+            } catch {
+                logger.warning("Failed to answer pending plan input for channel \(sessionChannelId): \(error)")
+                await deliverToChannelPlugin(
+                    channelId: sessionChannelId,
+                    content: "Could not record that answer. Please try again.",
+                    topicId: topicId
+                )
+                return true
+            }
+        }
+
         do {
             try await channelSessionStore.recordUserMessage(
                 channelId: sessionChannelId,
@@ -875,6 +921,32 @@ extension CoreService: InboundMessageReceiver {
             topicId: topicId
         )
         return true
+    }
+
+    private func customPlanInputAnswers(
+        from content: String,
+        request: PlanInputRequest
+    ) -> [PlanInputAnswer]? {
+        let trimmed = content.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        if request.questions.count == 1, let question = request.questions.first {
+            guard question.allowCustomAnswer else { return nil }
+            return [PlanInputAnswer(questionId: question.id, customAnswer: trimmed)]
+        }
+
+        let lines = trimmed
+            .split(whereSeparator: \.isNewline)
+            .map { String($0).trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+        guard lines.count == request.questions.count else {
+            return nil
+        }
+        var answers: [PlanInputAnswer] = []
+        for (index, question) in request.questions.enumerated() {
+            guard question.allowCustomAnswer else { return nil }
+            answers.append(PlanInputAnswer(questionId: question.id, customAnswer: lines[index]))
+        }
+        return answers
     }
 
     func handleAddDirCommand(channelId: String, content: String) async -> String? {

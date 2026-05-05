@@ -5,6 +5,28 @@ import PluginSDK
 import Protocols
 
 actor DiscordGatewayLoop {
+    struct PlanInputMenu: Sendable {
+        let sloppyChannelId: String
+        let discordChannelId: String
+        let request: PlanInputRequest
+    }
+
+    actor PlanInputMenuStore {
+        private var menus: [String: PlanInputMenu] = [:]
+
+        func set(nonce: String, menu: PlanInputMenu) {
+            menus[nonce] = menu
+        }
+
+        func get(nonce: String) -> PlanInputMenu? {
+            menus[nonce]
+        }
+
+        func remove(nonce: String) {
+            menus[nonce] = nil
+        }
+    }
+
     private struct IncomingAuthor: Sendable {
         let id: String
         let username: String
@@ -87,13 +109,15 @@ actor DiscordGatewayLoop {
     private var botUserID: String?
     private var applicationId: String?
     private var projectLinkMenus: [String: ProjectLinkMenu] = [:]
+    private let planInputMenus: PlanInputMenuStore
 
     init(
         client: any DiscordPlatformClient,
         receiver: any InboundMessageReceiver,
         config: DiscordPluginConfig,
         sloppyChannelIds: [String],
-        logger: Logger
+        logger: Logger,
+        planInputMenus: PlanInputMenuStore = PlanInputMenuStore()
     ) {
         self.client = client
         self.receiver = receiver
@@ -101,6 +125,7 @@ actor DiscordGatewayLoop {
         self.sloppyChannelIds = sloppyChannelIds
         self.commands = ChannelCommandHandler(platformName: "Discord")
         self.logger = logger
+        self.planInputMenus = planInputMenus
     }
 
     func run() async {
@@ -469,8 +494,22 @@ actor DiscordGatewayLoop {
         interactionToken: String
     ) async {
         guard let customId = data["data"]?.asObject?["custom_id"]?.asString,
-              customId.hasPrefix("sloppy:cl:")
+              customId.hasPrefix("sloppy:")
         else {
+            return
+        }
+
+        if customId.hasPrefix("sloppy:pi:") {
+            await handlePlanInputComponentInteraction(
+                customId: customId,
+                data: data,
+                interactionId: interactionId,
+                interactionToken: interactionToken
+            )
+            return
+        }
+
+        guard customId.hasPrefix("sloppy:cl:") else {
             return
         }
 
@@ -589,6 +628,62 @@ actor DiscordGatewayLoop {
                 interactionToken: interactionToken,
                 type: 4,
                 content: trimmedContent(message),
+                components: nil
+            )
+        }
+    }
+
+    private func handlePlanInputComponentInteraction(
+        customId: String,
+        data: [String: JSONValue],
+        interactionId: String,
+        interactionToken: String
+    ) async {
+        let parts = customId.split(separator: ":", omittingEmptySubsequences: false)
+        guard parts.count == 4,
+              let menu = await planInputMenus.get(nonce: String(parts[2])),
+              let index = Int(parts[3]),
+              menu.request.questions.count == 1,
+              let question = menu.request.questions.first,
+              question.options.indices.contains(index)
+        else {
+            try? await client.createInteractionResponse(
+                interactionId: interactionId,
+                interactionToken: interactionToken,
+                type: 4,
+                content: "Question expired. Send your answer as a message.",
+                components: nil
+            )
+            return
+        }
+
+        let userId = data["member"]?.asObject?["user"]?.asObject?["id"]?.asString
+            ?? data["user"]?.asObject?["id"]?.asString
+            ?? "unknown"
+        let option = question.options[index]
+        let ok = await receiver.answerChannelPlanInputOption(
+            channelId: menu.sloppyChannelId,
+            userId: "discord:\(userId)",
+            requestId: menu.request.id,
+            questionId: question.id,
+            optionId: option.id,
+            topicId: nil
+        )
+        if ok {
+            await planInputMenus.remove(nonce: String(parts[2]))
+            try? await client.createInteractionResponse(
+                interactionId: interactionId,
+                interactionToken: interactionToken,
+                type: 7,
+                content: "Answer recorded: \(option.label)",
+                components: .array([])
+            )
+        } else {
+            try? await client.createInteractionResponse(
+                interactionId: interactionId,
+                interactionToken: interactionToken,
+                type: 4,
+                content: "Could not record answer.",
                 components: nil
             )
         }

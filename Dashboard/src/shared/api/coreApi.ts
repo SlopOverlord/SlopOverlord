@@ -62,6 +62,7 @@ export interface CoreApi {
   fetchChannelEvents: (channelId: string, query?: ChannelEventsQuery) => Promise<AnyRecord | null>;
   fetchChannelSessions: (query?: ChannelSessionsQuery) => Promise<AnyRecord[] | null>;
   fetchChannelSession: (sessionId: string) => Promise<AnyRecord | null>;
+  answerChannelInputRequest: (sessionId: string, requestId: string, payload: AnyRecord) => Promise<AnyRecord | null>;
   deleteChannelSession: (sessionId: string) => Promise<boolean>;
   postChannelControl: (channelId: string, payload: AnyRecord) => Promise<AnyRecord | null>;
   fetchBulletins: () => Promise<AnyRecord[]>;
@@ -161,6 +162,12 @@ export interface CoreApi {
     sessionId: string,
     payload: AnyRecord,
     options?: RequestOptions
+  ) => Promise<AnyRecord | null>;
+  answerAgentSessionInputRequest: (
+    agentId: string,
+    sessionId: string,
+    requestId: string,
+    payload: AnyRecord
   ) => Promise<AnyRecord | null>;
   postAgentSessionDirectory: (
     agentId: string,
@@ -324,6 +331,18 @@ export function createCoreApi(): CoreApi {
     fetchChannelSession: async (sessionId) => {
       const response = await requestJson<AnyRecord>({
         path: `/v1/channel-sessions/${encodeURIComponent(sessionId)}`
+      });
+      if (!response.ok) {
+        return null;
+      }
+      return response.data;
+    },
+
+    answerChannelInputRequest: async (sessionId, requestId, payload) => {
+      const response = await requestJson<AnyRecord, AnyRecord>({
+        path: `/v1/channel-sessions/${encodeURIComponent(sessionId)}/input-requests/${encodeURIComponent(requestId)}/answer`,
+        method: "POST",
+        body: payload
       });
       if (!response.ok) {
         return null;
@@ -1235,6 +1254,18 @@ export function createCoreApi(): CoreApi {
         method: "POST",
         body: payload,
         signal: options.signal
+      });
+      if (!response.ok) {
+        return null;
+      }
+      return response.data;
+    },
+
+    answerAgentSessionInputRequest: async (agentId, sessionId, requestId, payload) => {
+      const response = await requestJson<AnyRecord, AnyRecord>({
+        path: `/v1/agents/${encodeURIComponent(agentId)}/sessions/${encodeURIComponent(sessionId)}/input-requests/${encodeURIComponent(requestId)}/answer`,
+        method: "POST",
+        body: payload
       });
       if (!response.ok) {
         return null;

@@ -22,12 +22,12 @@ struct ProjectTaskListTool: CoreTool {
         guard let svc = context.projectService else {
             return toolFailure(tool: name, code: "not_available", message: "Project service not available.", retryable: false)
         }
-        let channelId = arguments["channelId"]?.asString ?? context.sessionID
-        let topicId = arguments["topicId"]?.asString
-        let statusFilter = arguments["status"]?.asString?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        let channelId = stringArgument(arguments, "channelId", default: context.sessionID)
+        let topicId = trimmedStringArgument(arguments, "topicId")
+        let statusFilter = trimmedStringArgument(arguments, "status")?.lowercased()
 
         let project: ProjectRecord
-        if let pid = arguments["projectId"]?.asString, !pid.isEmpty {
+        if let pid = trimmedStringArgument(arguments, "projectId") {
             do {
                 project = try await svc.getProject(id: pid)
             } catch {

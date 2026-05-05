@@ -300,6 +300,45 @@ actor ChannelSessionFileStore {
         )
     }
 
+    @discardableResult
+    func recordInputRequest(
+        channelId: String,
+        request: PlanInputRequest,
+        createdAt: Date = Date()
+    ) throws -> ChannelSessionSummary {
+        let title = request.title?.trimmingCharacters(in: .whitespacesAndNewlines)
+        return try appendEvent(
+            channelId: channelId,
+            userId: "assistant",
+            content: title?.isEmpty == false ? title! : "Input requested.",
+            type: .inputRequest,
+            metadata: ["requestId": request.id],
+            createdAt: createdAt,
+            inputRequest: request
+        )
+    }
+
+    @discardableResult
+    func recordInputResponse(
+        channelId: String,
+        response: PlanInputResponse,
+        summary: String,
+        createdAt: Date = Date()
+    ) throws -> ChannelSessionSummary {
+        return try appendEvent(
+            channelId: channelId,
+            userId: response.userId,
+            content: summary,
+            type: .inputResponse,
+            metadata: [
+                "requestId": response.requestId,
+                "status": response.status.rawValue
+            ],
+            createdAt: createdAt,
+            inputResponse: response
+        )
+    }
+
     func getMessageHistory(channelId: String, limit: Int = 50) throws -> [ChannelMessageEntry] {
         guard let openSession = try currentOpenSession(channelId: channelId) else {
             return []
@@ -319,6 +358,25 @@ actor ChannelSessionFileStore {
                 createdAt: event.createdAt
             )
         }
+    }
+
+    func hasPendingInputRequest(channelId: String) throws -> Bool {
+        try pendingInputRequest(channelId: channelId) != nil
+    }
+
+    func pendingInputRequest(channelId: String) throws -> (sessionId: String, request: PlanInputRequest)? {
+        guard let openSession = try currentOpenSession(channelId: channelId) else {
+            return nil
+        }
+        let events = try loadSession(sessionID: openSession.sessionId)
+        let answered = Set(events.compactMap { $0.inputResponse?.requestId })
+        for event in events.reversed() where event.type == .inputRequest {
+            guard let requestID = event.inputRequest?.id else { continue }
+            if !answered.contains(requestID) {
+                return event.inputRequest.map { (openSession.sessionId, $0) }
+            }
+        }
+        return nil
     }
 
     private func appendMessage(
@@ -343,7 +401,9 @@ actor ChannelSessionFileStore {
         content: String,
         type: ChannelSessionEventType,
         metadata: [String: String]? = nil,
-        createdAt: Date
+        createdAt: Date,
+        inputRequest: PlanInputRequest? = nil,
+        inputResponse: PlanInputResponse? = nil
     ) throws -> ChannelSessionSummary {
         let normalizedChannelID = try normalizedChannelID(channelId)
         let summary = try currentOpenSession(channelId: normalizedChannelID)
@@ -355,7 +415,9 @@ actor ChannelSessionFileStore {
             userId: userId,
             content: content,
             createdAt: createdAt,
-            metadata: metadata
+            metadata: metadata,
+            inputRequest: inputRequest,
+            inputResponse: inputResponse
         )
         try append(events: [event], to: fileURL, createIfMissing: false)
         return try loadSessionSummary(fileURL: fileURL)
@@ -571,6 +633,8 @@ public struct ChannelSessionEvent: Codable, Sendable, Equatable {
     public var content: String
     public var createdAt: Date
     public var metadata: [String: String]?
+    public var inputRequest: PlanInputRequest?
+    public var inputResponse: PlanInputResponse?
 
     public init(
         id: String = UUID().uuidString,
@@ -579,7 +643,9 @@ public struct ChannelSessionEvent: Codable, Sendable, Equatable {
         userId: String,
         content: String,
         createdAt: Date = Date(),
-        metadata: [String: String]? = nil
+        metadata: [String: String]? = nil,
+        inputRequest: PlanInputRequest? = nil,
+        inputResponse: PlanInputResponse? = nil
     ) {
         self.id = id
         self.channelId = channelId
@@ -588,6 +654,8 @@ public struct ChannelSessionEvent: Codable, Sendable, Equatable {
         self.content = content
         self.createdAt = createdAt
         self.metadata = metadata
+        self.inputRequest = inputRequest
+        self.inputResponse = inputResponse
     }
 }
 
@@ -600,6 +668,8 @@ public enum ChannelSessionEventType: String, Codable, Sendable {
     case thinking = "thinking"
     case toolCall = "tool_call"
     case toolResult = "tool_result"
+    case inputRequest = "input_request"
+    case inputResponse = "input_response"
 }
 
 public enum ChannelSessionStatus: String, Codable, Sendable, Equatable {

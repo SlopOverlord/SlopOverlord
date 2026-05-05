@@ -251,6 +251,50 @@ actor ChannelDeliveryService {
         return false
     }
 
+    @discardableResult
+    func presentPlanInputRequest(
+        channelId: String,
+        userId: String,
+        request: PlanInputRequest,
+        topicId: String?
+    ) async -> Bool {
+        if let plugin = resolvedInProcessPlugin(channelId: channelId) as? any PlanInputGatewayPlugin {
+            do {
+                try await plugin.presentPlanInputRequest(
+                    channelId: channelId,
+                    userId: userId,
+                    request: request,
+                    topicId: topicId
+                )
+                return true
+            } catch {
+                return false
+            }
+        }
+
+        let body = Self.planInputFallbackText(request)
+        return await deliver(channelId: channelId, userId: userId, content: body, topicId: topicId)
+    }
+
+    private static func planInputFallbackText(_ request: PlanInputRequest) -> String {
+        let title = request.title?.trimmingCharacters(in: .whitespacesAndNewlines)
+        var lines: [String] = [title?.isEmpty == false ? title! : "Plan input requested"]
+        for (index, question) in request.questions.enumerated() {
+            lines.append("")
+            lines.append("\(index + 1). \(question.question)")
+            for option in question.options {
+                if let description = option.description, !description.isEmpty {
+                    lines.append("- \(option.label): \(description)")
+                } else {
+                    lines.append("- \(option.label)")
+                }
+            }
+        }
+        lines.append("")
+        lines.append("Choose an option below when available, or send your own answer as the next message.")
+        return lines.joined(separator: "\n")
+    }
+
     private func externalPluginBinding(for channelId: String) async -> ChannelPluginRecord? {
         let plugins = await store.listChannelPlugins()
         let base = ChannelGatewayScope.parse(channelId).baseChannelId

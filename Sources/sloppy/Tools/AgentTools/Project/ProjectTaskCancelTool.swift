@@ -26,8 +26,8 @@ struct ProjectTaskCancelTool: CoreTool {
         guard let svc = context.projectService else {
             return toolFailure(tool: name, code: "not_available", message: "Project service not available.", retryable: false)
         }
-        let channelId = arguments["channelId"]?.asString ?? context.sessionID
-        let topicId = arguments["topicId"]?.asString
+        let channelId = stringArgument(arguments, "channelId", default: context.sessionID)
+        let topicId = trimmedStringArgument(arguments, "topicId")
         let reason = arguments["reason"]?.asString
         let parsedReferences = taskReferences(from: arguments)
 
@@ -38,7 +38,7 @@ struct ProjectTaskCancelTool: CoreTool {
             return toolFailure(tool: name, code: "invalid_arguments", message: "`taskId`, `reference`, `taskIds`, or `references` is required.", retryable: false)
         }
         let project: ProjectRecord
-        if let pid = arguments["projectId"]?.asString, !pid.isEmpty {
+        if let pid = trimmedStringArgument(arguments, "projectId") {
             do {
                 project = try await svc.getProject(id: pid)
             } catch {

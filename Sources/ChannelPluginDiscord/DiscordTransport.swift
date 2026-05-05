@@ -15,10 +15,17 @@ protocol DiscordPlatformClient: Sendable {
     func gatewayURL() async throws -> URL
     func connectGateway(url: URL) async throws -> any DiscordGatewaySession
     func sendMessage(channelId: String, content: String) async throws -> DiscordRESTMessage
+    func sendMessage(channelId: String, content: String, components: JSONValue?) async throws -> DiscordRESTMessage
     func editMessage(channelId: String, messageId: String, content: String) async throws -> DiscordRESTMessage
     func deleteMessage(channelId: String, messageId: String) async throws
     func registerGlobalCommands(applicationId: String, commands: [JSONValue]) async throws
     func createInteractionResponse(interactionId: String, interactionToken: String, type: Int, content: String?, components: JSONValue?) async throws
+}
+
+extension DiscordPlatformClient {
+    func sendMessage(channelId: String, content: String, components: JSONValue?) async throws -> DiscordRESTMessage {
+        try await sendMessage(channelId: channelId, content: content)
+    }
 }
 
 struct DiscordGatewayPayload: Codable, Sendable {
@@ -101,10 +108,18 @@ actor DiscordHTTPClient: DiscordPlatformClient {
     }
 
     func sendMessage(channelId: String, content: String) async throws -> DiscordRESTMessage {
+        try await sendMessage(channelId: channelId, content: content, components: nil)
+    }
+
+    func sendMessage(channelId: String, content: String, components: JSONValue?) async throws -> DiscordRESTMessage {
+        var body: [String: JSONValue] = ["content": .string(content)]
+        if let components {
+            body["components"] = components
+        }
         let payload = try await request(
             method: "POST",
             path: "channels/\(channelId)/messages",
-            body: ["content": .string(content)]
+            body: body
         )
         let response = try JSONDecoder().decode(DiscordRESTMessage.self, from: payload)
         return response

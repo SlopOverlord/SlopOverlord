@@ -12,6 +12,7 @@ The `sloppy` binary is both a server and a command-line client. When the server 
 | Situation | Recommended tool |
 | --- | --- |
 | Quick inspection, scripting, CI/CD | CLI |
+| Fast local project chat from a terminal | Terminal UI |
 | Day-to-day chat and visual management | Dashboard |
 | Custom integrations and automation | HTTP API directly |
 
@@ -76,6 +77,23 @@ When the server starts, `SLOPPY_TOKEN` is used as:
 2. the runtime value for `ui.dashboardAuth.token` when dashboard auth is enabled but no dashboard token is configured
 
 This is useful for local runs, launch agents, CI, or container deployments where secrets should come from the environment instead of the checked-in config file.
+
+## Terminal UI
+
+The default interactive terminal experience is the Sloppy TUI:
+
+```bash
+sloppy
+sloppy tui
+sloppy tui --config-path /path/to/sloppy.json
+sloppy -s <sessionId>
+sloppy tui -s <sessionId>
+sloppy models
+```
+
+`sloppy` with no subcommand opens the TUI. It bootstraps the runtime in-process for the current directory, restores the last agent/session for that project, and shares the same `sloppy.json` and workspace as the server and Dashboard. Use `sloppy models` to open only the model picker for the current TUI agent.
+
+See [Terminal UI](/guides/tui) for keys, slash commands, model/provider setup, file attachments, and session resume behavior.
 
 ## Background service
 

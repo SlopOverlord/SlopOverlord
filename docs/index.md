@@ -15,7 +15,7 @@ Who is it for? Developers and teams who want AI agents they can observe, extend,
 
 Sloppy combines a Swift HTTP server and actor-based orchestration kernel with a React operator dashboard. You deploy a single `sloppy` process; it handles everything from message ingestion to model calls, background task execution, memory maintenance, and event emission.
 
-Channels (Telegram, Discord, HTTP API) deliver messages to the runtime. The runtime decides how to respond — inline, via a spawned worker, or through a focused branch — and keeps a complete typed record of every decision. The dashboard lets you watch it all happen in real time.
+Entry points (Terminal UI, Telegram, Discord, HTTP API) deliver messages to the runtime. The runtime decides how to respond — inline, via a spawned worker, or through a focused branch — and keeps a complete typed record of every decision. The dashboard lets you watch it all happen in real time.
 
 ## What makes it different?
 
@@ -74,6 +74,10 @@ Visor runs continuously in the background, monitoring worker health, detecting t
 
 The React operator dashboard shows live channel activity, agent state, memory, workers, and configuration. It connects directly to the Core API.
 
+### Terminal UI
+
+The `sloppy` command opens a full-screen terminal UI for local project chat. It restores the last agent/session for the current directory, supports model and provider pickers, accepts slash commands, and can inline project files with `@path`. See [Terminal UI](/guides/tui).
+
 ### Plugin system
 
 Model providers (OpenAI, Anthropic, Gemini, Ollama), tools, memory backends, and gateway channels are all loaded via the `PluginSDK` plugin contracts — no core changes required.
@@ -108,7 +112,7 @@ This builds the server stack and the Dashboard bundle, then installs `sloppy` in
 sloppy --version
 ```
 
-Then start the server with `sloppy run`. From another terminal, check it with `sloppy status`.
+Then open the terminal UI with `sloppy`, or start the server and Dashboard with `sloppy run`. From another terminal, check the server with `sloppy status`.
 
 If you prefer a curl installer flow:
 
@@ -139,13 +143,14 @@ SLOPPY_CA_CERTS=/path/to/extra-ca.pem
 
 Runtime configuration lives in `sloppy.json`. If you do nothing, Sloppy uses sensible defaults and picks up any API keys from the environment.
 
-See [Model Providers](/guides/models) for provider-specific setup and [CLI Reference](/guides/cli) for all runtime commands.
+See [Model Providers](/guides/models) for provider-specific setup, [Terminal UI](/guides/tui) for interactive local chat, and [CLI Reference](/guides/cli) for all runtime commands.
 
 ## Start here
 
 | Guide | Description |
 | --- | --- |
 | [Install](/install) | Get Sloppy running from the terminal or with Docker |
+| [Terminal UI](/guides/tui) | Use the full-screen local terminal chat, model picker, and slash commands |
 | [CLI Reference](/guides/cli) | All `sloppy` subcommands and flags |
 | [Model Providers](/guides/models) | Configure OpenAI, Gemini, Anthropic, and Ollama |
 | [Channels](/channels/about) | How channels work and how to set up Telegram and Discord |

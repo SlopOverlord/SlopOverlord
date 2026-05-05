@@ -29,6 +29,7 @@ extension CoreService {
         sessionStore.updateAgentsRootURL(agentsRootURL)
         actorBoardStore.updateWorkspaceRootURL(workspaceRootURL)
         await channelModelStore.updateWorkspaceRootURL(workspaceRootURL)
+        await channelChatModeStore.updateWorkspaceRootURL(workspaceRootURL)
         await sessionOrchestrator.updateAgentsRootURL(agentsRootURL)
         await toolsAuthorization.updateAgentsRootURL(agentsRootURL)
         await mcpRegistry.updateConfig(config.mcp)

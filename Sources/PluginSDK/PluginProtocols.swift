@@ -98,6 +98,16 @@ public protocol InboundMessageReceiver: Sendable {
         platform: String?,
         platformChannelId: String?
     ) async -> ChannelProjectLinkResult
+
+    /// Answers a pending plan-mode input request from a native platform option button.
+    func answerChannelPlanInputOption(
+        channelId: String,
+        userId: String,
+        requestId: String,
+        questionId: String,
+        optionId: String,
+        topicId: String?
+    ) async -> Bool
 }
 
 public extension InboundMessageReceiver {
@@ -145,6 +155,17 @@ public extension InboundMessageReceiver {
     ) async -> ChannelProjectLinkResult {
         .failed(message: "Project linking is not available.")
     }
+
+    func answerChannelPlanInputOption(
+        channelId: String,
+        userId: String,
+        requestId: String,
+        questionId: String,
+        optionId: String,
+        topicId: String?
+    ) async -> Bool {
+        false
+    }
 }
 
 /// In-process gateway plugin for direct integration.
@@ -169,6 +190,16 @@ public extension GatewayPlugin {
     func send(channelId: String, message: String) async throws {
         try await send(channelId: channelId, message: message, topicId: nil)
     }
+}
+
+/// Optional gateway capability for presenting plan-mode input requests with native platform actions.
+public protocol PlanInputGatewayPlugin: GatewayPlugin {
+    func presentPlanInputRequest(
+        channelId: String,
+        userId: String,
+        request: PlanInputRequest,
+        topicId: String?
+    ) async throws
 }
 
 public struct GatewayOutboundStreamHandle: Codable, Sendable, Equatable {

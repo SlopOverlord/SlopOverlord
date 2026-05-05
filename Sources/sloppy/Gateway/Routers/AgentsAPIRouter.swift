@@ -443,6 +443,31 @@ struct AgentsAPIRouter: APIRouter {
             }
         }
 
+        router.post("/v1/agents/:agentId/sessions/:sessionId/input-requests/:requestId/answer", metadata: RouteMetadata(summary: "Answer session input request", description: "Answers a pending plan-mode structured input request and resumes the session", tags: ["Agents"])) { request in
+            let agentId = request.pathParam("agentId") ?? ""
+            let sessionId = request.pathParam("sessionId") ?? ""
+            let requestId = request.pathParam("requestId") ?? ""
+            guard let body = request.body,
+                  let payload = CoreRouter.decode(body, as: PlanInputAnswerRequest.self)
+            else {
+                return CoreRouter.json(status: HTTPStatus.badRequest, payload: ["error": ErrorCode.invalidBody])
+            }
+
+            do {
+                let response = try await service.answerAgentPlanInput(
+                    agentID: agentId,
+                    sessionID: sessionId,
+                    requestID: requestId,
+                    payload: payload
+                )
+                return CoreRouter.encodable(status: HTTPStatus.ok, payload: response)
+            } catch let error as CoreService.AgentSessionError {
+                return CoreRouter.agentSessionErrorResponse(error, fallback: ErrorCode.sessionWriteFailed)
+            } catch {
+                return CoreRouter.json(status: HTTPStatus.internalServerError, payload: ["error": ErrorCode.sessionWriteFailed])
+            }
+        }
+
         router.post("/v1/agents/:agentId/sessions/:sessionId/directories", metadata: RouteMetadata(summary: "Add session directory", description: "Adds a working directory to an active agent session", tags: ["Agents"])) { request in
             let agentId = request.pathParam("agentId") ?? ""
             let sessionId = request.pathParam("sessionId") ?? ""

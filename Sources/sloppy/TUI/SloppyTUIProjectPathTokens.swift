@@ -142,3 +142,32 @@ enum SloppyTUIProjectPathTokens {
         return result
     }
 }
+
+struct SloppyTUIProjectPathSearchSuppression: Equatable {
+    var rawToken: String
+    var line: Int
+    var startColumn: Int
+
+    init(token: SloppyTUIProjectPathTokens.Token) {
+        self.rawToken = token.rawToken
+        self.line = token.line
+        self.startColumn = token.startColumn
+    }
+
+    init(rawToken: String, line: Int, startColumn: Int) {
+        self.rawToken = rawToken
+        self.line = line
+        self.startColumn = startColumn
+    }
+
+    func matches(_ token: SloppyTUIProjectPathTokens.Token?) -> Bool {
+        guard let token,
+              token.line == line,
+              token.startColumn == startColumn
+        else {
+            return false
+        }
+
+        return token.rawToken.hasPrefix(rawToken) || rawToken.hasPrefix(token.rawToken)
+    }
+}

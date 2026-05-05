@@ -43,6 +43,20 @@ A default scaffold is written on agent creation with sensible baseline behaviors
 
 Describes the person the agent is working with. Use this file to tell the agent about your communication preferences, the context you're working in, and what kind of responses you find most useful. This gets injected into the system prompt alongside `AGENTS.md`.
 
+### FRIEND_REMINDER.md
+
+A short per-agent reminder block that is appended to each user message when the file is not empty. Use it for lightweight, always-current preferences or constraints that should sit next to the user's request rather than only in the startup context.
+
+Sloppy creates this file empty by default. When it contains text, the runtime sends the user message to the model with an extra block:
+
+```md
+#[FRIEND_REMINDER.md]
+- Do not use MCPs
+- Always run git pull
+```
+
+Because this block is attached to every user turn, keep it brief and tactical. Put stable identity, collaboration style, and broad operating rules in `USER.md` or `AGENTS.md` instead.
+
 ### SOUL.md
 
 Defines the agent's core values and behavioral constraints — things like "prioritize correctness over speed", "never hide risks", "avoid hallucinations". These act as a backstop that applies regardless of what the task instructions say.
@@ -103,6 +117,7 @@ Stores the persisted session history for this agent. Each session is written as 
 ├── config.json             ← mutable runtime config
 ├── AGENTS.md               ← behavior instructions
 ├── USER.md                 ← user preferences
+├── FRIEND_REMINDER.md      ← optional reminder appended to user turns
 ├── SOUL.md                 ← core values
 ├── IDENTITY.md             ← identity description
 ├── HEARTBEAT.md            ← heartbeat prompt template

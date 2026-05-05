@@ -30,15 +30,15 @@ struct ProjectTaskCreateTool: CoreTool {
         guard let svc = context.projectService else {
             return toolFailure(tool: name, code: "not_available", message: "Project service not available.", retryable: false)
         }
-        let channelId = arguments["channelId"]?.asString ?? context.sessionID
-        let topicId = arguments["topicId"]?.asString
+        let channelId = stringArgument(arguments, "channelId", default: context.sessionID)
+        let topicId = trimmedStringArgument(arguments, "topicId")
         let title = arguments["title"]?.asString?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         guard !title.isEmpty else {
             return toolFailure(tool: name, code: "invalid_arguments", message: "`title` is required.", retryable: false)
         }
 
         let project: ProjectRecord
-        if let pid = arguments["projectId"]?.asString, !pid.isEmpty {
+        if let pid = trimmedStringArgument(arguments, "projectId") {
             do {
                 project = try await svc.getProject(id: pid)
             } catch {
@@ -59,8 +59,8 @@ struct ProjectTaskCreateTool: CoreTool {
                 request: ProjectTaskCreateRequest(
                     title: title,
                     description: arguments["description"]?.asString,
-                    priority: arguments["priority"]?.asString ?? "medium",
-                    status: arguments["status"]?.asString ?? ProjectTaskStatus.pendingApproval.rawValue,
+                    priority: trimmedStringArgument(arguments, "priority") ?? "medium",
+                    status: trimmedStringArgument(arguments, "status") ?? ProjectTaskStatus.pendingApproval.rawValue,
                     kind: kind,
                     loopModeOverride: loopMode,
                     actorId: arguments["actorId"]?.asString,

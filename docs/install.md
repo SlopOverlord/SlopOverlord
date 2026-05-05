@@ -128,7 +128,13 @@ powershell -ExecutionPolicy Bypass -File scripts/install-sloppy-node.ps1
 
 For permissions, protocol details, and client helper notes, see [SloppyNode](/guides/sloppy-node).
 
-Then start the server:
+Then open the terminal UI for local project chat:
+
+```bash
+sloppy
+```
+
+Or start the server and Dashboard:
 
 ```bash
 sloppy run
@@ -207,7 +213,7 @@ Preview removals without deleting anything:
 bash scripts/uninstall.sh --dry-run
 ```
 
-For details see [Build From Terminal](/guides/build-from-terminal) and the [CLI Reference](/guides/cli).
+For details see [Build From Terminal](/guides/build-from-terminal), [Terminal UI](/guides/tui), and the [CLI Reference](/guides/cli).
 
 ## Docker
 

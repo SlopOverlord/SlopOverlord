@@ -363,6 +363,19 @@ func parseMemoryScope(from arguments: [String: JSONValue]) -> MemoryScope? {
 
 // MARK: - Project helpers (pure functions)
 
+func trimmedStringArgument(_ arguments: [String: JSONValue], _ key: String) -> String? {
+    guard let raw = arguments[key]?.asString?.trimmingCharacters(in: .whitespacesAndNewlines),
+          !raw.isEmpty
+    else {
+        return nil
+    }
+    return raw
+}
+
+func stringArgument(_ arguments: [String: JSONValue], _ key: String, default defaultValue: String) -> String {
+    trimmedStringArgument(arguments, key) ?? defaultValue
+}
+
 func findProjectForChannel(store: any PersistenceStore, channelId: String, topicId: String?) async -> ProjectRecord? {
     let projects = await store.listProjects()
     let scoped = ChannelGatewayScope.parse(channelId)

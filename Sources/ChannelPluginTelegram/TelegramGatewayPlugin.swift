@@ -6,7 +6,28 @@ import Protocols
 
 /// In-process GatewayPlugin that bridges Telegram to Sloppy channels.
 /// Uses long-polling to receive messages and InboundMessageReceiver to forward them to Sloppy.
-public actor TelegramGatewayPlugin: StreamingGatewayPlugin, ToolApprovalGatewayPlugin {
+actor TelegramPlanInputSessionStore {
+    struct Session: Sendable {
+        let bindingChannelId: String
+        let request: PlanInputRequest
+    }
+
+    private var sessions: [Int64: Session] = [:]
+
+    func set(messageId: Int64, session: Session) {
+        sessions[messageId] = session
+    }
+
+    func get(messageId: Int64) -> Session? {
+        sessions[messageId]
+    }
+
+    func remove(messageId: Int64) {
+        sessions[messageId] = nil
+    }
+}
+
+public actor TelegramGatewayPlugin: StreamingGatewayPlugin, ToolApprovalGatewayPlugin, PlanInputGatewayPlugin {
     private struct StreamState: Sendable {
         let chatId: Int64
         let messageId: Int64
@@ -24,6 +45,7 @@ public actor TelegramGatewayPlugin: StreamingGatewayPlugin, ToolApprovalGatewayP
     private let logger: Logger
     private let modelPickerBridge: (any TelegramModelPickerBridge)?
     private let toolApprovalBridge: (any ToolApprovalBridge)?
+    private let planInputSessions = TelegramPlanInputSessionStore()
     private var pollerTask: Task<Void, Never>?
     private var streams: [String: StreamState] = [:]
     private var approvalMessages: [String: StreamState] = [:]
@@ -99,7 +121,8 @@ public actor TelegramGatewayPlugin: StreamingGatewayPlugin, ToolApprovalGatewayP
                 await self.setActiveChatId(channelId: channelId, chatId: chatId)
             },
             modelPickerBridge: modelPickerBridge,
-            toolApprovalBridge: toolApprovalBridge
+            toolApprovalBridge: toolApprovalBridge,
+            planInputSessions: planInputSessions
         )
         pollerTask = Task { await poller.run() }
     }
@@ -138,6 +161,38 @@ public actor TelegramGatewayPlugin: StreamingGatewayPlugin, ToolApprovalGatewayP
         }
         let threadId = effectiveMessageThreadId(channelId: channelId, topicId: topicId)
         _ = try await bot.sendMessage(chatId: chatId, text: message, messageThreadId: threadId)
+    }
+
+    public func presentPlanInputRequest(
+        channelId: String,
+        userId _: String,
+        request: PlanInputRequest,
+        topicId: String?
+    ) async throws {
+        guard let chatId = resolvedChatId(forChannelId: channelId) else {
+            logger.warning("No Telegram chat target for plan input \(request.id).")
+            return
+        }
+        let threadId = effectiveMessageThreadId(channelId: channelId, topicId: topicId)
+        let sent = try await bot.sendMessage(
+            chatId: chatId,
+            text: Self.planInputText(request),
+            messageThreadId: threadId,
+            replyMarkup: Self.planInputKeyboard(messageId: 0, request: request),
+            showTyping: false
+        )
+        let keyboard = Self.planInputKeyboard(messageId: sent.messageId, request: request)
+        _ = try await bot.editMessageText(
+            chatId: chatId,
+            messageId: sent.messageId,
+            text: Self.planInputText(request),
+            messageThreadId: threadId,
+            replyMarkup: keyboard
+        )
+        await planInputSessions.set(
+            messageId: sent.messageId,
+            session: .init(bindingChannelId: ChannelGatewayScope.parse(channelId).baseChannelId, request: request)
+        )
     }
 
     public func presentToolApproval(_ approval: ToolApprovalRecord) async throws {
@@ -257,5 +312,39 @@ public actor TelegramGatewayPlugin: StreamingGatewayPlugin, ToolApprovalGatewayP
             text: finalContent,
             messageThreadId: state.messageThreadId
         )
+    }
+
+    private static func planInputText(_ request: PlanInputRequest) -> String {
+        var lines: [String] = [request.title ?? "Plan input requested"]
+        for (index, question) in request.questions.enumerated() {
+            lines.append("")
+            lines.append("\(index + 1). \(question.question)")
+            for option in question.options {
+                if let description = option.description, !description.isEmpty {
+                    lines.append("- \(option.label): \(description)")
+                } else {
+                    lines.append("- \(option.label)")
+                }
+            }
+        }
+        lines.append("")
+        if request.questions.count == 1 {
+            lines.append("Tap an option, or send your own answer as the next message.")
+        } else {
+            lines.append("Send custom answers as the next message, one line per question.")
+        }
+        return lines.joined(separator: "\n")
+    }
+
+    private static func planInputKeyboard(messageId: Int64, request: PlanInputRequest) -> [[[String: String]]]? {
+        guard request.questions.count == 1, let question = request.questions.first else {
+            return nil
+        }
+        return question.options.enumerated().map { index, option in
+            [[
+                "text": String(option.label.prefix(64)),
+                "callback_data": "pi:\(messageId):\(index)"
+            ]]
+        }
     }
 }

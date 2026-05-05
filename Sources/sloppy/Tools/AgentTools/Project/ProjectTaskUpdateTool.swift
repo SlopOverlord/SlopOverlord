@@ -33,15 +33,15 @@ struct ProjectTaskUpdateTool: CoreTool {
         guard let svc = context.projectService else {
             return toolFailure(tool: name, code: "not_available", message: "Project service not available.", retryable: false)
         }
-        let channelId = arguments["channelId"]?.asString ?? context.sessionID
-        let topicId = arguments["topicId"]?.asString
+        let channelId = stringArgument(arguments, "channelId", default: context.sessionID)
+        let topicId = trimmedStringArgument(arguments, "topicId")
         let rawReference = arguments["taskId"]?.asString ?? arguments["reference"]?.asString ?? ""
 
         guard let normalizedReference = normalizeTaskRef(rawReference) else {
             return toolFailure(tool: name, code: "invalid_arguments", message: "`taskId` (or `reference`) is required.", retryable: false)
         }
         let project: ProjectRecord
-        if let pid = arguments["projectId"]?.asString, !pid.isEmpty {
+        if let pid = trimmedStringArgument(arguments, "projectId") {
             do {
                 project = try await svc.getProject(id: pid)
             } catch {
@@ -61,9 +61,7 @@ struct ProjectTaskUpdateTool: CoreTool {
                 .lowercased()
             let completionNote = arguments["completionNote"]?.asString?
                 .trimmingCharacters(in: .whitespacesAndNewlines)
-            let requestedStatus = arguments["status"]?.asString?
-                .trimmingCharacters(in: .whitespacesAndNewlines)
-                .lowercased()
+            let requestedStatus = trimmedStringArgument(arguments, "status")?.lowercased()
             if requestedStatus == ProjectTaskStatus.done.rawValue {
                 guard let completionConfidenceRaw,
                       let completionConfidence = ProjectTaskCompletionConfidence(rawValue: completionConfidenceRaw),
@@ -96,8 +94,8 @@ struct ProjectTaskUpdateTool: CoreTool {
                 request: ProjectTaskUpdateRequest(
                     title: arguments["title"]?.asString,
                     description: arguments["description"]?.asString,
-                    priority: arguments["priority"]?.asString,
-                    status: arguments["status"]?.asString,
+                    priority: trimmedStringArgument(arguments, "priority"),
+                    status: requestedStatus,
                     completionConfidence: completionConfidenceRaw.flatMap { ProjectTaskCompletionConfidence(rawValue: $0) },
                     completionNote: completionNote,
                     kind: kind,

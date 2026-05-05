@@ -38,6 +38,7 @@ function emptyAgentConfigDraft(agentId) {
       soulMarkdown: "",
       identityMarkdown: "",
       heartbeatMarkdown: "",
+      friendReminderMarkdown: "",
       memoryMarkdown: ""
     },
     heartbeat: {
@@ -78,6 +79,7 @@ function normalizeConfigDraft(agentId, config) {
       soulMarkdown: String(config.documents?.soulMarkdown || ""),
       identityMarkdown: String(config.documents?.identityMarkdown || ""),
       heartbeatMarkdown: String(config.documents?.heartbeatMarkdown || ""),
+      friendReminderMarkdown: String(config.documents?.friendReminderMarkdown || ""),
       memoryMarkdown: String(config.documents?.memoryMarkdown || "")
     },
     heartbeat: {
@@ -150,6 +152,7 @@ const AGENT_DOC_FILES = [
   { id: "soulMarkdown", name: "SOUL.md", icon: "psychology" },
   { id: "identityMarkdown", name: "IDENTITY.md", icon: "badge" },
   { id: "heartbeatMarkdown", name: "HEARTBEAT.md", icon: "monitor_heart" },
+  { id: "friendReminderMarkdown", name: "FRIEND_REMINDER.md", icon: "favorite" },
   { id: "memoryMarkdown", name: "MEMORY.md", icon: "neurology", readOnly: true }
 ];
 
@@ -581,6 +584,7 @@ export function AgentConfigTab({ agentId, agentDisplayName = "", onDeleteAgent =
         soulMarkdown: String(draft.documents.soulMarkdown || ""),
         identityMarkdown: String(draft.documents.identityMarkdown || ""),
         heartbeatMarkdown: String(draft.documents.heartbeatMarkdown || ""),
+        friendReminderMarkdown: String(draft.documents.friendReminderMarkdown || ""),
         memoryMarkdown: String(draft.documents.memoryMarkdown || "")
       },
       heartbeat: {

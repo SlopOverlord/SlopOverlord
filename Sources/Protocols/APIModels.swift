@@ -1736,6 +1736,7 @@ public struct AgentDocumentBundle: Codable, Sendable, Equatable {
     public var soulMarkdown: String
     public var identityMarkdown: String
     public var heartbeatMarkdown: String
+    public var friendReminderMarkdown: String
     public var memoryMarkdown: String
 
     public init(
@@ -1744,6 +1745,7 @@ public struct AgentDocumentBundle: Codable, Sendable, Equatable {
         soulMarkdown: String,
         identityMarkdown: String,
         heartbeatMarkdown: String = "",
+        friendReminderMarkdown: String = "",
         memoryMarkdown: String = ""
     ) {
         self.userMarkdown = userMarkdown
@@ -1751,6 +1753,7 @@ public struct AgentDocumentBundle: Codable, Sendable, Equatable {
         self.soulMarkdown = soulMarkdown
         self.identityMarkdown = identityMarkdown
         self.heartbeatMarkdown = heartbeatMarkdown
+        self.friendReminderMarkdown = friendReminderMarkdown
         self.memoryMarkdown = memoryMarkdown
     }
 
@@ -1760,6 +1763,7 @@ public struct AgentDocumentBundle: Codable, Sendable, Equatable {
         case soulMarkdown
         case identityMarkdown
         case heartbeatMarkdown
+        case friendReminderMarkdown
         case memoryMarkdown
     }
 
@@ -1770,6 +1774,7 @@ public struct AgentDocumentBundle: Codable, Sendable, Equatable {
         soulMarkdown = try container.decode(String.self, forKey: .soulMarkdown)
         identityMarkdown = try container.decode(String.self, forKey: .identityMarkdown)
         heartbeatMarkdown = try container.decodeIfPresent(String.self, forKey: .heartbeatMarkdown) ?? ""
+        friendReminderMarkdown = try container.decodeIfPresent(String.self, forKey: .friendReminderMarkdown) ?? ""
         memoryMarkdown = try container.decodeIfPresent(String.self, forKey: .memoryMarkdown) ?? ""
     }
 }
@@ -2810,6 +2815,8 @@ public enum AgentSessionEventType: String, Codable, Sendable {
     case runControl = "run_control"
     case toolCall = "tool_call"
     case toolResult = "tool_result"
+    case inputRequest = "input_request"
+    case inputResponse = "input_response"
 }
 
 public enum AgentMessageRole: String, Codable, Sendable {
@@ -2977,6 +2984,118 @@ public struct AgentToolResultEvent: Codable, Sendable, Equatable {
     }
 }
 
+public struct PlanInputOption: Codable, Sendable, Equatable {
+    public var id: String
+    public var label: String
+    public var description: String?
+
+    public init(id: String, label: String, description: String? = nil) {
+        self.id = id
+        self.label = label
+        self.description = description
+    }
+}
+
+public struct PlanInputQuestion: Codable, Sendable, Equatable {
+    public var id: String
+    public var header: String?
+    public var question: String
+    public var options: [PlanInputOption]
+    public var allowCustomAnswer: Bool
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case header
+        case question
+        case options
+        case allowCustomAnswer
+    }
+
+    public init(
+        id: String,
+        header: String? = nil,
+        question: String,
+        options: [PlanInputOption],
+        allowCustomAnswer: Bool = true
+    ) {
+        self.id = id
+        self.header = header
+        self.question = question
+        self.options = options
+        self.allowCustomAnswer = allowCustomAnswer
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(String.self, forKey: .id)
+        header = try container.decodeIfPresent(String.self, forKey: .header)
+        question = try container.decode(String.self, forKey: .question)
+        options = try container.decode([PlanInputOption].self, forKey: .options)
+        allowCustomAnswer = try container.decodeIfPresent(Bool.self, forKey: .allowCustomAnswer) ?? true
+    }
+}
+
+public struct PlanInputRequest: Codable, Sendable, Equatable {
+    public var id: String
+    public var mode: String
+    public var title: String?
+    public var questions: [PlanInputQuestion]
+    public var createdAt: Date
+
+    public init(
+        id: String = UUID().uuidString,
+        mode: String = "plan",
+        title: String? = nil,
+        questions: [PlanInputQuestion],
+        createdAt: Date = Date()
+    ) {
+        self.id = id
+        self.mode = mode
+        self.title = title
+        self.questions = questions
+        self.createdAt = createdAt
+    }
+}
+
+public enum PlanInputResponseStatus: String, Codable, Sendable, Equatable {
+    case answered
+    case cancelled
+}
+
+public struct PlanInputAnswer: Codable, Sendable, Equatable {
+    public var questionId: String
+    public var selectedOptionId: String?
+    public var customAnswer: String?
+
+    public init(questionId: String, selectedOptionId: String? = nil, customAnswer: String? = nil) {
+        self.questionId = questionId
+        self.selectedOptionId = selectedOptionId
+        self.customAnswer = customAnswer
+    }
+}
+
+public struct PlanInputResponse: Codable, Sendable, Equatable {
+    public var requestId: String
+    public var status: PlanInputResponseStatus
+    public var answers: [PlanInputAnswer]
+    public var userId: String
+    public var createdAt: Date
+
+    public init(
+        requestId: String,
+        status: PlanInputResponseStatus,
+        answers: [PlanInputAnswer],
+        userId: String,
+        createdAt: Date = Date()
+    ) {
+        self.requestId = requestId
+        self.status = status
+        self.answers = answers
+        self.userId = userId
+        self.createdAt = createdAt
+    }
+}
+
 public struct AgentSessionMetadataEvent: Codable, Sendable, Equatable {
     public var title: String
     public var parentSessionId: String?
@@ -3025,6 +3144,8 @@ public struct AgentSessionEvent: Codable, Sendable, Equatable {
     public var runControl: AgentRunControlEvent?
     public var toolCall: AgentToolCallEvent?
     public var toolResult: AgentToolResultEvent?
+    public var inputRequest: PlanInputRequest?
+    public var inputResponse: PlanInputResponse?
 
     public init(
         id: String = UUID().uuidString,
@@ -3039,7 +3160,9 @@ public struct AgentSessionEvent: Codable, Sendable, Equatable {
         subSession: AgentSubSessionEvent? = nil,
         runControl: AgentRunControlEvent? = nil,
         toolCall: AgentToolCallEvent? = nil,
-        toolResult: AgentToolResultEvent? = nil
+        toolResult: AgentToolResultEvent? = nil,
+        inputRequest: PlanInputRequest? = nil,
+        inputResponse: PlanInputResponse? = nil
     ) {
         self.id = id
         self.version = version
@@ -3054,6 +3177,20 @@ public struct AgentSessionEvent: Codable, Sendable, Equatable {
         self.runControl = runControl
         self.toolCall = toolCall
         self.toolResult = toolResult
+        self.inputRequest = inputRequest
+        self.inputResponse = inputResponse
+    }
+}
+
+public struct PlanInputAnswerRequest: Codable, Sendable, Equatable {
+    public var status: PlanInputResponseStatus
+    public var answers: [PlanInputAnswer]
+    public var userId: String
+
+    public init(status: PlanInputResponseStatus = .answered, answers: [PlanInputAnswer], userId: String) {
+        self.status = status
+        self.answers = answers
+        self.userId = userId
     }
 }
 

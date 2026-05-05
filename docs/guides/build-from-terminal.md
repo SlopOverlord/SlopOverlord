@@ -119,12 +119,21 @@ Start the sloppy runtime directly:
 swift run sloppy
 ```
 
+With no subcommand, `swift run sloppy` opens the interactive terminal UI. To make the intent explicit, use:
+
+```bash
+swift run sloppy -- tui
+```
+
 Useful runtime variants:
 
 ```bash
-swift run sloppy --oneshot
-swift run sloppy --run-demo-request
-swift run sloppy --config-path sloppy.json
+swift run sloppy -- run
+swift run sloppy -- run --oneshot
+swift run sloppy -- run --run-demo-request
+swift run sloppy -- run --config-path sloppy.json
+swift run sloppy -- tui --config-path sloppy.json
+swift run sloppy -- models
 ```
 
 Run the node daemon when needed:
@@ -201,6 +210,18 @@ sloppy config get         # inspect runtime config
 ```
 
 See the [CLI Reference](/guides/cli) for the full command set.
+
+## Terminal UI
+
+For local project work, the fastest loop is often the TUI:
+
+```bash
+sloppy
+```
+
+It resolves the current directory as a Sloppy project, restores the last agent/session for that project, and lets you chat, switch models, configure providers, attach files with `@path`, inspect diffs, and resume sessions from the terminal.
+
+See [Terminal UI](/guides/tui) for the full walkthrough.
 
 ## CI-parity checks
 

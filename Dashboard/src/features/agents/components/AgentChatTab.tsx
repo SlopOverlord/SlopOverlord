@@ -21,10 +21,12 @@ import {
   fetchAgentChatSlashCommands,
   fetchPendingToolApprovals,
   approveToolApproval,
-  rejectToolApproval
+  rejectToolApproval,
+  answerAgentSessionInputRequest
 } from "../../../api";
 import { navigateToTaskScreen } from "../../../app/routing/navigateToTaskScreen";
 import { ProjectGitDiffPanel } from "./ProjectGitDiffPanel";
+import { PlanInputPanel } from "../../../components/PlanInputPanel/PlanInputPanel";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
@@ -1201,6 +1203,14 @@ function buildTechnicalRecord(
   return null;
 }
 
+function answeredInputRequestIds(events) {
+  return new Set(
+    (Array.isArray(events) ? events : [])
+      .filter((eventItem) => eventItem?.type === "input_response" && eventItem?.inputResponse?.requestId)
+      .map((eventItem) => String(eventItem.inputResponse.requestId))
+  );
+}
+
 function segmentsToPlainText(segments) {
   return (segments || [])
     .map((segment) => {
@@ -1672,8 +1682,20 @@ function buildTimelineItems({
     !hasDuplicatedPersistedAssistant;
 
   const timelineItems = [];
+  const answeredInputs = answeredInputRequestIds(safeEvents);
   for (let index = 0; index < safeEvents.length; index += 1) {
     const eventItem = safeEvents[index];
+    if (eventItem?.type === "input_request" && eventItem.inputRequest) {
+      const requestId = String(eventItem.inputRequest.id || "");
+      timelineItems.push({
+        id: `${extractEventKey(eventItem, index)}-input-request`,
+        kind: "input_request",
+        event: eventItem,
+        isAnswered: answeredInputs.has(requestId)
+      });
+      continue;
+    }
+
     const isChatMessage =
       eventItem?.type === "message" &&
       eventItem?.message &&
@@ -1748,6 +1770,7 @@ function AgentChatEvents({
   onCopyMessage,
   onOpenSubagent,
   getSubagentStatusLabel,
+  onAnswerInputRequest,
   onTaskTagClick,
   onTaskTagHoverStart,
   onTaskTagHoverEnd
@@ -1930,6 +1953,18 @@ function AgentChatEvents({
 
             if (timelineItem.kind === "technical" && timelineItem.record) {
               return renderTechEntry(timelineItem, index);
+            }
+
+            if (timelineItem.kind === "input_request") {
+              const request = timelineItem.event?.inputRequest || {};
+              return (
+                <PlanInputPanel
+                  key={timelineItem.id}
+                  request={request}
+                  disabled={Boolean(timelineItem.isAnswered)}
+                  onSubmit={(payload) => onAnswerInputRequest?.(String(request.id || ""), payload)}
+                />
+              );
             }
 
             const eventItem = timelineItem.event;
@@ -3997,6 +4032,21 @@ export function AgentChatTab({
     }
   }
 
+  async function handleAnswerInputRequest(requestId, payload) {
+    const sessionId = activeSessionIdRef.current;
+    if (!agentId || !sessionId || !requestId) {
+      return;
+    }
+    setStatusText("Submitting plan input...");
+    const response = await answerAgentSessionInputRequest(agentId, sessionId, requestId, payload);
+    if (!response) {
+      setStatusText("Failed to submit plan input.");
+      return;
+    }
+    await syncSessionDetail(sessionId);
+    setStatusText("Plan input submitted.");
+  }
+
   function scheduleSessionSync(sessionId, delayMs = 120) {
     if (!sessionId) {
       return;
@@ -5510,6 +5560,7 @@ export function AgentChatTab({
                 onCopyMessage={handleCopyMessage}
                 onOpenSubagent={openSubagentPanel}
                 getSubagentStatusLabel={getSubagentStatusLabel}
+                onAnswerInputRequest={handleAnswerInputRequest}
                 onTaskTagClick={openTaskReference}
                 onTaskTagHoverStart={handleTaskTagHoverStart}
                 onTaskTagHoverEnd={handleTaskTagHoverEnd}

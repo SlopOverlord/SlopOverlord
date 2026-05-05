@@ -26,6 +26,27 @@
         },
         {
             "type": "swift",
+            "request": "attach",
+            "name": "Debug Sloppy TUI (Terminal.app Attach)",
+            "attachCommands": [
+                "command source -- ${workspaceFolder:Sloppy}/.build/sloppy-tui-attach.lldb"
+            ],
+            "preLaunchTask": "swift: Run Debug Sloppy TUI in Terminal.app"
+        },
+        {
+            "type": "swift",
+            "request": "launch",
+            "args": [
+                "tui"
+            ],
+            "cwd": "${workspaceFolder:Sloppy}",
+            "name": "Release Sloppy TUI",
+            "target": "sloppy",
+            "configuration": "release",
+            "preLaunchTask": "swift: Build Release Sloppy TUI"
+        },
+        {
+            "type": "swift",
             "request": "launch",
             "args": [],
             "cwd": "${workspaceFolder:Sloppy}",

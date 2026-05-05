@@ -81,4 +81,136 @@ struct GatewayToolInvocationTests {
         #expect(payload["path"]?.asString == noteURL.path)
         #expect(payload["content"]?.asString == "hello from gateway")
     }
+
+    @Test("gateway project tools treat empty optional ids as current channel")
+    func gatewayProjectToolsTreatEmptyOptionalIdsAsCurrentChannel() async throws {
+        let service = makeService()
+        let agentID = "gateway-project-empty-args-\(UUID().uuidString)"
+        let channelID = "telegram-agent\u{001E}tgthread:42"
+        try await makeAgent(service: service, agentID: agentID)
+
+        _ = try await service.createProject(
+            ProjectCreateRequest(
+                id: "gateway-empty-args",
+                name: "Gateway Empty Args",
+                channels: [.init(title: "Telegram topic", channelId: channelID)]
+            )
+        )
+        _ = try await service.createProjectTask(
+            projectID: "gateway-empty-args",
+            request: ProjectTaskCreateRequest(title: "Existing task", status: ProjectTaskStatus.backlog.rawValue)
+        )
+
+        let emptyOptionalArguments: [String: JSONValue] = [
+            "channelId": .string(""),
+            "projectId": .string(""),
+            "status": .string(""),
+            "topicId": .string("")
+        ]
+        let listResult = await service.invokeToolFromChannelRuntime(
+            agentID: agentID,
+            channelID: channelID,
+            request: ToolInvocationRequest(
+                tool: "project.task_list",
+                arguments: emptyOptionalArguments
+            )
+        )
+
+        #expect(listResult.ok == true)
+        #expect(listResult.data?.asObject?["projectId"]?.asString == "gateway-empty-args")
+        #expect(listResult.data?.asObject?["tasks"]?.asArray?.count == 1)
+
+        let createResult = await service.invokeToolFromChannelRuntime(
+            agentID: agentID,
+            channelID: channelID,
+            request: ToolInvocationRequest(
+                tool: "project.task_create",
+                arguments: emptyOptionalArguments.merging(["title": .string("New task")]) { _, new in new }
+            )
+        )
+
+        #expect(createResult.ok == true)
+        #expect(createResult.data?.asObject?["projectId"]?.asString == "gateway-empty-args")
+        #expect(createResult.data?.asObject?["status"]?.asString == ProjectTaskStatus.pendingApproval.rawValue)
+    }
+
+    @Test("gateway plan input tool records pending request and option answer")
+    func gatewayPlanInputRecordsPendingRequestAndOptionAnswer() async throws {
+        let service = makeService()
+        let agentID = "gateway-plan-input-\(UUID().uuidString)"
+        let channelID = "channel:telegram"
+        try await makeAgent(service: service, agentID: agentID)
+
+        let result = await service.invokeToolFromChannelRuntime(
+            agentID: agentID,
+            channelID: channelID,
+            request: ToolInvocationRequest(
+                tool: "planning.request_input",
+                arguments: [
+                    "title": .string("Choose direction"),
+                    "questions": .array([
+                        .object([
+                            "id": .string("direction"),
+                            "question": .string("Which path should I take?"),
+                            "options": .array([
+                                .object(["id": .string("small"), "label": .string("Small")]),
+                                .object(["id": .string("large"), "label": .string("Large")])
+                            ])
+                        ])
+                    ])
+                ]
+            ),
+            chatMode: .plan
+        )
+
+        #expect(result.ok == true)
+        let requestID = try #require(result.data?.asObject?["requestId"]?.asString)
+        let pending = try await service.channelSessionStore.pendingInputRequest(channelId: channelID)
+        #expect(pending?.request.id == requestID)
+
+        let answered = await service.answerChannelPlanInputOption(
+            channelId: channelID,
+            userId: "tg:1",
+            requestId: requestID,
+            questionId: "direction",
+            optionId: "small",
+            topicId: nil
+        )
+
+        #expect(answered == true)
+        let sessionID = try #require(pending?.sessionId)
+        let detail = try await service.channelSessionStore.loadSessionDetail(sessionID: sessionID)
+        #expect(detail.events.contains { $0.type == .inputResponse && $0.inputResponse?.requestId == requestID })
+    }
+
+    @Test("gateway plan input tool rejects outside plan mode")
+    func gatewayPlanInputRejectsOutsidePlanMode() async throws {
+        let service = makeService()
+        let agentID = "gateway-plan-input-reject-\(UUID().uuidString)"
+        try await makeAgent(service: service, agentID: agentID)
+
+        let result = await service.invokeToolFromChannelRuntime(
+            agentID: agentID,
+            channelID: "channel:telegram",
+            request: ToolInvocationRequest(
+                tool: "planning.request_input",
+                arguments: [
+                    "questions": .array([
+                        .object([
+                            "id": .string("direction"),
+                            "question": .string("Which path?"),
+                            "options": .array([
+                                .object(["id": .string("small"), "label": .string("Small")]),
+                                .object(["id": .string("large"), "label": .string("Large")])
+                            ])
+                        ])
+                    ])
+                ]
+            ),
+            chatMode: .ask
+        )
+
+        #expect(result.ok == false)
+        #expect(result.error?.code == "plan_mode_required")
+    }
 }

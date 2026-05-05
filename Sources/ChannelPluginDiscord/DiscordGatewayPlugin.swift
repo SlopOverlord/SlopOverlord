@@ -1,8 +1,9 @@
 import Foundation
 import Logging
 import PluginSDK
+import Protocols
 
-public actor DiscordGatewayPlugin: StreamingGatewayPlugin {
+public actor DiscordGatewayPlugin: StreamingGatewayPlugin, PlanInputGatewayPlugin {
     private struct StreamState: Sendable {
         let discordChannelId: String
         let messageId: String
@@ -16,6 +17,7 @@ public actor DiscordGatewayPlugin: StreamingGatewayPlugin {
     private let config: DiscordPluginConfig
     private let client: any DiscordPlatformClient
     private let logger: Logger
+    private let planInputMenus = DiscordGatewayLoop.PlanInputMenuStore()
     private var gatewayTask: Task<Void, Never>?
     private var streams: [String: StreamState] = [:]
 
@@ -78,7 +80,8 @@ public actor DiscordGatewayPlugin: StreamingGatewayPlugin {
             receiver: inboundReceiver,
             config: config,
             sloppyChannelIds: channelIds,
-            logger: logger
+            logger: logger,
+            planInputMenus: planInputMenus
         )
         gatewayTask = Task {
             await loop.run()
@@ -100,6 +103,32 @@ public actor DiscordGatewayPlugin: StreamingGatewayPlugin {
         _ = try await client.sendMessage(
             channelId: discordChannelId,
             content: renderContent(message)
+        )
+    }
+
+    public func presentPlanInputRequest(
+        channelId: String,
+        userId _: String,
+        request: PlanInputRequest,
+        topicId _: String?
+    ) async throws {
+        guard let discordChannelId = config.discordChannelId(forChannelId: channelId) else {
+            logger.warning("No Discord channel mapping for plan input \(request.id).")
+            return
+        }
+        let nonce = String(UUID().uuidString.prefix(8))
+        await planInputMenus.set(
+            nonce: nonce,
+            menu: .init(
+                sloppyChannelId: ChannelGatewayScope.parse(channelId).baseChannelId,
+                discordChannelId: discordChannelId,
+                request: request
+            )
+        )
+        _ = try await client.sendMessage(
+            channelId: discordChannelId,
+            content: renderContent(Self.planInputText(request)),
+            components: Self.planInputComponents(nonce: nonce, request: request)
         )
     }
 
@@ -194,5 +223,51 @@ public actor DiscordGatewayPlugin: StreamingGatewayPlugin {
         }
         let endIndex = value.index(value.startIndex, offsetBy: limit - 1)
         return String(value[..<endIndex]) + "…"
+    }
+
+    private static func planInputText(_ request: PlanInputRequest) -> String {
+        var lines: [String] = [request.title ?? "Plan input requested"]
+        for (index, question) in request.questions.enumerated() {
+            lines.append("")
+            lines.append("\(index + 1). \(question.question)")
+            for option in question.options {
+                if let description = option.description, !description.isEmpty {
+                    lines.append("- \(option.label): \(description)")
+                } else {
+                    lines.append("- \(option.label)")
+                }
+            }
+        }
+        lines.append("")
+        if request.questions.count == 1 {
+            lines.append("Use a button, or send your own answer as the next message.")
+        } else {
+            lines.append("Send custom answers as the next message, one line per question.")
+        }
+        return lines.joined(separator: "\n")
+    }
+
+    private static func planInputComponents(nonce: String, request: PlanInputRequest) -> JSONValue? {
+        guard request.questions.count == 1, let question = request.questions.first else {
+            return nil
+        }
+        var rows: [JSONValue] = []
+        var current: [JSONValue] = []
+        for (index, option) in question.options.enumerated() {
+            current.append(.object([
+                "type": .number(2),
+                "style": .number(1),
+                "label": .string(String(option.label.prefix(80))),
+                "custom_id": .string("sloppy:pi:\(nonce):\(index)")
+            ]))
+            if current.count == 5 {
+                rows.append(.object(["type": .number(1), "components": .array(current)]))
+                current = []
+            }
+        }
+        if !current.isEmpty {
+            rows.append(.object(["type": .number(1), "components": .array(current)]))
+        }
+        return .array(rows)
     }
 }

@@ -38,6 +38,25 @@ extension CoreService {
         await channelModelStore.remove(channelId: channelId)
     }
 
+    func handleModeCommand(channelId: String, content: String) async -> String? {
+        let trimmed = content.trimmingCharacters(in: .whitespacesAndNewlines)
+        let lower = trimmed.lowercased()
+        guard lower == "/mode" || lower.hasPrefix("/mode ") else { return nil }
+
+        let bindingId = ChannelGatewayScope.parse(channelId).baseChannelId
+        let tail = trimmed.dropFirst("/mode".count).trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !tail.isEmpty else {
+            let current = await channelChatModeStore.get(channelId: bindingId)
+            return "Current mode: \(current.rawValue). Usage: /mode ask|build|plan|debug"
+        }
+        guard let mode = AgentChatMode(rawValue: tail) else {
+            return "Unknown mode `\(tail)`. Use ask, build, plan, or debug."
+        }
+        await channelChatModeStore.set(channelId: bindingId, mode: mode)
+        await runtime.invalidateChannelSession(channelId: channelId)
+        return "Mode set to \(mode.rawValue)."
+    }
+
     func handleContextCommand(channelId: String, content: String) async -> String? {
         let lower = content.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         guard lower == "/context" else { return nil }

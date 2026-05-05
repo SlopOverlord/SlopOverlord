@@ -24,7 +24,8 @@ extension CoreService {
         sessionID: String,
         request: ToolInvocationRequest,
         recordSessionEvents: Bool = true,
-        requireApproval: Bool = false
+        requireApproval: Bool = false,
+        chatMode: AgentChatMode? = nil
     ) async -> ToolInvocationResult {
         guard let normalizedAgentID = normalizedAgentID(agentID) else {
             return .init(
@@ -85,6 +86,15 @@ extension CoreService {
         }
 
         let trimmedToolID = request.tool.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmedToolID == "planning.request_input" {
+            return await handleAgentPlanInputTool(
+                agentID: normalizedAgentID,
+                sessionID: normalizedSessionID,
+                request: request,
+                chatMode: chatMode
+            )
+        }
+
         if authorization.allowed,
            let allowOverlay = sessionSubagentToolAllowList[normalizedSessionID],
            !allowOverlay.isEmpty,
@@ -319,7 +329,8 @@ extension CoreService {
         channelID: String,
         request: ToolInvocationRequest,
         topicID: String? = nil,
-        requireApproval: Bool = false
+        requireApproval: Bool = false,
+        chatMode: AgentChatMode? = nil
     ) async -> ToolInvocationResult {
         guard let normalizedAgentID = normalizedAgentID(agentID) else {
             return .init(
@@ -367,6 +378,17 @@ extension CoreService {
                 tool: request.tool,
                 ok: false,
                 error: .init(code: "authorization_failed", message: "Failed to authorize tool call.", retryable: true)
+            )
+        }
+
+        let trimmedToolID = request.tool.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmedToolID == "planning.request_input" {
+            return await handleChannelPlanInputTool(
+                agentID: normalizedAgentID,
+                channelID: channelID,
+                request: request,
+                topicID: topicID,
+                chatMode: chatMode
             )
         }
 

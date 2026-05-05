@@ -104,7 +104,7 @@ Git Sync saves your agent configuration (instructions, settings, tool policies) 
 - Keep a history of changes to your agents
 
 ::: warning
-Git Sync only synchronizes **configuration** inside `.sloppy/` (AGENTS.md, config.json, tools.json, etc.), **not** memory data (SQLite), sessions, or cloned project code.
+Git Sync only synchronizes **configuration** inside `.sloppy/` (`AGENTS.md`, `USER.md`, `FRIEND_REMINDER.md`, `config.json`, `tools.json`, etc.), **not** memory data (SQLite), sessions, or cloned project code.
 :::
 
 ### Setup via the Dashboard

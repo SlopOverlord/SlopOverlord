@@ -23,6 +23,7 @@ interface DocumentSizes {
   userMarkdown: number;
   identityMarkdown: number;
   soulMarkdown: number;
+  friendReminderMarkdown?: number;
 }
 
 interface SessionContextData {
@@ -189,7 +190,8 @@ function SessionContextPanel({ coreApi }: { coreApi: CoreApi }) {
       data.documentSizes.agentsMarkdown +
       data.documentSizes.userMarkdown +
       data.documentSizes.identityMarkdown +
-      data.documentSizes.soulMarkdown
+      data.documentSizes.soulMarkdown +
+      Number(data.documentSizes.friendReminderMarkdown || 0)
     );
   }, [data]);
 
@@ -280,6 +282,7 @@ function SessionContextPanel({ coreApi }: { coreApi: CoreApi }) {
             <SectionSizeBar label="USER.md" chars={data.documentSizes.userMarkdown} total={docTotal} />
             <SectionSizeBar label="IDENTITY.md" chars={data.documentSizes.identityMarkdown} total={docTotal} />
             <SectionSizeBar label="SOUL.md" chars={data.documentSizes.soulMarkdown} total={docTotal} />
+            <SectionSizeBar label="FRIEND_REMINDER.md" chars={data.documentSizes.friendReminderMarkdown || 0} total={docTotal} />
           </div>
 
           {data.installedSkillIds.length > 0 && (

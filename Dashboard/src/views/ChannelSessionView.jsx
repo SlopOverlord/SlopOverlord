@@ -3,8 +3,9 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
 import { oneDark } from "react-syntax-highlighter/dist/esm/styles/prism";
-import { deleteChannelSession, fetchActorsBoard, fetchAgents, fetchChannelEvents, fetchChannelModel, fetchChannelSession, fetchProjects, fetchTokenUsage, postChannelControl } from "../api";
+import { answerChannelInputRequest, deleteChannelSession, fetchActorsBoard, fetchAgents, fetchChannelEvents, fetchChannelModel, fetchChannelSession, fetchProjects, fetchTokenUsage, postChannelControl } from "../api";
 import { Breadcrumbs } from "../components/Breadcrumbs/Breadcrumbs";
+import { PlanInputPanel } from "../components/PlanInputPanel/PlanInputPanel";
 import { AgentPetIcon } from "../features/agents/components/AgentPetSprite";
 
 const SHOW_DEBUG_ACTIONS = Boolean(import.meta.env.DEV);
@@ -585,6 +586,11 @@ export function ChannelSessionView({ sessionId, onNavigateBack }) {
   }, [actorBoard, agents, projects, summary?.channelId]);
 
   const transcriptItems = useMemo(() => {
+    const answeredInputs = new Set(
+      events
+        .filter((eventItem) => eventItem?.type === "input_response" && eventItem?.inputResponse?.requestId)
+        .map((eventItem) => String(eventItem.inputResponse.requestId))
+    );
     return events.map((eventItem, index) => ({
       id: String(eventItem?.id || `event-${index}`),
       index,
@@ -594,6 +600,8 @@ export function ChannelSessionView({ sessionId, onNavigateBack }) {
       content: String(eventItem?.content || ""),
       createdAt: eventItem?.createdAt || "",
       metadata: eventItem?.metadata || null,
+      inputRequest: eventItem?.inputRequest || null,
+      inputAnswered: answeredInputs.has(String(eventItem?.inputRequest?.id || "")),
       isMessage: isMessageEvent(String(eventItem?.type || ""))
     }));
   }, [events]);
@@ -651,6 +659,17 @@ export function ChannelSessionView({ sessionId, onNavigateBack }) {
       // ignore clipboard failures in restricted contexts
     }
     setIsShareMenuOpen(false);
+  }
+
+  async function handleAnswerInputRequest(requestId, payload) {
+    if (!summary?.sessionId || !requestId) return;
+    setErrorText("");
+    const detail = await answerChannelInputRequest(summary.sessionId, requestId, payload);
+    if (!detail) {
+      setErrorText("Failed to submit plan input.");
+      return;
+    }
+    setSessionDetail(detail);
   }
 
   async function handleChannelControl(action) {
@@ -937,6 +956,17 @@ export function ChannelSessionView({ sessionId, onNavigateBack }) {
                 <p className="placeholder-text">No transcript available yet.</p>
               ) : (
                 transcriptItems.map((item) => {
+                  if (item.type === "input_request" && item.inputRequest) {
+                    return (
+                      <PlanInputPanel
+                        key={item.id}
+                        request={item.inputRequest}
+                        disabled={item.inputAnswered}
+                        onSubmit={(payload) => handleAnswerInputRequest(String(item.inputRequest.id || ""), payload)}
+                      />
+                    );
+                  }
+
                   if (!item.isMessage) {
                     return (
                       <article key={item.id} className="agent-chat-technical">

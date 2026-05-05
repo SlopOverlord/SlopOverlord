@@ -22,7 +22,7 @@ struct ProjectTaskGetTool: CoreTool {
             return toolFailure(tool: name, code: "not_available", message: "Project service not available.", retryable: false)
         }
         let rawReference = arguments["taskId"]?.asString ?? arguments["reference"]?.asString ?? ""
-        let fallbackChannelId = arguments["channelId"]?.asString ?? context.sessionID
+        let fallbackChannelId = stringArgument(arguments, "channelId", default: context.sessionID)
 
         guard let normalizedReference = normalizeTaskRef(rawReference) else {
             return toolFailure(tool: name, code: "invalid_arguments", message: "`taskId` (or `reference`) is required. Example: MOBILE-1", retryable: false)

@@ -123,6 +123,22 @@ The heartbeat is disabled by default. You can enable it and set the interval in 
 | `heartbeat.enabled` | `false` | Whether the heartbeat is active |
 | `heartbeat.intervalMinutes` | `5` | How often the heartbeat fires |
 
+### Friend reminder
+
+Each agent also has an optional `FRIEND_REMINDER.md` file. It is empty by default. When it contains text, Sloppy appends it to every user message before sending that turn to the model:
+
+```md
+User request text
+
+#[FRIEND_REMINDER.md]
+- Do not use MCPs
+- Always run git pull
+```
+
+This differs from bootstrap files such as `AGENTS.md`, `USER.md`, `SOUL.md`, and `MEMORY.md`: those shape the session background context, while `FRIEND_REMINDER.md` is deliberately placed next to the current user request. Use it for short, high-salience constraints that should be refreshed every turn.
+
+The same behavior applies to gateway-backed channel sessions (for example Telegram or Discord) when the channel is linked to an agent.
+
 ### Channel session auto-close
 
 By default, channel sessions stay open indefinitely. You can configure them to close automatically after a period of inactivity.

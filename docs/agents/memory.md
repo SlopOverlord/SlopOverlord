@@ -5,7 +5,7 @@ title: Agent memory
 
 # Agent memory
 
-Sloppy gives agents two complementary ways to remember: a **hybrid memory store** (SQLite-backed, searchable entries) and **markdown documents** on disk (`USER.md`, `MEMORY.md`, and optional project `.meta/MEMORY.md`). Together they let an agent keep facts, preferences, and narrative context across sessions and restarts.
+Sloppy gives agents two complementary ways to remember: a **hybrid memory store** (SQLite-backed, searchable entries) and **markdown documents** on disk (`USER.md`, `FRIEND_REMINDER.md`, `MEMORY.md`, and optional project `.meta/MEMORY.md`). Together they let an agent keep facts, preferences, and narrative context across sessions and restarts.
 
 This page describes how both layers work, how they show up in the Dashboard, which tools update them, and how **memory checkpoints** refresh long-form `MEMORY.md` without polluting the chat.
 
@@ -14,7 +14,7 @@ This page describes how both layers work, how they show up in the Dashboard, whi
 | Layer | What it is | Where you see it |
 | --- | --- | --- |
 | **Hybrid memory** | Structured entries (note, summary, kind, class, scope, edges). Indexed for recall and search. | **Agents → Memories** tab (list and graph). SQLite in your workspace. |
-| **Agent markdown** | Plain files in the agent catalog: `USER.md` (identity/instructions), `MEMORY.md` (long-form narrative the model reads). | **Agents → Agent files** in the Dashboard; files under `.sloppy/agents/<agent>/` on disk. |
+| **Agent markdown** | Plain files in the agent catalog: `USER.md` (identity/instructions), `FRIEND_REMINDER.md` (short per-turn reminders), `MEMORY.md` (long-form narrative the model reads). | **Agents → Agent files** in the Dashboard; files under `.sloppy/agents/<agent>/` on disk. |
 | **Project meta memory** | Optional `.meta/MEMORY.md` inside a project repo. | On disk; updated via tools when the agent targets a project. |
 
 These are **not** the same list: saving a hybrid entry does **not** automatically rewrite `MEMORY.md`, and editing `MEMORY.md` does **not** create hybrid rows unless a workflow explicitly does both.
@@ -26,6 +26,7 @@ The API and tools enforce size limits (character counts) on bundled agent docume
 | Resource | Limit (characters) |
 | --- | ---: |
 | `USER.md` | 2000 |
+| `FRIEND_REMINDER.md` | 2000 |
 | `MEMORY.md` (agent) | 3000 |
 | `.meta/MEMORY.md` (project) | 3000 |
 
@@ -34,6 +35,7 @@ If generated or submitted text exceeds a limit, the update may be rejected or sk
 ## Dashboard: Memories vs Agent files
 
 - **Memories** — shows **hybrid store** entries for that agent (scoped to the agent or to channels like `agent:<agentId>:session:<sessionId>`). This is **not** a live view of the `MEMORY.md` file.
+- **Agent files → `FRIEND_REMINDER.md`** — a user-editable short reminder appended to every runtime user turn when non-empty. It is meant for tactical, current constraints rather than unlimited memory.
 - **Agent files → `MEMORY.md`** — often labeled as **auto-generated** or read-only in the UI when the server maintains that file from checkpoints or refresh logic. Prefer updating via **`agent.documents.set_memory_markdown`** (or checkpoints) rather than expecting ad-hoc hybrid saves to appear here.
 
 ::: tip

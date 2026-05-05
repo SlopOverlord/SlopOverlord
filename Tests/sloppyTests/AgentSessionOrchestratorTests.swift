@@ -10,16 +10,20 @@ private final class MockCallStore: @unchecked Sendable {
     private let lock = NSLock()
     private var _models: [String] = []
     private var _reasoningEfforts: [ReasoningEffort?] = []
+    private var _prompts: [String] = []
 
     func recordModel(_ model: String) { lock.withLock { _models.append(model) } }
     func recordEffort(_ effort: ReasoningEffort?) { lock.withLock { _reasoningEfforts.append(effort) } }
+    func recordPrompt(_ prompt: Prompt) { lock.withLock { _prompts.append(prompt.description) } }
     var models: [String] { lock.withLock { _models } }
     var reasoningEfforts: [ReasoningEffort?] { lock.withLock { _reasoningEfforts } }
+    var prompts: [String] { lock.withLock { _prompts } }
 }
 
 private struct FixedTextLanguageModel: LanguageModel {
     typealias UnavailableReason = Never
     let text: String
+    var callStore: MockCallStore? = nil
 
     func respond<Content>(
         within session: LanguageModelSession,
@@ -29,6 +33,7 @@ private struct FixedTextLanguageModel: LanguageModel {
         options: GenerationOptions
     ) async throws -> LanguageModelSession.Response<Content> where Content: Generable {
         guard type == String.self else { fatalError("FixedTextLanguageModel: only String supported") }
+        callStore?.recordPrompt(prompt)
         return LanguageModelSession.Response(
             content: text as! Content,
             rawContent: GeneratedContent(text),
@@ -71,7 +76,7 @@ private actor SessionCapturingModelProvider: ModelProvider {
 
     func createLanguageModel(for modelName: String) async throws -> any LanguageModel {
         callStore.recordModel(modelName)
-        return FixedTextLanguageModel(text: "Captured.")
+        return FixedTextLanguageModel(text: "Captured.", callStore: callStore)
     }
 
     nonisolated func generationOptions(for modelName: String, maxTokens: Int, reasoningEffort: ReasoningEffort?) -> GenerationOptions {
@@ -81,6 +86,7 @@ private actor SessionCapturingModelProvider: ModelProvider {
 
     func requestedModelsSnapshot() -> [String] { callStore.models }
     func requestedReasoningEffortsSnapshot() -> [ReasoningEffort?] { callStore.reasoningEfforts }
+    func requestedPromptsSnapshot() -> [String] { callStore.prompts }
 }
 
 private actor FixedOutputModelProvider: ModelProvider {
@@ -254,6 +260,57 @@ func agentSessionOrchestratorDropsReasoningEffortForNonReasoningModels() async t
 
     #expect(await provider.requestedModelsSnapshot() == ["openai:gpt-5.4-mini"])
     #expect(await provider.requestedReasoningEffortsSnapshot() == [nil])
+}
+
+@Test
+func agentSessionOrchestratorAppendsFriendReminderToRuntimeUserMessage() async throws {
+    let availableModels = [
+        ProviderModelOption(id: "openai:gpt-5.4-mini", title: "openai:gpt-5.4-mini", capabilities: ["tools"])
+    ]
+    let agentID = "friend-reminder-agent"
+    let (catalogStore, sessionStore, _) = try makeAgentSessionFixture(
+        agentID: agentID,
+        selectedModel: "openai:gpt-5.4-mini",
+        availableModels: availableModels
+    )
+    _ = try catalogStore.updateAgentConfig(
+        agentID: agentID,
+        request: AgentConfigUpdateRequest(
+            role: nil,
+            selectedModel: "openai:gpt-5.4-mini",
+            documents: AgentDocumentBundle(
+                userMarkdown: "# User\nTest user\n",
+                agentsMarkdown: "# Agent\nTest agent\n",
+                soulMarkdown: "# Soul\nTest soul\n",
+                identityMarkdown: "# Identity\n\(agentID)\n",
+                friendReminderMarkdown: "- Do not use mcps\n- always run git pull\n"
+            )
+        ),
+        availableModels: availableModels
+    )
+    let provider = SessionCapturingModelProvider(models: availableModels.map(\.id))
+    let runtime = RuntimeSystem(modelProvider: provider, defaultModel: "openai:gpt-5.4-mini")
+    let orchestrator = AgentSessionOrchestrator(
+        runtime: runtime,
+        sessionStore: sessionStore,
+        agentCatalogStore: catalogStore,
+        availableModels: availableModels
+    )
+
+    let session = try await orchestrator.createSession(agentID: agentID, request: AgentSessionCreateRequest())
+    _ = try await orchestrator.postMessage(
+        agentID: agentID,
+        sessionID: session.id,
+        request: AgentSessionPostMessageRequest(
+            userId: "dashboard",
+            content: "Да, исправь это как можно скорее",
+            mode: .build
+        )
+    )
+
+    let prompt = await provider.requestedPromptsSnapshot().last ?? ""
+    #expect(prompt.contains("User request:\nДа, исправь это как можно скорее"))
+    #expect(prompt.contains("#[FRIEND_REMINDER.md]\n- Do not use mcps\n- always run git pull"))
 }
 
 @Test

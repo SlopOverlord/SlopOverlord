@@ -23,7 +23,7 @@ struct ProjectEscalateTool: CoreTool {
         guard let svc = context.projectService else {
             return toolFailure(tool: name, code: "not_available", message: "Project service not available.", retryable: false)
         }
-        let channelId = arguments["channelId"]?.asString ?? context.sessionID
+        let channelId = stringArgument(arguments, "channelId", default: context.sessionID)
         let reason = arguments["reason"]?.asString?.trimmingCharacters(in: .whitespacesAndNewlines) ?? "Escalation requested"
         let taskId = arguments["taskId"]?.asString
 
@@ -32,7 +32,7 @@ struct ProjectEscalateTool: CoreTool {
         await svc.deliverMessage(channelId: channelId, content: message)
 
         if let taskId {
-            let topicId = arguments["topicId"]?.asString
+            let topicId = trimmedStringArgument(arguments, "topicId")
             if let project = await svc.findProjectForChannel(channelId: channelId, topicId: topicId) {
                 _ = try? await svc.updateTask(
                     projectID: project.id,

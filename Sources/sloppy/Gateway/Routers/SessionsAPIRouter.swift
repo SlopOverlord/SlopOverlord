@@ -49,6 +49,33 @@ struct SessionsAPIRouter: APIRouter {
             }
         }
 
+        router.post("/v1/channel-sessions/:sessionId/input-requests/:requestId/answer", metadata: RouteMetadata(summary: "Answer channel input request", description: "Answers a pending plan-mode channel input request and resumes the channel turn", tags: ["Sessions"])) { request in
+            let sessionId = request.pathParam("sessionId") ?? ""
+            let requestId = request.pathParam("requestId") ?? ""
+            guard let body = request.body,
+                  let payload = CoreRouter.decode(body, as: PlanInputAnswerRequest.self)
+            else {
+                return CoreRouter.json(status: HTTPStatus.badRequest, payload: ["error": ErrorCode.invalidBody])
+            }
+
+            do {
+                let session = try await service.answerChannelPlanInput(
+                    sessionID: sessionId,
+                    requestID: requestId,
+                    payload: payload
+                )
+                return CoreRouter.encodable(status: HTTPStatus.ok, payload: session)
+            } catch ChannelSessionFileStore.StoreError.invalidSessionID {
+                return CoreRouter.json(status: HTTPStatus.badRequest, payload: ["error": ErrorCode.invalidBody])
+            } catch ChannelSessionFileStore.StoreError.sessionNotFound {
+                return CoreRouter.json(status: HTTPStatus.notFound, payload: ["error": ErrorCode.sessionNotFound])
+            } catch let error as CoreService.AgentSessionError {
+                return CoreRouter.agentSessionErrorResponse(error, fallback: ErrorCode.sessionWriteFailed)
+            } catch {
+                return CoreRouter.json(status: HTTPStatus.internalServerError, payload: ["error": ErrorCode.sessionWriteFailed])
+            }
+        }
+
         router.delete("/v1/channel-sessions/:sessionId", metadata: RouteMetadata(summary: "Delete channel session", description: "Permanently deletes a channel session and all its events", tags: ["Sessions"])) { request in
             let sessionId = request.pathParam("sessionId") ?? ""
 

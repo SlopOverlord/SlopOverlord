@@ -9,6 +9,7 @@ public struct DebugDocumentSizes: Encodable, Sendable {
     public var userMarkdown: Int
     public var identityMarkdown: Int
     public var soulMarkdown: Int
+    public var friendReminderMarkdown: Int
 }
 
 public struct DebugSessionContextResponse: Encodable, Sendable {
@@ -121,7 +122,8 @@ extension CoreService {
                 agentsMarkdown: documents.agentsMarkdown.count,
                 userMarkdown: documents.userMarkdown.count,
                 identityMarkdown: documents.identityMarkdown.count,
-                soulMarkdown: documents.soulMarkdown.count
+                soulMarkdown: documents.soulMarkdown.count,
+                friendReminderMarkdown: documents.friendReminderMarkdown.count
             ),
             skillsCount: skills.count,
             installedSkillIds: skills.map(\.id),

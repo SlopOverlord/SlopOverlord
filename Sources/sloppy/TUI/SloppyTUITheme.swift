@@ -631,7 +631,16 @@ enum SloppyTUITheme {
     }
 
     private static func shortPath(_ path: String) -> String {
-        let expanded = (path as NSString).abbreviatingWithTildeInPath
+        let homePath = FileManager.default.homeDirectoryForCurrentUser.standardizedFileURL.path
+        let standardized = URL(fileURLWithPath: path).standardizedFileURL.path
+        let expanded: String
+        if standardized == homePath {
+            expanded = "~"
+        } else if standardized.hasPrefix(homePath + "/") {
+            expanded = "~" + standardized.dropFirst(homePath.count)
+        } else {
+            expanded = standardized
+        }
         let parts = expanded.split(separator: "/").map(String.init)
         guard parts.count > 2 else { return expanded }
         return "…/" + parts.suffix(2).joined(separator: "/")

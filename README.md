@@ -13,7 +13,7 @@
 [![](https://img.shields.io/endpoint?url=https%3A%2F%2Fswiftpackageindex.com%2Fapi%2Fpackages%2FTeamSloppy%2FSloppy%2Fbadge%3Ftype%3Dswift-versions)](https://swiftpackageindex.com/TeamSloppy/Sloppy)
 [![](https://img.shields.io/endpoint?url=https%3A%2F%2Fswiftpackageindex.com%2Fapi%2Fpackages%2FTeamSloppy%2FSloppy%2Fbadge%3Ftype%3Dplatforms)](https://swiftpackageindex.com/TeamSloppy/Sloppy)
 
-Sloppy is a multi-agent runtime for building operator-visible AI workflows in Swift 6 on macOS and Linux. It combines a rule-based orchestration core, branch and worker execution, persistent runtime state, model/provider plugins, channel integrations, and a React dashboard for observing what the system is doing.
+Sloppy is a multi-agent runtime for building operator-visible AI workflows in Swift 6 on macOS and Linux. It combines a rule-based orchestration core, branch and worker execution, persistent runtime state, model/provider plugins, channel integrations, a terminal UI, and a React dashboard for observing what the system is doing.
 
 ## 🎯 Sloppy is right for you if
 
@@ -60,6 +60,7 @@ The runtime is designed to keep agent execution structured, inspectable, and rec
 | 🔌 Plugin system | Extends models, tools, memory, and gateways without hard-coding providers |
 | 🤖 `AnyLanguageModel` bridge | Connects providers such as OpenAI and Ollama |
 | 💬 Telegram gateway | Bridges Telegram chats into Sloppy channels |
+| 🖥️ Terminal UI | Opens project-aware chat, model/provider pickers, slash commands, and file context from `sloppy` |
 | 📊 Dashboard | Exposes chat, activity, artifacts, and runtime state in the UI |
 
 ## 🧩 Problems Sloppy Solves
@@ -91,10 +92,11 @@ What makes Sloppy distinct in its current form:
 git clone https://github.com/TeamSloppy/Sloppy.git
 cd Sloppy
 bash scripts/install.sh
-sloppy run
+sloppy       # terminal UI
+sloppy run   # server + Dashboard
 ```
 
-By default the installer builds the server stack and bundled dashboard assets. To skip the dashboard build, run:
+By default the installer builds the server stack and bundled dashboard assets. `sloppy` opens the interactive terminal UI for the current project; `sloppy run` starts the HTTP server and Dashboard. To skip the dashboard build, run:
 
 ```bash
 bash scripts/install.sh --server-only

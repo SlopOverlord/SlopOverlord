@@ -30,6 +30,7 @@ actor TelegramPoller {
     private let onMessageRouted: (@Sendable (String, Int64) async -> Void)?
     private let modelPickerBridge: (any TelegramModelPickerBridge)?
     private let toolApprovalBridge: (any ToolApprovalBridge)?
+    private let planInputSessions: TelegramPlanInputSessionStore?
     private var offset: Int64? = nil
     /// Resolved via `getMe` for `/cmd@bot` routing and mention detection.
     private var botUserId: Int64 = 0
@@ -45,7 +46,8 @@ actor TelegramPoller {
         logger: Logger,
         onMessageRouted: (@Sendable (String, Int64) async -> Void)? = nil,
         modelPickerBridge: (any TelegramModelPickerBridge)? = nil,
-        toolApprovalBridge: (any ToolApprovalBridge)? = nil
+        toolApprovalBridge: (any ToolApprovalBridge)? = nil,
+        planInputSessions: TelegramPlanInputSessionStore? = nil
     ) {
         self.bot = bot
         self.receiver = receiver
@@ -55,6 +57,7 @@ actor TelegramPoller {
         self.onMessageRouted = onMessageRouted
         self.modelPickerBridge = modelPickerBridge
         self.toolApprovalBridge = toolApprovalBridge
+        self.planInputSessions = planInputSessions
     }
 
     func run() async {
@@ -132,6 +135,18 @@ actor TelegramPoller {
 
         guard let bindingChannelId = config.channelId(forChatId: chatId, topicId: messageThreadId.map(String.init)) else {
             try? await bot.answerCallbackQuery(callbackQueryId: query.id, text: "Канал не привязан.", showAlert: true)
+            return
+        }
+
+        if await handlePlanInputCallback(
+            data: data,
+            query: query,
+            chatId: chatId,
+            messageId: message.messageId,
+            messageThreadId: messageThreadId,
+            userId: userId,
+            bindingChannelId: bindingChannelId
+        ) {
             return
         }
 
@@ -256,6 +271,57 @@ actor TelegramPoller {
                 try? await bot.answerCallbackQuery(callbackQueryId: query.id, text: err.message, showAlert: true)
             }
         }
+    }
+
+    private func handlePlanInputCallback(
+        data: String,
+        query: TelegramBotAPI.CallbackQuery,
+        chatId: Int64,
+        messageId: Int64,
+        messageThreadId: Int?,
+        userId: Int64,
+        bindingChannelId: String
+    ) async -> Bool {
+        guard data.hasPrefix("pi:") else {
+            return false
+        }
+        let parts = data.split(separator: ":", omittingEmptySubsequences: false)
+        guard parts.count == 3,
+              let requestMessageId = Int64(parts[1]),
+              let optionIndex = Int(parts[2]),
+              let session = await planInputSessions?.get(messageId: requestMessageId),
+              session.bindingChannelId == bindingChannelId,
+              session.request.questions.count == 1,
+              let question = session.request.questions.first,
+              question.options.indices.contains(optionIndex)
+        else {
+            try? await bot.answerCallbackQuery(callbackQueryId: query.id, text: "Question expired. Send your answer as a message.", showAlert: true)
+            return true
+        }
+
+        let option = question.options[optionIndex]
+        let ok = await receiver.answerChannelPlanInputOption(
+            channelId: bindingChannelId,
+            userId: "tg:\(userId)",
+            requestId: session.request.id,
+            questionId: question.id,
+            optionId: option.id,
+            topicId: messageThreadId.map(String.init)
+        )
+        if ok {
+            await planInputSessions?.remove(messageId: requestMessageId)
+            _ = try? await bot.editMessageText(
+                chatId: chatId,
+                messageId: messageId,
+                text: "Answer recorded: \(option.label)",
+                messageThreadId: messageThreadId,
+                replyMarkup: []
+            )
+            try? await bot.answerCallbackQuery(callbackQueryId: query.id, text: "Done")
+        } else {
+            try? await bot.answerCallbackQuery(callbackQueryId: query.id, text: "Could not record answer.", showAlert: true)
+        }
+        return true
     }
 
     // MARK: - Messages

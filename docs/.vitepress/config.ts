@@ -50,6 +50,7 @@ export default defineConfig({
           { text: "Build With Docker", link: "/guides/build-with-docker" },
           { text: "Development Workflow", link: "/guides/development-workflow" },
           { text: "Project Context", link: "/guides/project-context" },
+          { text: "Terminal UI", link: "/guides/tui" },
           { text: "CLI Reference", link: "/guides/cli" },
           { text: "SloppyNode", link: "/guides/sloppy-node" },
           { text: "Model Providers", link: "/guides/models" },
