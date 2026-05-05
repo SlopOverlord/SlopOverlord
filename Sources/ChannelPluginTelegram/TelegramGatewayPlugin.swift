@@ -160,7 +160,14 @@ public actor TelegramGatewayPlugin: StreamingGatewayPlugin, ToolApprovalGatewayP
             return
         }
         let threadId = effectiveMessageThreadId(channelId: channelId, topicId: topicId)
-        _ = try await bot.sendMessage(chatId: chatId, text: message, messageThreadId: threadId)
+        for (index, chunk) in TelegramMessageSplitter.split(message).enumerated() {
+            _ = try await bot.sendMessage(
+                chatId: chatId,
+                text: chunk,
+                messageThreadId: threadId,
+                showTyping: index == 0
+            )
+        }
     }
 
     public func presentPlanInputRequest(
@@ -270,13 +277,18 @@ public actor TelegramGatewayPlugin: StreamingGatewayPlugin, ToolApprovalGatewayP
             return
         }
 
+        let rendered = TelegramMessageSplitter.split(normalized).first ?? normalized
+        guard rendered != state.lastRenderedText else {
+            return
+        }
+
         _ = try await bot.editMessageText(
             chatId: state.chatId,
             messageId: state.messageId,
-            text: normalized,
+            text: rendered,
             messageThreadId: state.messageThreadId
         )
-        state.lastRenderedText = normalized
+        state.lastRenderedText = rendered
         state.lastUpdatedAt = now
         streams[handle.id] = state
     }
@@ -302,16 +314,30 @@ public actor TelegramGatewayPlugin: StreamingGatewayPlugin, ToolApprovalGatewayP
             return
         }
 
-        guard finalContent != state.lastRenderedText else {
+        let chunks = TelegramMessageSplitter.split(finalContent)
+        guard let firstChunk = chunks.first else {
             return
         }
 
-        _ = try await bot.editMessageText(
-            chatId: state.chatId,
-            messageId: state.messageId,
-            text: finalContent,
-            messageThreadId: state.messageThreadId
-        )
+        if firstChunk != state.lastRenderedText {
+            _ = try await bot.editMessageText(
+                chatId: state.chatId,
+                messageId: state.messageId,
+                text: firstChunk,
+                messageThreadId: state.messageThreadId
+            )
+        } else if chunks.count == 1 {
+            return
+        }
+
+        for chunk in chunks.dropFirst() {
+            _ = try await bot.sendMessage(
+                chatId: state.chatId,
+                text: chunk,
+                messageThreadId: state.messageThreadId,
+                showTyping: false
+            )
+        }
     }
 
     private static func planInputText(_ request: PlanInputRequest) -> String {

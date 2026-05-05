@@ -409,16 +409,42 @@ final class SloppyTUIScreen: @preconcurrency Component, @unchecked Sendable {
     private func handleAttachmentInput(_ input: TerminalInput) -> Bool {
         switch input {
         case .paste(let text):
+            guard !isEditingSingleLineSlashCommand else { return false }
             let urls = attachmentURLs(fromPastedText: text)
             guard !urls.isEmpty else { return false }
             addPendingAttachmentFiles(urls)
             return true
         case .key(.character("v"), let modifiers) where modifiers.contains(.control):
+            if isEditingSingleLineSlashCommand, pasteClipboardTextIntoEditor() {
+                return true
+            }
             pasteAttachmentFromClipboard()
             return true
         default:
             return false
         }
+    }
+
+    private var isEditingSingleLineSlashCommand: Bool {
+        let text = editor.getText()
+        guard !text.contains("\n") else { return false }
+        return text.trimmingCharacters(in: .whitespacesAndNewlines).hasPrefix("/")
+    }
+
+    private func pasteClipboardTextIntoEditor() -> Bool {
+        #if canImport(AppKit)
+        let pasteboard = NSPasteboard.general
+        if let urls = pasteboard.readObjects(forClasses: [NSURL.self], options: nil) as? [URL],
+           !urls.isEmpty {
+            editor.handle(input: .paste(urls.map(\.path).joined(separator: "\n")))
+            return true
+        }
+        if let text = pasteboard.string(forType: .string), !text.isEmpty {
+            editor.handle(input: .paste(text))
+            return true
+        }
+        #endif
+        return false
     }
 
     private func handleModeCycle(_ input: TerminalInput) -> Bool {
