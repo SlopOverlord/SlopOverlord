@@ -11,13 +11,13 @@ extension CoreService {
         request: ToolInvocationRequest,
         chatMode: AgentChatMode?
     ) async -> ToolInvocationResult {
-        guard chatMode == .plan else {
+        guard let requestMode = inputRequestMode(from: chatMode) else {
             return ToolInvocationResult(
                 tool: request.tool,
                 ok: false,
                 error: ToolErrorPayload(
-                    code: "plan_mode_required",
-                    message: "`planning.request_input` is only available in plan mode.",
+                    code: "input_mode_required",
+                    message: "`planning.request_input` is only available in plan or debug mode.",
                     retryable: false
                 )
             )
@@ -25,7 +25,7 @@ extension CoreService {
 
         let inputRequest: PlanInputRequest
         do {
-            inputRequest = try makePlanInputRequest(arguments: request.arguments)
+            inputRequest = try makePlanInputRequest(arguments: request.arguments, mode: requestMode.rawValue)
         } catch {
             return ToolInvocationResult(
                 tool: request.tool,
@@ -81,13 +81,13 @@ extension CoreService {
         topicID: String?,
         chatMode: AgentChatMode?
     ) async -> ToolInvocationResult {
-        guard chatMode == .plan else {
+        guard let requestMode = inputRequestMode(from: chatMode) else {
             return ToolInvocationResult(
                 tool: request.tool,
                 ok: false,
                 error: ToolErrorPayload(
-                    code: "plan_mode_required",
-                    message: "`planning.request_input` is only available in plan mode.",
+                    code: "input_mode_required",
+                    message: "`planning.request_input` is only available in plan or debug mode.",
                     retryable: false
                 )
             )
@@ -95,7 +95,7 @@ extension CoreService {
 
         let inputRequest: PlanInputRequest
         do {
-            inputRequest = try makePlanInputRequest(arguments: request.arguments)
+            inputRequest = try makePlanInputRequest(arguments: request.arguments, mode: requestMode.rawValue)
             try await channelSessionStore.recordInputRequest(channelId: channelID, request: inputRequest)
             _ = await channelDelivery.presentPlanInputRequest(
                 channelId: channelID,
@@ -198,7 +198,7 @@ extension CoreService {
             request: AgentSessionPostMessageRequest(
                 userId: response.userId,
                 content: resumePromptText(request: inputRequest, response: response),
-                mode: .plan
+                mode: inputRequestChatMode(inputRequest)
             )
         )
     }
@@ -235,7 +235,8 @@ extension CoreService {
                 channelId: detail.summary.channelId,
                 userId: response.userId,
                 contentForModel: resumePromptText(request: inputRequest, response: response),
-                topicId: nil
+                topicId: nil,
+                mode: inputRequestChatMode(inputRequest)
             )
         }
         return try await channelSessionStore.loadSessionDetail(sessionID: sessionID)
@@ -275,7 +276,20 @@ extension CoreService {
         }
     }
 
-    private func makePlanInputRequest(arguments: [String: JSONValue]) throws -> PlanInputRequest {
+    private func inputRequestMode(from chatMode: AgentChatMode?) -> AgentChatMode? {
+        switch chatMode {
+        case .plan, .debug:
+            return chatMode
+        case .ask, .build, nil:
+            return nil
+        }
+    }
+
+    private func inputRequestChatMode(_ request: PlanInputRequest) -> AgentChatMode {
+        AgentChatMode(rawValue: request.mode) ?? .plan
+    }
+
+    private func makePlanInputRequest(arguments: [String: JSONValue], mode: String) throws -> PlanInputRequest {
         let title = arguments["title"]?.asString?.trimmingCharacters(in: .whitespacesAndNewlines)
         guard let questionValues = arguments["questions"]?.asArray else {
             throw PlanInputValidationError.invalid("`questions` must be an array.")
@@ -324,7 +338,7 @@ extension CoreService {
                 allowCustomAnswer: object["allowCustomAnswer"]?.asBool ?? true
             )
         }
-        return PlanInputRequest(title: title?.isEmpty == false ? title : nil, questions: questions)
+        return PlanInputRequest(mode: mode, title: title?.isEmpty == false ? title : nil, questions: questions)
     }
 
     private func pendingPlanInputRequest(
@@ -390,7 +404,7 @@ extension CoreService {
 
     private func answerSummaryText(request: PlanInputRequest, response: PlanInputResponse) -> String {
         if response.status == .cancelled {
-            return "Plan input cancelled."
+            return "\(inputRequestModeLabel(request)) input cancelled."
         }
         let lines = request.questions.map { question -> String in
             guard let answer = response.answers.first(where: { $0.questionId == question.id }) else {
@@ -405,17 +419,21 @@ extension CoreService {
             }
             return "- \(question.question): \(text)"
         }
-        return (["Plan input answered:"] + lines).joined(separator: "\n")
+        return (["\(inputRequestModeLabel(request)) input answered:"] + lines).joined(separator: "\n")
     }
 
     private func resumePromptText(request: PlanInputRequest, response: PlanInputResponse) -> String {
         """
-        The user answered the pending plan input request `\(request.id)`.
+        The user answered the pending \(inputRequestModeLabel(request).lowercased()) input request `\(request.id)`.
 
         \(answerSummaryText(request: request, response: response))
 
-        Continue the plan-mode turn using these answers.
+        Continue the \(inputRequestChatMode(request).rawValue)-mode turn using these answers.
         """
+    }
+
+    private func inputRequestModeLabel(_ request: PlanInputRequest) -> String {
+        inputRequestChatMode(request) == .debug ? "Debug" : "Plan"
     }
 
     private func stableID(_ raw: String?, field: String) throws -> String {

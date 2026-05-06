@@ -14,11 +14,11 @@ actor ToolAuthorizationService {
     }
 
     private let store: AgentToolsFileStore
-    private let mcpRegistry: MCPClientRegistry
+    private let mcpRegistry: any MCPToolDiscovering
     private var cache: [String: CachedPolicy] = [:]
     private var invocationsByAgent: [String: [Date]] = [:]
 
-    init(store: AgentToolsFileStore, mcpRegistry: MCPClientRegistry) {
+    init(store: AgentToolsFileStore, mcpRegistry: any MCPToolDiscovering) {
         self.store = store
         self.mcpRegistry = mcpRegistry
     }
@@ -56,7 +56,14 @@ actor ToolAuthorizationService {
     }
 
     func authorize(agentID: String, toolID: String) async throws -> ToolAuthorizationDecision {
-        let knownToolIDs = await ToolCatalog.knownToolIDs(mcpRegistry: mcpRegistry)
+        let builtInToolIDs = ToolCatalog.knownToolIDs
+        if builtInToolIDs.contains(toolID) {
+            let policy = try reloadedPolicy(agentID: agentID, knownToolIDs: builtInToolIDs)
+            return authorizeKnownTool(agentID: agentID, toolID: toolID, policy: policy)
+        }
+
+        let dynamicToolIDs = await mcpRegistry.dynamicToolIDs()
+        let knownToolIDs = builtInToolIDs.union(dynamicToolIDs)
         let policy = try reloadedPolicy(agentID: agentID, knownToolIDs: knownToolIDs)
 
         guard knownToolIDs.contains(toolID) else {
@@ -71,6 +78,14 @@ actor ToolAuthorizationService {
             )
         }
 
+        return authorizeKnownTool(agentID: agentID, toolID: toolID, policy: policy)
+    }
+
+    private func authorizeKnownTool(
+        agentID: String,
+        toolID: String,
+        policy: AgentToolsPolicy
+    ) -> ToolAuthorizationDecision {
         let explicitlyAllowed = policy.tools[toolID]
         let allowed = explicitlyAllowed ?? (policy.defaultPolicy == .allow)
         guard allowed else {

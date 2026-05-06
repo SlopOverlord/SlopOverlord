@@ -94,6 +94,14 @@ function defaultDraft() {
     approval: {
       enabled: false
     },
+    preToolsHook: {
+      enabled: null,
+      command: null,
+      arguments: null,
+      timeoutMs: null,
+      maxOutputBytes: null,
+      failurePolicy: null
+    },
     guardrails: {
       maxReadBytes: 524288,
       maxWriteBytes: 524288,
@@ -124,6 +132,16 @@ function parseList(value) {
     .split("\n")
     .map((item) => item.trim())
     .filter(Boolean);
+}
+
+function parseNullableList(value) {
+  const items = parseList(value);
+  return items.length > 0 ? items : null;
+}
+
+function nullableText(value) {
+  const text = String(value || "").trim();
+  return text ? text : null;
 }
 
 const NUMERIC_GUARDRAILS = [
@@ -250,6 +268,10 @@ export function AgentToolsTab({ agentId }) {
           ...defaultDraft().approval,
           ...(policy.approval || {})
         },
+        preToolsHook: {
+          ...defaultDraft().preToolsHook,
+          ...(policy.preToolsHook || {})
+        },
         guardrails: {
           ...defaultDraft().guardrails,
           ...(policy.guardrails || {})
@@ -322,6 +344,16 @@ export function AgentToolsTab({ agentId }) {
     }));
   }
 
+  function updatePreToolsHook(field, value) {
+    setDraft((previous) => ({
+      ...previous,
+      preToolsHook: {
+        ...previous.preToolsHook,
+        [field]: value
+      }
+    }));
+  }
+
   function isToolEnabled(toolId, state = draft) {
     const explicitlyEnabled = state.tools?.[toolId];
     if (typeof explicitlyEnabled === "boolean") {
@@ -366,6 +398,20 @@ export function AgentToolsTab({ agentId }) {
       tools: draft.tools,
       approval: {
         enabled: Boolean(draft.approval?.enabled)
+      },
+      preToolsHook: {
+        enabled: typeof draft.preToolsHook?.enabled === "boolean" ? draft.preToolsHook.enabled : null,
+        command: nullableText(draft.preToolsHook?.command),
+        arguments: parseNullableList(draft.preToolsHook?.arguments),
+        timeoutMs: draft.preToolsHook?.timeoutMs === null || draft.preToolsHook?.timeoutMs === ""
+          ? null
+          : Number(draft.preToolsHook?.timeoutMs),
+        maxOutputBytes: draft.preToolsHook?.maxOutputBytes === null || draft.preToolsHook?.maxOutputBytes === ""
+          ? null
+          : Number(draft.preToolsHook?.maxOutputBytes),
+        failurePolicy: draft.preToolsHook?.failurePolicy === "allow" || draft.preToolsHook?.failurePolicy === "block"
+          ? draft.preToolsHook.failurePolicy
+          : null
       },
       guardrails: {
         maxReadBytes: Number(draft.guardrails.maxReadBytes),
@@ -462,6 +508,120 @@ export function AgentToolsTab({ agentId }) {
                 <span className="agent-tools-switch-track" />
               </span>
             </label>
+          </section>
+
+          <section className="agent-tools-panel">
+            <div className="agent-tools-panel-head">
+              <h4>Pre-Tools Hook Override</h4>
+              <p>Override the global local hook for this agent before tool calls are logged, approved, or executed.</p>
+            </div>
+
+            <div className="review-approval-options">
+              {[
+                { id: "inherit", label: "Inherit", icon: "settings_backup_restore" },
+                { id: "enabled", label: "Enabled", icon: "lock" },
+                { id: "disabled", label: "Disabled", icon: "lock_open" }
+              ].map((option) => {
+                const mode = draft.preToolsHook?.enabled === true
+                  ? "enabled"
+                  : draft.preToolsHook?.enabled === false
+                    ? "disabled"
+                    : "inherit";
+                return (
+                  <button
+                    key={option.id}
+                    type="button"
+                    className={`review-approval-option ${mode === option.id ? "active" : ""}`}
+                    onClick={() => {
+                      updatePreToolsHook(
+                        "enabled",
+                        option.id === "inherit" ? null : option.id === "enabled"
+                      );
+                    }}
+                  >
+                    <span className="material-symbols-rounded review-approval-icon">{option.icon}</span>
+                    <strong className="review-approval-name">{option.label}</strong>
+                  </button>
+                );
+              })}
+            </div>
+
+            <div className="agent-tools-textarea-grid" style={{ marginTop: 12 }}>
+              <label className="agent-tools-field">
+                <span>Command Override</span>
+                <small>Blank inherits the global command.</small>
+                <input
+                  type="text"
+                  value={draft.preToolsHook?.command ?? ""}
+                  placeholder="/absolute/path/to/hook"
+                  onChange={(event) => updatePreToolsHook("command", event.target.value)}
+                />
+              </label>
+              <label className="agent-tools-field">
+                <span>Arguments Override</span>
+                <small>Blank inherits global arguments. One argument per line.</small>
+                <textarea
+                  rows={4}
+                  value={Array.isArray(draft.preToolsHook?.arguments)
+                    ? draft.preToolsHook.arguments.join("\n")
+                    : String(draft.preToolsHook?.arguments || "")}
+                  onChange={(event) => updatePreToolsHook("arguments", event.target.value)}
+                />
+              </label>
+            </div>
+
+            <div className="agent-tools-guardrail-grid" style={{ marginTop: 12 }}>
+              <label className="agent-tools-guardrail">
+                <span className="agent-tools-guardrail-title">Timeout Override</span>
+                <span className="agent-tools-guardrail-note">Blank inherits global timeout.</span>
+                <div className="agent-tools-number">
+                  <input
+                    type="number"
+                    value={draft.preToolsHook?.timeoutMs ?? ""}
+                    placeholder="inherit"
+                    onChange={(event) => updatePreToolsHook("timeoutMs", event.target.value)}
+                  />
+                  <span className="agent-tools-unit">ms</span>
+                </div>
+              </label>
+              <label className="agent-tools-guardrail">
+                <span className="agent-tools-guardrail-title">Max Output Override</span>
+                <span className="agent-tools-guardrail-note">Blank inherits global output cap.</span>
+                <div className="agent-tools-number">
+                  <input
+                    type="number"
+                    value={draft.preToolsHook?.maxOutputBytes ?? ""}
+                    placeholder="inherit"
+                    onChange={(event) => updatePreToolsHook("maxOutputBytes", event.target.value)}
+                  />
+                  <span className="agent-tools-unit">bytes</span>
+                </div>
+              </label>
+            </div>
+
+            <div style={{ marginTop: 12 }}>
+              <span className="agent-tools-guardrail-title">Failure Policy Override</span>
+              <div className="review-approval-options" style={{ marginTop: 8 }}>
+                {[
+                  { id: "inherit", label: "Inherit", icon: "settings_backup_restore" },
+                  { id: "block", label: "Block", icon: "lock" },
+                  { id: "allow", label: "Allow", icon: "lock_open" }
+                ].map((option) => {
+                  const mode = draft.preToolsHook?.failurePolicy || "inherit";
+                  return (
+                    <button
+                      key={option.id}
+                      type="button"
+                      className={`review-approval-option ${mode === option.id ? "active" : ""}`}
+                      onClick={() => updatePreToolsHook("failurePolicy", option.id === "inherit" ? null : option.id)}
+                    >
+                      <span className="material-symbols-rounded review-approval-icon">{option.icon}</span>
+                      <strong className="review-approval-name">{option.label}</strong>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
           </section>
 
           <section className="agent-tools-panel">

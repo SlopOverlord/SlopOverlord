@@ -2405,6 +2405,7 @@ public struct AgentToolsPolicy: Codable, Sendable, Equatable {
     public var defaultPolicy: AgentPolicyDefault
     public var tools: [String: Bool]
     public var approval: AgentToolApprovalSettings
+    public var preToolsHook: AgentToolPreHookOverride
     public var guardrails: AgentToolsGuardrails
 
     public init(
@@ -2412,12 +2413,14 @@ public struct AgentToolsPolicy: Codable, Sendable, Equatable {
         defaultPolicy: AgentPolicyDefault = .allow,
         tools: [String: Bool] = [:],
         approval: AgentToolApprovalSettings = .init(),
+        preToolsHook: AgentToolPreHookOverride = .init(),
         guardrails: AgentToolsGuardrails = .init()
     ) {
         self.version = version
         self.defaultPolicy = defaultPolicy
         self.tools = tools
         self.approval = approval
+        self.preToolsHook = preToolsHook
         self.guardrails = guardrails
     }
 
@@ -2426,6 +2429,7 @@ public struct AgentToolsPolicy: Codable, Sendable, Equatable {
         case defaultPolicy
         case tools
         case approval
+        case preToolsHook
         case guardrails
     }
 
@@ -2435,6 +2439,7 @@ public struct AgentToolsPolicy: Codable, Sendable, Equatable {
         self.defaultPolicy = try container.decodeIfPresent(AgentPolicyDefault.self, forKey: .defaultPolicy) ?? .allow
         self.tools = try container.decodeIfPresent([String: Bool].self, forKey: .tools) ?? [:]
         self.approval = try container.decodeIfPresent(AgentToolApprovalSettings.self, forKey: .approval) ?? .init()
+        self.preToolsHook = try container.decodeIfPresent(AgentToolPreHookOverride.self, forKey: .preToolsHook) ?? .init()
         self.guardrails = try container.decodeIfPresent(AgentToolsGuardrails.self, forKey: .guardrails) ?? .init()
     }
 }
@@ -2447,11 +2452,42 @@ public struct AgentToolApprovalSettings: Codable, Sendable, Equatable {
     }
 }
 
+public enum ToolHookFailurePolicy: String, Codable, Sendable, Equatable {
+    case allow
+    case block
+}
+
+public struct AgentToolPreHookOverride: Codable, Sendable, Equatable {
+    public var enabled: Bool?
+    public var command: String?
+    public var arguments: [String]?
+    public var timeoutMs: Int?
+    public var maxOutputBytes: Int?
+    public var failurePolicy: ToolHookFailurePolicy?
+
+    public init(
+        enabled: Bool? = nil,
+        command: String? = nil,
+        arguments: [String]? = nil,
+        timeoutMs: Int? = nil,
+        maxOutputBytes: Int? = nil,
+        failurePolicy: ToolHookFailurePolicy? = nil
+    ) {
+        self.enabled = enabled
+        self.command = command
+        self.arguments = arguments
+        self.timeoutMs = timeoutMs
+        self.maxOutputBytes = maxOutputBytes
+        self.failurePolicy = failurePolicy
+    }
+}
+
 public struct AgentToolsUpdateRequest: Codable, Sendable {
     public var version: Int?
     public var defaultPolicy: AgentPolicyDefault
     public var tools: [String: Bool]
     public var approval: AgentToolApprovalSettings
+    public var preToolsHook: AgentToolPreHookOverride
     public var guardrails: AgentToolsGuardrails
 
     public init(
@@ -2459,12 +2495,14 @@ public struct AgentToolsUpdateRequest: Codable, Sendable {
         defaultPolicy: AgentPolicyDefault = .allow,
         tools: [String: Bool] = [:],
         approval: AgentToolApprovalSettings = .init(),
+        preToolsHook: AgentToolPreHookOverride = .init(),
         guardrails: AgentToolsGuardrails = .init()
     ) {
         self.version = version
         self.defaultPolicy = defaultPolicy
         self.tools = tools
         self.approval = approval
+        self.preToolsHook = preToolsHook
         self.guardrails = guardrails
     }
 
@@ -2473,6 +2511,7 @@ public struct AgentToolsUpdateRequest: Codable, Sendable {
         case defaultPolicy
         case tools
         case approval
+        case preToolsHook
         case guardrails
     }
 
@@ -2482,6 +2521,7 @@ public struct AgentToolsUpdateRequest: Codable, Sendable {
         self.defaultPolicy = try container.decodeIfPresent(AgentPolicyDefault.self, forKey: .defaultPolicy) ?? .allow
         self.tools = try container.decodeIfPresent([String: Bool].self, forKey: .tools) ?? [:]
         self.approval = try container.decodeIfPresent(AgentToolApprovalSettings.self, forKey: .approval) ?? .init()
+        self.preToolsHook = try container.decodeIfPresent(AgentToolPreHookOverride.self, forKey: .preToolsHook) ?? .init()
         self.guardrails = try container.decodeIfPresent(AgentToolsGuardrails.self, forKey: .guardrails) ?? .init()
     }
 }

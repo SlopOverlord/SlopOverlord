@@ -161,7 +161,6 @@ struct SloppyTUIApp {
         return try await service.createAgentSession(
             agentID: agentID,
             request: AgentSessionCreateRequest(
-                title: "TUI chat",
                 projectId: projectID
             )
         )

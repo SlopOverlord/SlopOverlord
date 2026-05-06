@@ -1,0 +1,13 @@
+{
+  "columns": 40,
+  "rows": 8,
+  "events": [
+    { "type": "key", "data": "H" },
+    { "type": "key", "data": "i" },
+    { "type": "key", "data": "enter" },
+    { "type": "paste", "data": "pasted line" },
+    { "type": "sleep", "ms": 10 },
+    { "type": "resize", "columns": 30, "rows": 8 },
+    { "type": "theme", "data": "dark" }
+  ]
+}

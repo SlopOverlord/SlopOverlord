@@ -84,6 +84,44 @@ final class SloppyTUIScreen: @preconcurrency Component, @unchecked Sendable {
         SloppyTUISlashCommand("provider", "Configure provider"),
         SloppyTUISlashCommand("quit", "Exit TUI"),
     ]
+    private static let handledSlashCommandNames: Set<String> = [
+        "help",
+        "status",
+        "pet",
+        "agents",
+        "agent",
+        "subagents",
+        "children",
+        "sessions",
+        "session",
+        "resume",
+        "new",
+        "clear",
+        "stop",
+        "btw",
+        "compact",
+        "add_dir",
+        "add-dir",
+        "fork",
+        "bar",
+        "copy",
+        "diff",
+        "effort",
+        "skills",
+        "editor",
+        "model",
+        "context",
+        "tasks",
+        "mcps",
+        "mcp",
+        "provider",
+        "providers",
+        "openai-device",
+        "anthropic-oauth",
+        "anthropic-callback",
+        "quit",
+        "exit",
+    ]
 
     private static let firstStartBootstrapCard = """
     ## First start bootstrap
@@ -137,12 +175,16 @@ final class SloppyTUIScreen: @preconcurrency Component, @unchecked Sendable {
     private var liveRunStatusLine: String?
     private var taskStartedAt: Date?
     private var lastTaskElapsed: TimeInterval?
+    private var transientNoticeLine: String?
+    private var transientNoticeTask: Task<Void, Never>?
     private var transcriptExpanded = false
     private var thinkingFrame = 0
     private var thinkingWord = "thinking"
     private var petMood: AgentPetAnimationState = .idle
     private var welcomeDismissed = false
     private var isPosting = false
+    private var isInterruptingRun = false
+    private var doubleEscapeDetector = SloppyTUIDoubleEscapeDetector()
     private var exitAfterModelSelection = false
     private var nextLocalCardID = 0
     private var localCardDismissTasks: [Int: Task<Void, Never>] = [:]
@@ -221,6 +263,8 @@ final class SloppyTUIScreen: @preconcurrency Component, @unchecked Sendable {
         thinkingAnimationTask?.cancel()
         projectFileIndexTask?.cancel()
         projectFileReindexTask?.cancel()
+        transientNoticeTask?.cancel()
+        transientNoticeTask = nil
         cancelLocalCardDismissTasks()
     }
 
@@ -231,6 +275,9 @@ final class SloppyTUIScreen: @preconcurrency Component, @unchecked Sendable {
     }
 
     func handle(input: TerminalInput) {
+        if handleDoubleEscapeInterrupt(input) {
+            return
+        }
         if handleActivePicker(input: input) {
             return
         }
@@ -253,6 +300,26 @@ final class SloppyTUIScreen: @preconcurrency Component, @unchecked Sendable {
             return
         }
         editor.handle(input: input)
+    }
+
+    private func handleDoubleEscapeInterrupt(_ input: TerminalInput) -> Bool {
+        let shouldInterrupt = doubleEscapeDetector.shouldInterrupt(
+            input: input,
+            isInterruptible: isPosting && !isInterruptingRun
+        )
+        guard shouldInterrupt else {
+            return false
+        }
+
+        Task { @MainActor in
+            await self.interruptCurrentRun(
+                reason: "TUI double Esc",
+                successMessage: "Interrupt requested.",
+                failurePrefix: "Interrupt failed",
+                useNotice: true
+            )
+        }
+        return true
     }
 
     private func renderBaseScreen(width: Int, height: Int) -> [String] {
@@ -746,7 +813,7 @@ final class SloppyTUIScreen: @preconcurrency Component, @unchecked Sendable {
         editor.setText("")
         persistDraft("")
 
-        if value.hasPrefix("/") {
+        if shouldHandleSlashCommand(value) {
             await handleCommand(value)
             return
         }
@@ -889,8 +956,16 @@ final class SloppyTUIScreen: @preconcurrency Component, @unchecked Sendable {
                 await sendMessage(raw)
                 return
             }
-            appendLocalCard("Unknown command `\(raw)`. Try `/help`.")
+            showSystemNotice("Unknown command `\(raw)`. Try `/help`.")
         }
+    }
+
+    private func shouldHandleSlashCommand(_ value: String) -> Bool {
+        SloppyTUISlashCommandRouter.shouldHandle(
+            value,
+            commandNames: Self.handledSlashCommandNames,
+            skillCommandNames: skillSlashCommandNames
+        )
     }
 
     private func showHelp() {
@@ -968,7 +1043,6 @@ final class SloppyTUIScreen: @preconcurrency Component, @unchecked Sendable {
             session = try await runtime.service.createAgentSession(
                 agentID: agent.id,
                 request: AgentSessionCreateRequest(
-                    title: "TUI chat",
                     checkpointSessionId: session.id,
                     projectId: project.id
                 )
@@ -982,15 +1056,46 @@ final class SloppyTUIScreen: @preconcurrency Component, @unchecked Sendable {
     }
 
     private func stopCurrentRun() async {
+        await interruptCurrentRun(
+            reason: "TUI /stop",
+            successMessage: "Stop requested.",
+            failurePrefix: "Stop failed",
+            useNotice: false
+        )
+    }
+
+    private func interruptCurrentRun(
+        reason: String,
+        successMessage: String,
+        failurePrefix: String,
+        useNotice: Bool
+    ) async {
+        guard !isInterruptingRun else {
+            return
+        }
+        isInterruptingRun = true
+        defer {
+            isInterruptingRun = false
+            doubleEscapeDetector.reset()
+        }
         do {
             _ = try await runtime.service.controlAgentSession(
                 agentID: agent.id,
                 sessionID: session.id,
-                request: AgentSessionControlRequest(action: .interruptTree, requestedBy: "tui", reason: "TUI /stop")
+                request: AgentSessionControlRequest(action: .interruptTree, requestedBy: "tui", reason: reason)
             )
-            appendLocalCard("Stop requested.")
+            if useNotice {
+                showSystemNotice(successMessage)
+            } else {
+                appendLocalCard(successMessage)
+            }
         } catch {
-            appendLocalCard("Stop failed: \(String(describing: error))")
+            let message = "\(failurePrefix): \(String(describing: error))"
+            if useNotice {
+                showSystemNotice(message)
+            } else {
+                appendLocalCard(message)
+            }
         }
     }
 
@@ -1033,7 +1138,7 @@ final class SloppyTUIScreen: @preconcurrency Component, @unchecked Sendable {
             let child = try await runtime.service.createAgentSession(
                 agentID: agent.id,
                 request: AgentSessionCreateRequest(
-                    title: titleTail.isEmpty ? "Fork of \(session.title)" : "Fork: \(String(titleTail.prefix(48)))",
+                    title: titleTail.isEmpty ? "Fork of \(SloppyTUITheme.sessionDisplayTitle(session))" : "Fork: \(String(titleTail.prefix(48)))",
                     parentSessionId: session.id,
                     projectId: project.id
                 )
@@ -1240,7 +1345,7 @@ final class SloppyTUIScreen: @preconcurrency Component, @unchecked Sendable {
             items: sessions.map { item in
                 SloppyTUIPickerItem(
                     value: item.id,
-                    label: item.title.isEmpty ? item.id : item.title,
+                    label: SloppyTUITheme.sessionDisplayTitle(item),
                     description: SloppyTUITheme.sessionPickerDescription(item),
                     isCurrent: item.id == session.id
                 )
@@ -1576,7 +1681,6 @@ final class SloppyTUIScreen: @preconcurrency Component, @unchecked Sendable {
         return try await runtime.service.createAgentSession(
             agentID: agentID,
             request: AgentSessionCreateRequest(
-                title: "TUI chat",
                 projectId: project.id
             )
         )
@@ -2484,6 +2588,25 @@ final class SloppyTUIScreen: @preconcurrency Component, @unchecked Sendable {
         localCardDismissTasks.removeAll()
     }
 
+    private func showSystemNotice(_ text: String, autoDismissAfter seconds: TimeInterval = 6) {
+        let value = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !value.isEmpty else { return }
+        transientNoticeLine = value
+        transientNoticeTask?.cancel()
+        transientNoticeTask = Task { [weak self] in
+            let nanoseconds = UInt64(max(0, seconds) * 1_000_000_000)
+            try? await Task.sleep(nanoseconds: nanoseconds)
+            guard !Task.isCancelled else { return }
+            await MainActor.run {
+                guard let self, self.transientNoticeLine == value else { return }
+                self.transientNoticeLine = nil
+                self.transientNoticeTask = nil
+                self.refreshStaticChrome()
+            }
+        }
+        refreshStaticChrome()
+    }
+
     private func refreshStaticChrome(statusLine: String? = nil) {
         header.text = SloppyTUITheme.header(
             project: project.name,
@@ -2503,8 +2626,9 @@ final class SloppyTUIScreen: @preconcurrency Component, @unchecked Sendable {
             sessionID: session.id
         )
         let busyStatus = (statusLine ?? liveRunStatusLine).map { $0 + elapsed.busySuffix }
+        let noticeStatus = transientNoticeLine.map { "notice: \($0)" + elapsed.idleSuffix }
         status.text = SloppyTUITheme.status(
-            busyStatus ?? defaultStatus,
+            busyStatus ?? noticeStatus ?? defaultStatus,
             isBusy: busyStatus != nil
         )
         requestRender()
@@ -2560,7 +2684,7 @@ final class SloppyTUIScreen: @preconcurrency Component, @unchecked Sendable {
     }
 
     private var shouldRenderWelcome: Bool {
-        !welcomeDismissed && localCards.isEmpty
+        !welcomeDismissed && localCards.isEmpty && transientNoticeLine == nil
     }
 
     private func stopTUI() {
@@ -2709,10 +2833,10 @@ final class SloppyTUIScreen: @preconcurrency Component, @unchecked Sendable {
             }
         }
         if !added.isEmpty {
-            appendLocalCard("Attached \(added.count) file(s): \(added.map { "`\($0)`" }.joined(separator: ", "))")
+            showSystemNotice("Attached \(added.count) file(s): \(added.joined(separator: ", "))")
         }
         if !skipped.isEmpty {
-            appendLocalCard("Attachment skipped:\n" + skipped.map { "- \($0)" }.joined(separator: "\n"))
+            showSystemNotice("Attachment skipped: " + skipped.joined(separator: "; "))
         }
         refreshStaticChrome()
     }
@@ -2781,15 +2905,15 @@ final class SloppyTUIScreen: @preconcurrency Component, @unchecked Sendable {
             addPendingClipboardImage(data: pngData, mimeType: "image/png", extension: "png")
             return
         }
-        appendLocalCard("Clipboard does not contain a file, image, or file path.")
+        showSystemNotice("Clipboard does not contain a file, image, or file path.")
         #else
-        appendLocalCard("Clipboard image paste is only available on macOS.")
+        showSystemNotice("Clipboard image paste is only available on macOS.")
         #endif
     }
 
     private func addPendingClipboardImage(data: Data, mimeType: String, extension pathExtension: String) {
         guard data.count <= SloppyTUIAttachmentLimits.maxBytes else {
-            appendLocalCard("Clipboard image is too large (\(data.count) bytes).")
+            showSystemNotice("Clipboard image is too large (\(data.count) bytes).")
             return
         }
         let name = "clipboard-\(Self.clipboardTimestamp()).\(pathExtension)"
@@ -2801,7 +2925,7 @@ final class SloppyTUIScreen: @preconcurrency Component, @unchecked Sendable {
                 contentBase64: data.base64EncodedString()
             )
         )
-        appendLocalCard("Attached clipboard image: `\(name)`")
+        showSystemNotice("Attached clipboard image: \(name)")
         refreshStaticChrome()
     }
 

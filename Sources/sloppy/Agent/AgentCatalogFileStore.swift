@@ -668,6 +668,7 @@ final class AgentCatalogFileStore {
             defaultPolicy: .allow,
             tools: [:],
             approval: .init(enabled: false),
+            preToolsHook: .init(),
             guardrails: .init()
         )
         let encoder = JSONEncoder()

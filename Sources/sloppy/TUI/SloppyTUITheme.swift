@@ -232,16 +232,39 @@ enum SloppyTUITheme {
         return parts.joined(separator: " · ")
     }
 
+    static func sessionDisplayTitle(_ session: AgentSessionSummary) -> String {
+        let title = session.title.trimmingCharacters(in: .whitespacesAndNewlines)
+        let preview = sessionPreviewText(session)
+        let lowercasedTitle = title.lowercased()
+        let isDefaultTitle = lowercasedTitle.hasPrefix("session session-")
+        let isLegacyTUITitle = lowercasedTitle == "tui chat"
+        if (isDefaultTitle || isLegacyTUITitle), !preview.isEmpty {
+            return truncateEnd(preview, maxWidth: 80)
+        }
+        if !title.isEmpty {
+            return title
+        }
+        if !preview.isEmpty {
+            return truncateEnd(preview, maxWidth: 80)
+        }
+        return "Session"
+    }
+
     static func sessionHeaderTitle(_ session: AgentSessionSummary) -> String {
-        "\(session.title) (\(shortID(session.id)))"
+        "\(sessionDisplayTitle(session)) (\(shortID(session.id)))"
     }
 
     static func sessionPickerDescription(_ session: AgentSessionSummary) -> String {
+        let preview = sessionPreviewText(session)
+        let detail = preview.isEmpty ? "\(session.messageCount) messages" : preview
+        return "\(relativeTime(session.updatedAt)) · \(shortID(session.id)) · \(detail)"
+    }
+
+    private static func sessionPreviewText(_ session: AgentSessionSummary) -> String {
         let preview = session.lastMessagePreview?
             .trimmingCharacters(in: .whitespacesAndNewlines)
             .replacingOccurrences(of: "\n", with: " ") ?? ""
-        let detail = preview.isEmpty ? "\(session.messageCount) messages" : preview
-        return "\(relativeTime(session.updatedAt)) · \(shortID(session.id)) · \(detail)"
+        return preview.replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
     }
 
     static func waitingIndicator(frame: Int, word: String) -> String {

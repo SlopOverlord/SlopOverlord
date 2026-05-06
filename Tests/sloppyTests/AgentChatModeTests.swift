@@ -33,6 +33,11 @@ func agentChatModeRuntimeInstructionsMatchModeSemantics() {
     #expect(plan.contains("Do not edit files"))
     #expect(debug.contains("Add focused diagnostic logging"))
     #expect(debug.contains("instrumentation"))
+    #expect(debug.contains("// #if region debug"))
+    #expect(debug.contains("// #end region debug"))
+    #expect(debug.contains("planning.request_input"))
+    #expect(debug.contains("mark_as_fixed"))
+    #expect(debug.contains("Bug is repeated"))
 }
 
 @Test

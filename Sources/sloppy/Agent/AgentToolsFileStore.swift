@@ -35,6 +35,7 @@ final class AgentToolsFileStore {
             defaultPolicy: .allow,
             tools: [:],
             approval: .init(enabled: false),
+            preToolsHook: .init(),
             guardrails: .init()
         )
     }
@@ -92,6 +93,7 @@ final class AgentToolsFileStore {
             defaultPolicy: request.defaultPolicy,
             tools: request.tools,
             approval: request.approval,
+            preToolsHook: request.preToolsHook,
             guardrails: request.guardrails
         )
         let validated = try validated(policy, knownToolIDs: knownToolIDs)

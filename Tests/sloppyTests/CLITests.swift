@@ -41,6 +41,45 @@ func cliStyleWhiteBoldContainsInput() {
     #expect(CLIStyle.whiteBold("id-123").contains("id-123"))
 }
 
+// MARK: - Service command tests
+
+@Test
+func serviceLaunchAgentPathCombinesInstallEnvironmentWithFallbacks() {
+    let path = ServiceManager.launchAgentPATH(
+        environment: ["PATH": "/custom/bin:/usr/bin:/custom/bin"]
+    )
+    let components = path.split(separator: ":").map(String.init)
+
+    #expect(components.prefix(2) == ["/custom/bin", "/usr/bin"])
+    #expect(components.contains("/opt/homebrew/bin"))
+    #expect(components.contains("/usr/local/bin"))
+    #expect(components.contains("/bin"))
+    #expect(components.filter { $0 == "/custom/bin" }.count == 1)
+    #expect(components.filter { $0 == "/usr/bin" }.count == 1)
+}
+
+@Test
+func serviceLaunchAgentPlistIncludesPathEnvironmentOnly() throws {
+    let plist = ServiceManager.makePlist(
+        executablePath: "/tmp/sloppy&server",
+        configPath: "/tmp/sloppy <config>.json",
+        environment: [
+            "PATH": "/custom/bin",
+            "SLOPPY_TOKEN": "secret",
+        ]
+    )
+    let data = try #require(plist.data(using: .utf8))
+    let rootObject = try PropertyListSerialization.propertyList(from: data, options: [], format: nil)
+    let root = try #require(rootObject as? [String: Any])
+    let environment = try #require(root["EnvironmentVariables"] as? [String: String])
+    let programArguments = try #require(root["ProgramArguments"] as? [String])
+
+    #expect(environment == ["PATH": ServiceManager.launchAgentPATH(environment: ["PATH": "/custom/bin"])])
+    #expect(programArguments == ["/tmp/sloppy&server", "run", "--config-path", "/tmp/sloppy <config>.json"])
+    #expect(!plist.contains("SLOPPY_TOKEN"))
+    #expect(!plist.contains("secret"))
+}
+
 // MARK: - CLIFormatters tests
 
 @Test

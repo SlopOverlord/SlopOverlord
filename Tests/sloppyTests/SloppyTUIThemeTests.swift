@@ -1,3 +1,4 @@
+import Protocols
 import Testing
 import TauTUI
 @testable import sloppy
@@ -92,6 +93,46 @@ func elapsedFormatsShortAndLongRuns() {
     #expect(SloppyTUITheme.elapsed(0) == "00:00")
     #expect(SloppyTUITheme.elapsed(65) == "01:05")
     #expect(SloppyTUITheme.elapsed(3_661) == "1:01:01")
+}
+
+@Test
+func sessionDisplayTitleUsesPreviewForDefaultDashboardStyleTitles() {
+    let session = AgentSessionSummary(
+        id: "session-abcdef123456",
+        agentId: "sloppy",
+        title: "Session session-",
+        messageCount: 2,
+        lastMessagePreview: "Refactor the TUI session header"
+    )
+
+    #expect(SloppyTUITheme.sessionDisplayTitle(session) == "Refactor the TUI session header")
+    #expect(SloppyTUITheme.sessionHeaderTitle(session).contains("Refactor the TUI session header"))
+}
+
+@Test
+func sessionDisplayTitleUsesPreviewForLegacyTUIChatTitles() {
+    let session = AgentSessionSummary(
+        id: "session-abcdef123456",
+        agentId: "sloppy",
+        title: "TUI chat",
+        messageCount: 2,
+        lastMessagePreview: "Investigate absolute path submission"
+    )
+
+    #expect(SloppyTUITheme.sessionDisplayTitle(session) == "Investigate absolute path submission")
+}
+
+@Test
+func sessionDisplayTitleKeepsSpecificTitles() {
+    let session = AgentSessionSummary(
+        id: "session-abcdef123456",
+        agentId: "sloppy",
+        title: "Fork: improve project overlay",
+        messageCount: 2,
+        lastMessagePreview: "Something else"
+    )
+
+    #expect(SloppyTUITheme.sessionDisplayTitle(session) == "Fork: improve project overlay")
 }
 
 private func stripANSI(_ line: String) -> String {

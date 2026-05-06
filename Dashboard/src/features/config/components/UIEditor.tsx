@@ -18,6 +18,13 @@ const PRESET_COLORS = [
   "#14b8a6",
 ];
 
+function parseLines(value: string): string[] {
+  return value
+    .split("\n")
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
 function isValidHex(value: string): boolean {
   return /^#([0-9a-fA-F]{3}){1,2}$/.test(value);
 }
@@ -52,6 +59,13 @@ export function UIEditor({ draftConfig, mutateDraft }: UIEditorProps) {
   const terminalEnabled = Boolean(draftConfig?.ui?.dashboardTerminal?.enabled);
   const terminalLocalOnly =
     draftConfig?.ui?.dashboardTerminal?.localOnly == null ? true : Boolean(draftConfig?.ui?.dashboardTerminal?.localOnly);
+  const preToolsHook = draftConfig?.toolHooks?.preTools || {};
+  const preToolsEnabled = Boolean(preToolsHook.enabled);
+  const preToolsCommand = String(preToolsHook.command || "");
+  const preToolsArguments = Array.isArray(preToolsHook.arguments) ? preToolsHook.arguments.join("\n") : "";
+  const preToolsTimeoutMs = Number(preToolsHook.timeoutMs || 2000);
+  const preToolsMaxOutputBytes = Number(preToolsHook.maxOutputBytes || 65536);
+  const preToolsFailurePolicy = String(preToolsHook.failurePolicy || "block") === "allow" ? "allow" : "block";
 
   const commitColor = useCallback((color: string) => {
     const normalized = color.trim().toLowerCase();
@@ -254,6 +268,146 @@ export function UIEditor({ draftConfig, mutateDraft }: UIEditorProps) {
           <span className="entry-form-hint">
             The terminal runs as a real shell inside the current project repo path when one is open, otherwise in the workspace root.
           </span>
+        </div>
+
+        <div style={{ gridColumn: "1 / -1", marginTop: "20px" }}>
+          <span style={{ fontSize: "0.85rem", color: "var(--muted)", display: "block", marginBottom: "8px" }}>
+            Pre-Tools Hook
+          </span>
+          <div className="settings-toggle-row">
+            <label className="agent-tools-guardrail agent-tools-guardrail-toggle">
+              <span className="agent-tools-guardrail-copy">
+                <span className="agent-tools-guardrail-title">Enable global local pre-tools hook</span>
+                <span className="agent-tools-guardrail-note">Runs before tool arguments are persisted, approved, or executed.</span>
+              </span>
+              <span className="agent-tools-switch">
+                <input
+                  type="checkbox"
+                  checked={preToolsEnabled}
+                  onChange={(event) => {
+                    const checked = event.target.checked;
+                    mutateDraft((draft) => {
+                      if (!draft.toolHooks) draft.toolHooks = {};
+                      if (!draft.toolHooks.preTools) {
+                        draft.toolHooks.preTools = {
+                          enabled: false,
+                          command: "",
+                          arguments: [],
+                          timeoutMs: 2000,
+                          maxOutputBytes: 65536,
+                          failurePolicy: "block"
+                        };
+                      }
+                      draft.toolHooks.preTools.enabled = checked;
+                    });
+                  }}
+                />
+                <span className="agent-tools-switch-track" />
+              </span>
+            </label>
+          </div>
+
+          <label style={{ gridColumn: "1 / -1", marginTop: "12px" }}>
+            Command
+            <input
+              type="text"
+              value={preToolsCommand}
+              placeholder="/absolute/path/to/hook"
+              onChange={(event) => {
+                mutateDraft((draft) => {
+                  if (!draft.toolHooks) draft.toolHooks = {};
+                  if (!draft.toolHooks.preTools) draft.toolHooks.preTools = {};
+                  draft.toolHooks.preTools.command = event.target.value;
+                });
+              }}
+            />
+            <span className="entry-form-hint">
+              Absolute path or workspace-relative executable. The hook receives JSON on stdin and returns JSON on stdout.
+            </span>
+          </label>
+
+          <label style={{ gridColumn: "1 / -1", marginTop: "12px" }}>
+            Arguments
+            <textarea
+              rows={4}
+              value={preToolsArguments}
+              placeholder="--profile&#10;private"
+              onChange={(event) => {
+                const lines = parseLines(event.target.value);
+                mutateDraft((draft) => {
+                  if (!draft.toolHooks) draft.toolHooks = {};
+                  if (!draft.toolHooks.preTools) draft.toolHooks.preTools = {};
+                  draft.toolHooks.preTools.arguments = lines;
+                });
+              }}
+            />
+            <span className="entry-form-hint">One argument per line. The command is executed directly, without a shell.</span>
+          </label>
+
+          <div className="entry-form-grid" style={{ gridColumn: "1 / -1" }}>
+            <label>
+              Timeout
+              <input
+                type="number"
+                min={1}
+                value={preToolsTimeoutMs}
+                onChange={(event) => {
+                  mutateDraft((draft) => {
+                    if (!draft.toolHooks) draft.toolHooks = {};
+                    if (!draft.toolHooks.preTools) draft.toolHooks.preTools = {};
+                    draft.toolHooks.preTools.timeoutMs = Number(event.target.value);
+                  });
+                }}
+              />
+              <span className="entry-form-hint">Milliseconds before the hook is terminated.</span>
+            </label>
+            <label>
+              Max Output Bytes
+              <input
+                type="number"
+                min={1}
+                value={preToolsMaxOutputBytes}
+                onChange={(event) => {
+                  mutateDraft((draft) => {
+                    if (!draft.toolHooks) draft.toolHooks = {};
+                    if (!draft.toolHooks.preTools) draft.toolHooks.preTools = {};
+                    draft.toolHooks.preTools.maxOutputBytes = Number(event.target.value);
+                  });
+                }}
+              />
+              <span className="entry-form-hint">Maximum stdout size accepted from the hook.</span>
+            </label>
+          </div>
+
+          <div style={{ gridColumn: "1 / -1", marginTop: "12px" }}>
+            <span style={{ fontSize: "0.85rem", color: "var(--muted)", display: "block", marginBottom: "8px" }}>
+              Failure Policy
+            </span>
+            <div className="review-approval-options">
+              {[
+                { id: "block", label: "Block on failure" },
+                { id: "allow", label: "Allow on failure" }
+              ].map((option) => (
+                <button
+                  key={option.id}
+                  type="button"
+                  className={`review-approval-option ${preToolsFailurePolicy === option.id ? "active" : ""}`}
+                  onClick={() => {
+                    mutateDraft((draft) => {
+                      if (!draft.toolHooks) draft.toolHooks = {};
+                      if (!draft.toolHooks.preTools) draft.toolHooks.preTools = {};
+                      draft.toolHooks.preTools.failurePolicy = option.id;
+                    });
+                  }}
+                >
+                  <span className="material-symbols-rounded review-approval-icon">
+                    {option.id === "block" ? "lock" : "lock_open"}
+                  </span>
+                  <strong className="review-approval-name">{option.label}</strong>
+                </button>
+              ))}
+            </div>
+          </div>
         </div>
       </div>
     </section>

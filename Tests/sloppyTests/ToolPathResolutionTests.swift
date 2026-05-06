@@ -315,6 +315,55 @@ struct ToolPathResolutionTests {
         #expect(result.ok == true)
     }
 
+    @Test("project session uses project repo path as default cwd")
+    func projectSessionUsesProjectRepoPathAsDefaultCwd() async throws {
+        let tmp = FileManager.default.temporaryDirectory
+        let repoRoot = tmp.appendingPathComponent("sloppy-project-chat-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: repoRoot, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: repoRoot) }
+
+        let markerURL = repoRoot.appendingPathComponent("PROJECT_MARKER.txt")
+        try "hello".write(to: markerURL, atomically: true, encoding: .utf8)
+
+        let service = CoreService(config: .test, persistenceBuilder: InMemoryCorePersistenceBuilder())
+        let agentID = "test-project-session-cwd-agent"
+        _ = try await service.createAgent(
+            AgentCreateRequest(id: agentID, displayName: "Project Session CWD Agent", role: "assistant")
+        )
+        _ = try await service.createProject(
+            ProjectCreateRequest(id: "project-session-cwd", name: "Project Session CWD", repoPath: repoRoot.path)
+        )
+        let session = try await service.createAgentSession(
+            agentID: agentID,
+            request: AgentSessionCreateRequest(title: "chat", projectId: "project-session-cwd")
+        )
+
+        let pwdResult = await service.invokeToolFromRuntime(
+            agentID: agentID,
+            sessionID: session.id,
+            request: ToolInvocationRequest(tool: "runtime.exec", arguments: [
+                "command": .string("pwd"),
+            ]),
+            recordSessionEvents: false
+        )
+        #expect(pwdResult.ok == true)
+        #expect(
+            pwdResult.data?.asObject?["stdout"]?.asString?.trimmingCharacters(in: .whitespacesAndNewlines)
+                .hasSuffix(repoRoot.lastPathComponent) == true
+        )
+
+        let readResult = await service.invokeToolFromRuntime(
+            agentID: agentID,
+            sessionID: session.id,
+            request: ToolInvocationRequest(tool: "files.read", arguments: [
+                "path": .string("PROJECT_MARKER.txt"),
+            ]),
+            recordSessionEvents: false
+        )
+        #expect(readResult.ok == true)
+        #expect(readResult.data?.asObject?["content"]?.asString == "hello")
+    }
+
     @Test("invokeToolFromRuntime restores project roots for task sessions")
     func invokeToolRestoresProjectRootsForTaskSession() async throws {
         let tmp = FileManager.default.temporaryDirectory

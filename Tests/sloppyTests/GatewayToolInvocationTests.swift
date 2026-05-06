@@ -183,8 +183,50 @@ struct GatewayToolInvocationTests {
         #expect(detail.events.contains { $0.type == .inputResponse && $0.inputResponse?.requestId == requestID })
     }
 
-    @Test("gateway plan input tool rejects outside plan mode")
-    func gatewayPlanInputRejectsOutsidePlanMode() async throws {
+    @Test("agent debug input tool records pending request")
+    func agentDebugInputRecordsPendingRequest() async throws {
+        let service = makeService()
+        let agentID = "agent-debug-input-\(UUID().uuidString)"
+        try await makeAgent(service: service, agentID: agentID)
+        let session = try await service.createAgentSession(
+            agentID: agentID,
+            request: AgentSessionCreateRequest(title: "Debug verdict")
+        )
+
+        let result = await service.invokeToolFromRuntime(
+            agentID: agentID,
+            sessionID: session.id,
+            request: ToolInvocationRequest(
+                tool: "planning.request_input",
+                arguments: [
+                    "title": .string("Verify debug result"),
+                    "questions": .array([
+                        .object([
+                            "id": .string("debug_verdict"),
+                            "question": .string("What happened after testing the instrumented build?"),
+                            "options": .array([
+                                .object(["id": .string("mark_as_fixed"), "label": .string("Mark as fixed")]),
+                                .object(["id": .string("bug_repeated"), "label": .string("Bug is repeated")])
+                            ]),
+                            "allowCustomAnswer": .bool(false)
+                        ])
+                    ])
+                ]
+            ),
+            chatMode: .debug
+        )
+
+        #expect(result.ok == true)
+        let requestID = try #require(result.data?.asObject?["requestId"]?.asString)
+        let detail = try await service.getAgentSession(agentID: agentID, sessionID: session.id)
+        let inputRequest = try #require(detail.events.compactMap(\.inputRequest).last)
+        #expect(inputRequest.id == requestID)
+        #expect(inputRequest.mode == AgentChatMode.debug.rawValue)
+        #expect(inputRequest.questions.first?.options.map(\.id) == ["mark_as_fixed", "bug_repeated"])
+    }
+
+    @Test("gateway input tool rejects outside plan or debug mode")
+    func gatewayInputRejectsOutsidePlanOrDebugMode() async throws {
         let service = makeService()
         let agentID = "gateway-plan-input-reject-\(UUID().uuidString)"
         try await makeAgent(service: service, agentID: agentID)
@@ -211,6 +253,6 @@ struct GatewayToolInvocationTests {
         )
 
         #expect(result.ok == false)
-        #expect(result.error?.code == "plan_mode_required")
+        #expect(result.error?.code == "input_mode_required")
     }
 }

@@ -1,11 +1,16 @@
 import Foundation
 import Protocols
 
+protocol MCPToolDiscovering: Sendable {
+    func dynamicTools() async -> [MCPDynamicTool]
+    func dynamicToolIDs() async -> Set<String>
+}
+
 enum ToolCatalog {
     /// Tool catalog entries auto-generated from the ToolRegistry.
     static let builtInEntries: [AgentToolCatalogEntry] = ToolRegistry.makeDefault().catalogEntries
 
-    static func entries(mcpRegistry: MCPClientRegistry?) async -> [AgentToolCatalogEntry] {
+    static func entries(mcpRegistry: (any MCPToolDiscovering)?) async -> [AgentToolCatalogEntry] {
         guard let mcpRegistry else {
             return builtInEntries
         }
@@ -21,14 +26,14 @@ enum ToolCatalog {
         return (builtInEntries + dynamicEntries).sorted { $0.id < $1.id }
     }
 
-    static func knownToolIDs(mcpRegistry: MCPClientRegistry?) async -> Set<String> {
+    static func knownToolIDs(mcpRegistry: (any MCPToolDiscovering)?) async -> Set<String> {
         guard let mcpRegistry else {
             return knownToolIDs
         }
         return knownToolIDs.union(await mcpRegistry.dynamicToolIDs())
     }
 
-    static func listToolsPayload(mcpRegistry: MCPClientRegistry?) async -> [JSONValue] {
+    static func listToolsPayload(mcpRegistry: (any MCPToolDiscovering)?) async -> [JSONValue] {
         let catalogEntries = await entries(mcpRegistry: mcpRegistry)
         let dynamicTools = Dictionary(uniqueKeysWithValues: await (mcpRegistry?.dynamicTools() ?? []).map { ($0.id, $0) })
 

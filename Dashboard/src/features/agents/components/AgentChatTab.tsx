@@ -5736,8 +5736,6 @@ export function AgentChatTab({
                     </>
                   )}
                 </p>
-
-                <p className="agent-chat-status-line placeholder-text">{statusText}</p>
               </div>
             </div>
 

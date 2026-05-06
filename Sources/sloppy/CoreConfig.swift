@@ -1133,6 +1133,72 @@ public struct CoreConfig: Codable, Sendable {
         }
     }
 
+    public struct ToolHooks: Codable, Sendable, Equatable {
+        public struct PreTools: Codable, Sendable, Equatable {
+            public enum FailurePolicy: String, Codable, Sendable, Equatable {
+                case allow
+                case block
+            }
+
+            public var enabled: Bool
+            public var command: String
+            public var arguments: [String]
+            public var timeoutMs: Int
+            public var maxOutputBytes: Int
+            public var failurePolicy: FailurePolicy
+
+            public init(
+                enabled: Bool = false,
+                command: String = "",
+                arguments: [String] = [],
+                timeoutMs: Int = 2_000,
+                maxOutputBytes: Int = 65_536,
+                failurePolicy: FailurePolicy = .block
+            ) {
+                self.enabled = enabled
+                self.command = command
+                self.arguments = arguments
+                self.timeoutMs = timeoutMs
+                self.maxOutputBytes = maxOutputBytes
+                self.failurePolicy = failurePolicy
+            }
+
+            private enum CodingKeys: String, CodingKey {
+                case enabled
+                case command
+                case arguments
+                case timeoutMs
+                case maxOutputBytes
+                case failurePolicy
+            }
+
+            public init(from decoder: Decoder) throws {
+                let container = try decoder.container(keyedBy: CodingKeys.self)
+                enabled = try container.decodeIfPresent(Bool.self, forKey: .enabled) ?? false
+                command = try container.decodeIfPresent(String.self, forKey: .command) ?? ""
+                arguments = try container.decodeIfPresent([String].self, forKey: .arguments) ?? []
+                timeoutMs = try container.decodeIfPresent(Int.self, forKey: .timeoutMs) ?? 2_000
+                maxOutputBytes = try container.decodeIfPresent(Int.self, forKey: .maxOutputBytes) ?? 65_536
+                failurePolicy = try container.decodeIfPresent(FailurePolicy.self, forKey: .failurePolicy) ?? .block
+            }
+        }
+
+        public var preTools: PreTools
+
+        public init(preTools: PreTools = PreTools()) {
+            self.preTools = preTools
+        }
+
+        private enum CodingKeys: String, CodingKey {
+            case preTools
+        }
+
+        public init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            preTools = try container.decodeIfPresent(PreTools.self, forKey: .preTools) ?? .init()
+        }
+    }
+
     public var listen: Listen
     public var workspace: Workspace
     public var auth: Auth
@@ -1153,6 +1219,7 @@ public struct CoreConfig: Codable, Sendable {
     public var browser: Browser
     public var visor: Visor
     public var ui: UI
+    public var toolHooks: ToolHooks
     public var sqlitePath: String
     /// Optional aliases for model ids (e.g. `"fast"` → `"openai:gpt-5.4-mini"`) used when resolving `model` from SKILL.md or tools.
     public var modelRouting: [String: String]
@@ -1177,6 +1244,7 @@ public struct CoreConfig: Codable, Sendable {
         browser: Browser = Browser(),
         visor: Visor = Visor(),
         ui: UI = UI(),
+        toolHooks: ToolHooks = ToolHooks(),
         sqlitePath: String,
         modelRouting: [String: String] = [:],
         disableModelInference: Bool = false
@@ -1200,6 +1268,7 @@ public struct CoreConfig: Codable, Sendable {
         self.browser = browser
         self.visor = visor
         self.ui = ui
+        self.toolHooks = toolHooks
         self.sqlitePath = sqlitePath
         self.modelRouting = modelRouting
         self.disableModelInference = disableModelInference
@@ -1238,6 +1307,7 @@ public struct CoreConfig: Codable, Sendable {
             browser: .init(),
             visor: .init(),
             ui: .init(),
+            toolHooks: .init(),
             sqlitePath: CoreConfig.defaultSQLiteFileName,
             modelRouting: [:]
         )
@@ -1305,6 +1375,7 @@ public struct CoreConfig: Codable, Sendable {
         case browser
         case visor
         case ui
+        case toolHooks
         case sqlitePath
         case modelRouting
         case disableModelInference
@@ -1330,6 +1401,7 @@ public struct CoreConfig: Codable, Sendable {
         browser = try container.decodeIfPresent(Browser.self, forKey: .browser) ?? .init()
         visor = try container.decodeIfPresent(Visor.self, forKey: .visor) ?? .init()
         ui = try container.decodeIfPresent(UI.self, forKey: .ui) ?? .init()
+        toolHooks = try container.decodeIfPresent(ToolHooks.self, forKey: .toolHooks) ?? .init()
         sqlitePath = try container.decode(String.self, forKey: .sqlitePath)
         models = try container.decodeIfPresent([ModelConfig].self, forKey: .models) ?? []
         plugins = try container.decodeIfPresent([PluginConfig].self, forKey: .plugins) ?? []
@@ -1358,6 +1430,7 @@ public struct CoreConfig: Codable, Sendable {
         try container.encode(browser, forKey: .browser)
         try container.encode(visor, forKey: .visor)
         try container.encode(ui, forKey: .ui)
+        try container.encode(toolHooks, forKey: .toolHooks)
         try container.encode(sqlitePath, forKey: .sqlitePath)
         if !modelRouting.isEmpty {
             try container.encode(modelRouting, forKey: .modelRouting)

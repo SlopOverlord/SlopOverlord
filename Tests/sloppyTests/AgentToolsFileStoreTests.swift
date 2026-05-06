@@ -97,6 +97,45 @@ func authorizationAllowsSystemListToolsFromCatalog() async throws {
 }
 
 @Test
+func authorizationAllowsBuiltInToolWithoutMCPDiscovery() async throws {
+    let root = FileManager.default.temporaryDirectory
+        .appendingPathComponent("tools-store-builtin-no-mcp-\(UUID().uuidString)", isDirectory: true)
+    let agentsRoot = root.appendingPathComponent("agents", isDirectory: true)
+    let agentDirectory = agentsRoot.appendingPathComponent("agent-built-in", isDirectory: true)
+    try FileManager.default.createDirectory(at: agentDirectory, withIntermediateDirectories: true)
+
+    let discovery = SpyMCPToolDiscovery(dynamicToolIDs: ["remote.echo"])
+    let store = AgentToolsFileStore(agentsRootURL: agentsRoot)
+    let auth = ToolAuthorizationService(store: store, mcpRegistry: discovery)
+
+    let decision = try await auth.authorize(agentID: "agent-built-in", toolID: "memory.save")
+
+    #expect(decision.allowed == true)
+    #expect(decision.error == nil)
+    #expect(await discovery.dynamicToolIDCallCount() == 0)
+    #expect(await discovery.dynamicToolsCallCount() == 0)
+}
+
+@Test
+func authorizationChecksMCPDiscoveryForDynamicTool() async throws {
+    let root = FileManager.default.temporaryDirectory
+        .appendingPathComponent("tools-store-dynamic-mcp-\(UUID().uuidString)", isDirectory: true)
+    let agentsRoot = root.appendingPathComponent("agents", isDirectory: true)
+    let agentDirectory = agentsRoot.appendingPathComponent("agent-dynamic", isDirectory: true)
+    try FileManager.default.createDirectory(at: agentDirectory, withIntermediateDirectories: true)
+
+    let discovery = SpyMCPToolDiscovery(dynamicToolIDs: ["remote.echo"])
+    let store = AgentToolsFileStore(agentsRootURL: agentsRoot)
+    let auth = ToolAuthorizationService(store: store, mcpRegistry: discovery)
+
+    let decision = try await auth.authorize(agentID: "agent-dynamic", toolID: "remote.echo")
+
+    #expect(decision.allowed == true)
+    #expect(decision.error == nil)
+    #expect(await discovery.dynamicToolIDCallCount() == 1)
+}
+
+@Test
 func toolsStoreLoadsLegacyGuardrailsWithLoopDefaults() throws {
     let root = FileManager.default.temporaryDirectory
         .appendingPathComponent("tools-store-legacy-\(UUID().uuidString)", isDirectory: true)
@@ -137,4 +176,32 @@ func toolsStoreLoadsLegacyGuardrailsWithLoopDefaults() throws {
     #expect(policy.guardrails.maxRepeatedNonRetryableFailures == 2)
     #expect(policy.guardrails.maxExecTimeoutMs == 120_000)
     #expect(policy.approval.enabled == false)
+}
+
+private actor SpyMCPToolDiscovery: MCPToolDiscovering {
+    private let ids: Set<String>
+    private var idCalls = 0
+    private var toolsCalls = 0
+
+    init(dynamicToolIDs: Set<String>) {
+        self.ids = dynamicToolIDs
+    }
+
+    func dynamicTools() async -> [MCPDynamicTool] {
+        toolsCalls += 1
+        return []
+    }
+
+    func dynamicToolIDs() async -> Set<String> {
+        idCalls += 1
+        return ids
+    }
+
+    func dynamicToolIDCallCount() -> Int {
+        idCalls
+    }
+
+    func dynamicToolsCallCount() -> Int {
+        toolsCalls
+    }
 }

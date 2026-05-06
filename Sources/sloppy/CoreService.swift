@@ -203,6 +203,7 @@ public actor CoreService {
     let acpSessionManager: ACPSessionManager
     let toolsAuthorization: ToolAuthorizationService
     let toolLoopGuard: ToolLoopGuard
+    let toolPreHookService: ToolPreHookService
     var toolExecution: ToolExecutionService
     let mcpRegistry: MCPClientRegistry
     let systemLogStore: SystemLogFileStore
@@ -403,6 +404,7 @@ public actor CoreService {
         let toolsStore = AgentToolsFileStore(agentsRootURL: self.agentsRootURL)
         self.toolsAuthorization = ToolAuthorizationService(store: toolsStore, mcpRegistry: self.mcpRegistry)
         self.toolLoopGuard = ToolLoopGuard()
+        self.toolPreHookService = ToolPreHookService()
         let processRegistry = SessionProcessRegistry()
         self.toolExecution = ToolExecutionService(
             workspaceRootURL: self.workspaceRootURL,
@@ -489,10 +491,11 @@ public actor CoreService {
                     agentID: agentID,
                     sessionID: sessionID,
                     request: request,
-                    recordSessionEvents: false,
+                    recordSessionEvents: true,
                     chatMode: mode
                 )
             }
+            await self.sessionOrchestrator.updateToolInvokerRecordsEvents(true)
             await self.sessionOrchestrator.updateResponseChunkObserver { [weak self] agentID, sessionID, chunk in
                 guard let self else {
                     return

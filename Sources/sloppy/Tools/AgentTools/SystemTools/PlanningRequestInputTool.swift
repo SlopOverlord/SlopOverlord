@@ -7,7 +7,7 @@ struct PlanningRequestInputTool: CoreTool {
     let title = "Request plan input"
     let status = "fully_functional"
     let name = "planning.request_input"
-    let description = "Pause a plan-mode turn and ask the user one to three structured questions."
+    let description = "Pause a plan-mode or debug-mode turn and ask the user one to three structured questions."
 
     var parameters: GenerationSchema {
         let optionSchema = DynamicGenerationSchema(
@@ -42,7 +42,7 @@ struct PlanningRequestInputTool: CoreTool {
         toolFailure(
             tool: name,
             code: "not_available",
-            message: "`planning.request_input` is handled by the active runtime turn and is only available in plan mode.",
+            message: "`planning.request_input` is handled by the active runtime turn and is only available in plan or debug mode.",
             retryable: false
         )
     }

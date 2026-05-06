@@ -30,6 +30,7 @@ actor AgentSessionOrchestrator {
     private var persistedModelContext: (config: CoreConfig, hasOAuthCredentials: Bool)
     private let logger: Logger
     private var toolInvoker: ToolInvoker?
+    private var toolInvokerRecordsEvents: Bool
     private var responseChunkObserver: ResponseChunkObserver?
     private var eventAppendObserver: EventAppendObserver?
     /// Loads `[project_context_bootstrap_v1]` markdown for a project id (agent session dashboard).
@@ -52,6 +53,7 @@ actor AgentSessionOrchestrator {
         availableModels: [ProviderModelOption],
         persistedModelContext: (config: CoreConfig, hasOAuthCredentials: Bool) = (CoreConfig.default, false),
         toolInvoker: ToolInvoker? = nil,
+        toolInvokerRecordsEvents: Bool = false,
         responseChunkObserver: ResponseChunkObserver? = nil,
         eventAppendObserver: EventAppendObserver? = nil,
         logger: Logger = Logger(label: "sloppy.core.sessions")
@@ -65,6 +67,7 @@ actor AgentSessionOrchestrator {
         self.availableModels = availableModels
         self.persistedModelContext = persistedModelContext
         self.toolInvoker = toolInvoker
+        self.toolInvokerRecordsEvents = toolInvokerRecordsEvents
         self.responseChunkObserver = responseChunkObserver
         self.eventAppendObserver = eventAppendObserver
         self.logger = logger
@@ -97,6 +100,10 @@ actor AgentSessionOrchestrator {
 
     func updateToolInvoker(_ toolInvoker: ToolInvoker?) {
         self.toolInvoker = toolInvoker
+    }
+
+    func updateToolInvokerRecordsEvents(_ recordsEvents: Bool) {
+        self.toolInvokerRecordsEvents = recordsEvents
     }
 
     func updateResponseChunkObserver(_ observer: ResponseChunkObserver?) {
@@ -695,7 +702,9 @@ actor AgentSessionOrchestrator {
         case .plan:
             instruction = "Produce a concise implementation or investigation plan. Do not edit files, run mutating commands, or make irreversible changes unless the authoritative runtime mode is build or debug for this turn."
         case .debug:
-            instruction = "Add focused diagnostic logging or instrumentation to the code so the behavior can be understood, then run or describe the smallest check that would produce useful evidence. Do not implement the final product fix unless the user explicitly asks for it."
+            instruction = """
+            Add focused diagnostic logging or instrumentation to the code so the behavior can be understood, then run or describe the smallest check that would produce useful evidence. Wrap every temporary diagnostic block you add with exactly `// #if region debug` before it and `// #end region debug` after it. After collecting evidence, use `planning.request_input` to pause and ask for a verification verdict with options `mark_as_fixed` labeled `Mark as fixed` and `bug_repeated` labeled `Bug is repeated`; then wait. If the user selects `mark_as_fixed`, remove every `// #if region debug`...`// #end region debug` block you added before finishing. If the user selects `bug_repeated`, continue investigating with the debug regions still available. Do not implement the final product fix unless the user explicitly asks for it.
+            """
         }
         let header =
             """
@@ -738,6 +747,7 @@ actor AgentSessionOrchestrator {
         }
 
         let messageContent = content.isEmpty ? "User attached files." : content
+        let toolInvokerRecordsEvents = self.toolInvokerRecordsEvents
         let routeDecision = await runtime.postMessage(
             channelId: channelID,
             request: ChannelMessageRequest(
@@ -770,6 +780,16 @@ actor AgentSessionOrchestrator {
                     )
                 }
 
+                let toolCallStatusEvent = AgentSessionEvent(
+                    agentId: agentID,
+                    sessionId: sessionID,
+                    type: .runStatus,
+                    runStatus: AgentRunStatusEvent(
+                        stage: .searching,
+                        label: "Executing tool",
+                        details: "Tool: \(toolRequest.tool)"
+                    )
+                )
                 let toolCallEvent = AgentSessionEvent(
                     agentId: agentID,
                     sessionId: sessionID,
@@ -781,21 +801,10 @@ actor AgentSessionOrchestrator {
                     )
                 )
 
-                let toolCallStatusEvent = AgentSessionEvent(
-                    agentId: agentID,
-                    sessionId: sessionID,
-                    type: .runStatus,
-                    runStatus: AgentRunStatusEvent(
-                        stage: .searching,
-                        label: "Executing tool",
-                        details: "Tool: \(toolRequest.tool)"
-                    )
-                )
-
                 await self.appendEventsSafely(
                     agentID: agentID,
                     sessionID: sessionID,
-                    events: [toolCallStatusEvent, toolCallEvent]
+                    events: toolInvokerRecordsEvents ? [toolCallStatusEvent] : [toolCallStatusEvent, toolCallEvent]
                 )
 
                 let result = await self.invokeTool(agentID: agentID, sessionID: sessionID, request: toolRequest, mode: mode)
@@ -806,6 +815,16 @@ actor AgentSessionOrchestrator {
                     await self.rememberPausedInputRequest(channelID: channelID, requestID: requestID)
                 }
 
+                let toolResultStatusEvent = AgentSessionEvent(
+                    agentId: agentID,
+                    sessionId: sessionID,
+                    type: .runStatus,
+                    runStatus: AgentRunStatusEvent(
+                        stage: .responding,
+                        label: "Responding",
+                        details: "Generating response..."
+                    )
+                )
                 let toolResultEvent = AgentSessionEvent(
                     agentId: agentID,
                     sessionId: sessionID,
@@ -819,20 +838,18 @@ actor AgentSessionOrchestrator {
                     )
                 )
 
-                let toolResultStatusEvent = AgentSessionEvent(
-                    agentId: agentID,
-                    sessionId: sessionID,
-                    type: .runStatus,
-                    runStatus: AgentRunStatusEvent(
-                        stage: .responding,
-                        label: "Responding",
-                        details: "Generating response..."
-                    )
-                )
-
-                if result.ok,
-                   result.tool == "planning.request_input",
-                   result.data?.asObject?["paused"]?.asBool == true {
+                let isPausedInputRequest = result.ok &&
+                    result.tool == "planning.request_input" &&
+                    result.data?.asObject?["paused"]?.asBool == true
+                if toolInvokerRecordsEvents {
+                    if !isPausedInputRequest {
+                        await self.appendEventsSafely(
+                            agentID: agentID,
+                            sessionID: sessionID,
+                            events: [toolResultStatusEvent]
+                        )
+                    }
+                } else if isPausedInputRequest {
                     await self.appendEventsSafely(
                         agentID: agentID,
                         sessionID: sessionID,

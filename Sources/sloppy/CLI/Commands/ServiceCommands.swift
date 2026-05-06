@@ -68,7 +68,7 @@ private enum ServicePlatform {
 
 /// Shared constants and helpers for interacting with the host service manager
 /// (launchctl on macOS, systemctl on Linux).
-private enum ServiceManager {
+enum ServiceManager {
     /// Reverse-DNS label used as the LaunchAgent label and systemd unit base name.
     static let label = "com.sloppy.server"
 
@@ -84,17 +84,52 @@ private enum ServiceManager {
             .appendingPathComponent(".sloppy/logs/service.log")
     }
 
-    static func makePlist(executablePath: String, configPath: String?) -> String {
+    static let launchAgentFallbackPATHComponents = [
+        "/opt/homebrew/bin",
+        "/opt/homebrew/sbin",
+        "/usr/local/bin",
+        "/usr/local/sbin",
+        "/usr/bin",
+        "/bin",
+        "/usr/sbin",
+        "/sbin",
+    ]
+
+    static func launchAgentPATH(
+        environment: [String: String] = ProcessInfo.processInfo.environment
+    ) -> String {
+        var components: [String] = []
+        var seen = Set<String>()
+
+        let configuredPath = environment["PATH"] ?? ""
+        for component in configuredPath.split(separator: ":").map(String.init) + launchAgentFallbackPATHComponents {
+            let normalized = component.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !normalized.isEmpty, !seen.contains(normalized) else {
+                continue
+            }
+            seen.insert(normalized)
+            components.append(normalized)
+        }
+
+        return components.joined(separator: ":")
+    }
+
+    static func makePlist(
+        executablePath: String,
+        configPath: String?,
+        environment: [String: String] = ProcessInfo.processInfo.environment
+    ) -> String {
         let configArgs: String
         if let configPath {
             configArgs = """
                 <string>--config-path</string>
-                        <string>\(configPath)</string>
+                        <string>\(xmlEscaped(configPath))</string>
             """
         } else {
             configArgs = ""
         }
-        let logPath = serviceLogURL.path
+        let logPath = xmlEscaped(serviceLogURL.path)
+        let launchAgentPath = xmlEscaped(launchAgentPATH(environment: environment))
         return """
         <?xml version="1.0" encoding="UTF-8"?>
         <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -102,9 +137,14 @@ private enum ServiceManager {
         <dict>
             <key>Label</key>
             <string>\(label)</string>
+            <key>EnvironmentVariables</key>
+            <dict>
+                <key>PATH</key>
+                <string>\(launchAgentPath)</string>
+            </dict>
             <key>ProgramArguments</key>
             <array>
-                <string>\(executablePath)</string>
+                <string>\(xmlEscaped(executablePath))</string>
                 <string>run</string>
                 \(configArgs.isEmpty ? "" : configArgs.trimmingCharacters(in: .whitespacesAndNewlines))
             </array>
@@ -119,6 +159,15 @@ private enum ServiceManager {
         </dict>
         </plist>
         """
+    }
+
+    private static func xmlEscaped(_ value: String) -> String {
+        value
+            .replacingOccurrences(of: "&", with: "&amp;")
+            .replacingOccurrences(of: "<", with: "&lt;")
+            .replacingOccurrences(of: ">", with: "&gt;")
+            .replacingOccurrences(of: "\"", with: "&quot;")
+            .replacingOccurrences(of: "'", with: "&apos;")
     }
 
     // MARK: Linux

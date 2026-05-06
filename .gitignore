@@ -1,4 +1,5 @@
 .build/
+Packages/*/.build/
 .cache/
 .data/
 .DS_Store

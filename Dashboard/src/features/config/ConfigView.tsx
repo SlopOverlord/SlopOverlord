@@ -367,6 +367,16 @@ const EMPTY_CONFIG = {
       localOnly: true
     }
   },
+  toolHooks: {
+    preTools: {
+      enabled: false,
+      command: "",
+      arguments: [],
+      timeoutMs: 2000,
+      maxOutputBytes: 65536,
+      failurePolicy: "block"
+    }
+  },
   modelRouting: {},
   sqlitePath: "core.sqlite"
 };
@@ -655,6 +665,21 @@ function normalizeConfig(config) {
   normalized.ui.dashboardTerminal.enabled = Boolean(config?.ui?.dashboardTerminal?.enabled);
   normalized.ui.dashboardTerminal.localOnly =
     config?.ui?.dashboardTerminal?.localOnly == null ? true : Boolean(config?.ui?.dashboardTerminal?.localOnly);
+  normalized.toolHooks.preTools.enabled = Boolean(config?.toolHooks?.preTools?.enabled);
+  normalized.toolHooks.preTools.command = String(config?.toolHooks?.preTools?.command || "");
+  normalized.toolHooks.preTools.arguments = Array.isArray(config?.toolHooks?.preTools?.arguments)
+    ? config.toolHooks.preTools.arguments.map((item) => String(item || ""))
+    : [];
+  normalized.toolHooks.preTools.timeoutMs = parseInteger(
+    config?.toolHooks?.preTools?.timeoutMs ?? normalized.toolHooks.preTools.timeoutMs,
+    normalized.toolHooks.preTools.timeoutMs
+  );
+  normalized.toolHooks.preTools.maxOutputBytes = parseInteger(
+    config?.toolHooks?.preTools?.maxOutputBytes ?? normalized.toolHooks.preTools.maxOutputBytes,
+    normalized.toolHooks.preTools.maxOutputBytes
+  );
+  normalized.toolHooks.preTools.failurePolicy =
+    String(config?.toolHooks?.preTools?.failurePolicy || "block") === "allow" ? "allow" : "block";
 
   const mr = config?.modelRouting;
   normalized.modelRouting = {};

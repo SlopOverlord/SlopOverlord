@@ -1,3 +1,4 @@
+import Foundation
 import Testing
 @testable import sloppy
 
@@ -24,6 +25,43 @@ func mcpServerStatusesReportDisabledAndInvalidServers() async {
     #expect(statuses[1].enabled)
     #expect(statuses[1].connected == false)
     #expect(statuses[1].message?.contains("command is missing") == true)
+}
+
+@Test("MCP status reports missing stdio commands")
+func mcpServerStatusesReportMissingCommands() async {
+    let missingCommand = "sloppy-mcp-command-missing-\(UUID().uuidString)"
+    let registry = MCPClientRegistry(
+        config: CoreConfig.MCP(
+            servers: [
+                .init(id: "missing", transport: .stdio, command: missingCommand, timeoutMs: 50)
+            ]
+        )
+    )
+
+    let statuses = await registry.serverStatuses()
+
+    #expect(statuses.count == 1)
+    #expect(statuses[0].id == "missing")
+    #expect(statuses[0].connected == false)
+    #expect(statuses[0].message?.contains("Command not found: \(missingCommand)") == true)
+}
+
+@Test("Tool catalog keeps built-ins when MCP discovery fails")
+func toolCatalogReturnsBuiltInsWhenMCPDiscoveryFails() async {
+    let missingCommand = "sloppy-mcp-discovery-missing-\(UUID().uuidString)"
+    let registry = MCPClientRegistry(
+        config: CoreConfig.MCP(
+            servers: [
+                .init(id: "broken", transport: .stdio, command: missingCommand, timeoutMs: 50)
+            ]
+        )
+    )
+
+    let entries = await ToolCatalog.entries(mcpRegistry: registry)
+    let ids = Set(entries.map(\.id))
+
+    #expect(ids.contains("memory.save"))
+    #expect(ids.contains("system.list_tools"))
 }
 
 @Test("CoreService exposes MCP runtime statuses")

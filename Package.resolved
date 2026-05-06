@@ -1,5 +1,5 @@
 {
-  "originHash" : "ac28225b899adc41d8cb3d2f2b0ecaee91eb9cd56c2ab52c0a822672a685c937",
+  "originHash" : "0afe88f3b1ffaa62fb8f9f6af108dba879bd530a82a5ebac943f5b5f05f3ca7d",
   "pins" : [
     {
       "identity" : "anylanguagemodel",
@@ -215,15 +215,6 @@
       "state" : {
         "branch" : "main",
         "revision" : "963a4d30886b093443f406abf154e07cd90aac0f"
-      }
-    },
-    {
-      "identity" : "tautui",
-      "kind" : "remoteSourceControl",
-      "location" : "https://github.com/steipete/TauTUI.git",
-      "state" : {
-        "branch" : "main",
-        "revision" : "d314c409d2ba719ee8da41a664bcd5059f09d9ca"
       }
     }
   ],

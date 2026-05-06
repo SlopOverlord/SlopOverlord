@@ -62,6 +62,61 @@ struct MCPDynamicTool: Sendable {
     let inputSchema: JSONValue
 }
 
+private final class DiscoveryTimeoutBox<T: Sendable>: @unchecked Sendable {
+    private let lock = NSLock()
+    private var continuation: CheckedContinuation<T, any Error>?
+    private var tasks: [Task<Void, Never>] = []
+    private var completed = false
+
+    func setContinuation(_ continuation: CheckedContinuation<T, any Error>) {
+        lock.lock()
+        if completed {
+            lock.unlock()
+            continuation.resume(throwing: CancellationError())
+            return
+        }
+        self.continuation = continuation
+        lock.unlock()
+    }
+
+    func setTasks(_ tasks: [Task<Void, Never>]) {
+        lock.lock()
+        if completed {
+            lock.unlock()
+            tasks.forEach { $0.cancel() }
+            return
+        }
+        self.tasks = tasks
+        lock.unlock()
+    }
+
+    func resume(_ result: Result<T, any Error>) {
+        lock.lock()
+        guard !completed else {
+            lock.unlock()
+            return
+        }
+        completed = true
+        let continuation = self.continuation
+        let tasks = self.tasks
+        self.continuation = nil
+        self.tasks = []
+        lock.unlock()
+
+        tasks.forEach { $0.cancel() }
+        switch result {
+        case .success(let value):
+            continuation?.resume(returning: value)
+        case .failure(let error):
+            continuation?.resume(throwing: error)
+        }
+    }
+
+    func cancel() {
+        resume(.failure(CancellationError()))
+    }
+}
+
 actor ManagedMCPStdioTransport: Transport {
     nonisolated let logger: Logging.Logger
 
@@ -91,6 +146,7 @@ actor ManagedMCPStdioTransport: Transport {
             return
         }
 
+        let environment = childProcessEnvironment()
         let inputPipe = Pipe()
         let outputPipe = Pipe()
         let process = Process()
@@ -98,12 +154,19 @@ actor ManagedMCPStdioTransport: Transport {
         process.standardOutput = outputPipe
         process.standardError = FileHandle.standardError
 
-        if command.hasPrefix("/") || command.hasPrefix(".") {
-            process.executableURL = URL(fileURLWithPath: command)
+        if command.hasPrefix("/") || command.hasPrefix(".") || command.contains("/") {
+            let executableURL = resolveCommandURL(command, cwd: cwd)
+            guard FileManager.default.isExecutableFile(atPath: executableURL.path) else {
+                throw MCPRegistryError.invalidConfiguration("Command not found: \(command)")
+            }
+            process.executableURL = executableURL
             process.arguments = arguments
         } else {
-            process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
-            process.arguments = [command] + arguments
+            guard let executablePath = findExecutable(command, environment: environment) else {
+                throw MCPRegistryError.invalidConfiguration("Command not found: \(command)")
+            }
+            process.executableURL = URL(fileURLWithPath: executablePath)
+            process.arguments = arguments
         }
 
         if let cwd,
@@ -111,9 +174,15 @@ actor ManagedMCPStdioTransport: Transport {
             process.currentDirectoryURL = URL(fileURLWithPath: cwd, isDirectory: true)
         }
 
-        process.environment = childProcessEnvironment()
+        process.environment = environment
 
-        try process.run()
+        do {
+            try process.run()
+        } catch {
+            throw MCPRegistryError.invalidConfiguration(
+                "Failed to start MCP command '\(command)': \(error.localizedDescription)"
+            )
+        }
 
         let transport = StdioTransport(
             input: FileDescriptor(rawValue: outputPipe.fileHandleForReading.fileDescriptor),
@@ -174,6 +243,29 @@ actor ManagedMCPStdioTransport: Transport {
 
     private func finishMessages() {
         messageContinuation.finish()
+    }
+
+    private func resolveCommandURL(_ command: String, cwd: String?) -> URL {
+        if command.hasPrefix("/") {
+            return URL(fileURLWithPath: command)
+        }
+        let base = cwd?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
+            ? cwd!
+            : FileManager.default.currentDirectoryPath
+        return URL(fileURLWithPath: base, isDirectory: true).appendingPathComponent(command)
+    }
+
+    private func findExecutable(_ command: String, environment: [String: String]) -> String? {
+        let path = environment["PATH"] ?? "/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+        for directory in path.split(separator: ":") {
+            let candidate = URL(fileURLWithPath: String(directory), isDirectory: true)
+                .appendingPathComponent(command)
+                .path
+            if FileManager.default.isExecutableFile(atPath: candidate) {
+                return candidate
+            }
+        }
+        return nil
     }
 }
 
@@ -288,10 +380,14 @@ actor MCPServerConnection {
 }
 
 actor MCPClientRegistry {
+    private static let failedDiscoveryRetryInterval: TimeInterval = 30
+
     private var config: CoreConfig.MCP
     private let logger: Logging.Logger
     private var connections: [String: MCPServerConnection] = [:]
     private var dynamicToolsByID: [String: MCPDynamicTool] = [:]
+    private var dynamicDiscoveryLoaded = false
+    private var dynamicDiscoveryLastFailureAt: Date?
 
     init(config: CoreConfig.MCP, logger: Logging.Logger = Logging.Logger(label: "sloppy.mcp")) {
         self.config = config
@@ -308,6 +404,8 @@ actor MCPClientRegistry {
         }
         self.config = config
         self.dynamicToolsByID = [:]
+        self.dynamicDiscoveryLoaded = false
+        self.dynamicDiscoveryLastFailureAt = nil
     }
 
     func listServers() -> [MCPServerSummary] {
@@ -504,11 +602,16 @@ actor MCPClientRegistry {
     }
 
     private func refreshDynamicToolsIfNeeded() async {
-        if !dynamicToolsByID.isEmpty {
+        if dynamicDiscoveryLoaded {
+            return
+        }
+        if let dynamicDiscoveryLastFailureAt,
+           Date().timeIntervalSince(dynamicDiscoveryLastFailureAt) < Self.failedDiscoveryRetryInterval {
             return
         }
 
         var discovered: [String: MCPDynamicTool] = [:]
+        var failedServers: [String] = []
         for server in config.servers where server.enabled && server.exposeTools {
             do {
                 let response = try await withDiscoveryTimeout(milliseconds: max(250, server.timeoutMs)) {
@@ -530,30 +633,51 @@ actor MCPClientRegistry {
                     )
                 }
             } catch {
+                failedServers.append(server.id)
+                connections.removeValue(forKey: server.id)
                 logger.warning(
                     "Failed to discover MCP tools for server \(server.id): \(String(describing: error))"
                 )
             }
         }
-        dynamicToolsByID = discovered
+        if !discovered.isEmpty || failedServers.isEmpty {
+            dynamicToolsByID = discovered
+            dynamicDiscoveryLoaded = failedServers.isEmpty
+            dynamicDiscoveryLastFailureAt = failedServers.isEmpty ? nil : Date()
+        } else {
+            dynamicDiscoveryLastFailureAt = Date()
+        }
     }
 
     private func withDiscoveryTimeout<T: Sendable>(
         milliseconds: Int,
         operation: @escaping @Sendable () async throws -> T
     ) async throws -> T {
-        try await withThrowingTaskGroup(of: T.self) { group in
-            group.addTask {
-                try await operation()
+        let box = DiscoveryTimeoutBox<T>()
+        return try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { continuation in
+                box.setContinuation(continuation)
+                let operationTask = Task {
+                    do {
+                        let value = try await operation()
+                        box.resume(.success(value))
+                    } catch {
+                        box.resume(.failure(error))
+                    }
+                }
+                let timeoutTask = Task {
+                    do {
+                        try await Task.sleep(nanoseconds: UInt64(max(1, milliseconds)) * 1_000_000)
+                        operationTask.cancel()
+                        box.resume(.failure(MCPRegistryError.invalidResult("Timed out while discovering MCP tools.")))
+                    } catch {
+                        box.resume(.failure(error))
+                    }
+                }
+                box.setTasks([operationTask, timeoutTask])
             }
-            group.addTask {
-                try await Task.sleep(nanoseconds: UInt64(max(1, milliseconds)) * 1_000_000)
-                throw MCPRegistryError.invalidResult("Timed out while discovering MCP tools.")
-            }
-
-            let result = try await group.next()!
-            group.cancelAll()
-            return result
+        } onCancel: {
+            box.cancel()
         }
     }
 
@@ -777,3 +901,5 @@ actor MCPClientRegistry {
         .object(metadata.fields.mapValues(jsonValue(from:)))
     }
 }
+
+extension MCPClientRegistry: MCPToolDiscovering {}

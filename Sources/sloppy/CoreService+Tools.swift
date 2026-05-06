@@ -112,7 +112,8 @@ extension CoreService {
 
         let sessionToolContext = await toolContextForSession(
             sessionID: normalizedSessionID,
-            sessionTitle: sessionDetail.summary.title
+            sessionTitle: sessionDetail.summary.title,
+            projectID: sessionDetail.summary.projectId
         )
 
         var effectivePolicy = authorization.policy
@@ -130,11 +131,32 @@ extension CoreService {
             URL(fileURLWithPath: $0, isDirectory: true)
         }
 
-        let loopDecision: ToolLoopGuard.Decision
+        var effectiveRequest = request
+        var preHookBlockedResult: ToolInvocationResult?
         if authorization.allowed {
+            switch await toolPreHookService.evaluate(
+                globalConfig: currentConfig.toolHooks.preTools,
+                agentOverride: effectivePolicy.preToolsHook,
+                agentID: normalizedAgentID,
+                sessionID: normalizedSessionID,
+                channelID: nil,
+                source: .agentSession,
+                request: request,
+                workingDirectory: sessionToolContext.workingDirectory,
+                workspaceRootURL: workspaceRootURL
+            ) {
+            case .allow(let rewritten):
+                effectiveRequest = rewritten
+            case .block(let blocked):
+                preHookBlockedResult = blocked
+            }
+        }
+
+        let loopDecision: ToolLoopGuard.Decision
+        if authorization.allowed, preHookBlockedResult == nil {
             loopDecision = await toolLoopGuard.evaluate(
                 sessionID: normalizedSessionID,
-                request: request,
+                request: effectiveRequest,
                 policy: effectivePolicy,
                 workspaceRootURL: workspaceRootURL,
                 currentDirectoryURL: currentDirectoryURL
@@ -148,13 +170,13 @@ extension CoreService {
             sessionId: normalizedSessionID,
             type: .toolCall,
             toolCall: AgentToolCallEvent(
-                tool: request.tool,
-                arguments: request.arguments,
-                reason: request.reason
+                tool: effectiveRequest.tool,
+                arguments: effectiveRequest.arguments,
+                reason: effectiveRequest.reason
             )
         )
 
-        if recordSessionEvents {
+        if recordSessionEvents, preHookBlockedResult == nil {
             do {
                 let summary = try sessionStore.appendEvents(
                     agentID: normalizedAgentID,
@@ -178,66 +200,71 @@ extension CoreService {
 
         let result: ToolInvocationResult
         if authorization.allowed {
-            switch loopDecision {
-            case .block(let message):
-                result = .init(
-                    tool: request.tool,
-                    ok: false,
-                    error: .init(
-                        code: "tool_loop_detected",
-                        message: message,
-                        retryable: false,
-                        hint: "Change the command or arguments, or summarize the blocker instead of retrying the same tool call."
-                    )
-                )
-
-            case .allow:
-                if let approval = await requestToolApprovalIfNeeded(
-                    agentID: normalizedAgentID,
-                    sessionID: normalizedSessionID,
-                    channelID: nil,
-                    topicID: nil,
-                    request: request,
-                    requireApproval: requireApproval || effectivePolicy.approval.enabled
-                ), let deniedResult = toolApprovalDeniedResult(tool: request.tool, approval: approval) {
-                    result = deniedResult
-                    break
-                }
-                await toolLoopGuard.recordStarted(
-                    sessionID: normalizedSessionID,
-                    request: request,
-                    policy: effectivePolicy,
-                    workspaceRootURL: workspaceRootURL,
-                    currentDirectoryURL: currentDirectoryURL
-                )
-                let toolExecution = self.toolExecution
-                let invocationPolicy = effectivePolicy
-                let timeoutMs = toolInvocationHardTimeoutMs(request: request, policy: invocationPolicy)
-                result = await runToolInvocationWithHardTimeout(
-                    toolID: request.tool,
-                    timeoutMs: timeoutMs
-                ) {
-                    await withSpan("tool.invoke", ofKind: .internal) { span in
-                        span.attributes["agent_id"] = "\(normalizedAgentID)"
-                        span.attributes["session_id"] = "\(normalizedSessionID)"
-                        span.attributes["tool_id"] = "\(request.tool)"
-                        return await toolExecution.invoke(
-                            agentID: normalizedAgentID,
-                            sessionID: normalizedSessionID,
-                            request: request,
-                            policy: invocationPolicy,
-                            currentDirectoryURL: currentDirectoryURL
+            if let preHookBlockedResult {
+                result = preHookBlockedResult
+            } else {
+                switch loopDecision {
+                case .block(let message):
+                    result = .init(
+                        tool: effectiveRequest.tool,
+                        ok: false,
+                        error: .init(
+                            code: "tool_loop_detected",
+                            message: message,
+                            retryable: false,
+                            hint: "Change the command or arguments, or summarize the blocker instead of retrying the same tool call."
                         )
+                    )
+
+                case .allow:
+                    if let approval = await requestToolApprovalIfNeeded(
+                        agentID: normalizedAgentID,
+                        sessionID: normalizedSessionID,
+                        channelID: nil,
+                        topicID: nil,
+                        request: effectiveRequest,
+                        requireApproval: requireApproval || effectivePolicy.approval.enabled
+                    ), let deniedResult = toolApprovalDeniedResult(tool: effectiveRequest.tool, approval: approval) {
+                        result = deniedResult
+                        break
                     }
+                    await toolLoopGuard.recordStarted(
+                        sessionID: normalizedSessionID,
+                        request: effectiveRequest,
+                        policy: effectivePolicy,
+                        workspaceRootURL: workspaceRootURL,
+                        currentDirectoryURL: currentDirectoryURL
+                    )
+                    let toolExecution = self.toolExecution
+                    let invocationPolicy = effectivePolicy
+                    let invocationRequest = effectiveRequest
+                    let timeoutMs = toolInvocationHardTimeoutMs(request: invocationRequest, policy: invocationPolicy)
+                    result = await runToolInvocationWithHardTimeout(
+                        toolID: invocationRequest.tool,
+                        timeoutMs: timeoutMs
+                    ) {
+                        await withSpan("tool.invoke", ofKind: .internal) { span in
+                            span.attributes["agent_id"] = "\(normalizedAgentID)"
+                            span.attributes["session_id"] = "\(normalizedSessionID)"
+                            span.attributes["tool_id"] = "\(invocationRequest.tool)"
+                            return await toolExecution.invoke(
+                                agentID: normalizedAgentID,
+                                sessionID: normalizedSessionID,
+                                request: invocationRequest,
+                                policy: invocationPolicy,
+                                currentDirectoryURL: currentDirectoryURL
+                            )
+                        }
+                    }
+                    await toolLoopGuard.recordResult(
+                        sessionID: normalizedSessionID,
+                        request: effectiveRequest,
+                        result: result,
+                        policy: effectivePolicy,
+                        workspaceRootURL: workspaceRootURL,
+                        currentDirectoryURL: currentDirectoryURL
+                    )
                 }
-                await toolLoopGuard.recordResult(
-                    sessionID: normalizedSessionID,
-                    request: request,
-                    result: result,
-                    policy: effectivePolicy,
-                    workspaceRootURL: workspaceRootURL,
-                    currentDirectoryURL: currentDirectoryURL
-                )
             }
         } else {
             result = .init(
@@ -252,7 +279,7 @@ extension CoreService {
             sessionId: normalizedSessionID,
             type: .toolResult,
             toolResult: AgentToolResultEvent(
-                tool: request.tool,
+                tool: result.tool,
                 ok: result.ok,
                 data: result.data,
                 error: result.error,
@@ -315,7 +342,7 @@ extension CoreService {
             agentId: normalizedAgentID,
             sessionId: normalizedSessionID,
             sessionTitle: sessionDetail.summary.title,
-            toolId: request.tool,
+            toolId: result.tool,
             ok: result.ok,
             durationMs: result.durationMs
         )
@@ -402,11 +429,32 @@ extension CoreService {
             URL(fileURLWithPath: $0, isDirectory: true)
         }
 
-        let loopDecision: ToolLoopGuard.Decision
+        var effectiveRequest = request
+        var preHookBlockedResult: ToolInvocationResult?
         if authorization.allowed {
+            switch await toolPreHookService.evaluate(
+                globalConfig: currentConfig.toolHooks.preTools,
+                agentOverride: effectivePolicy.preToolsHook,
+                agentID: normalizedAgentID,
+                sessionID: nil,
+                channelID: channelID,
+                source: .channelRuntime,
+                request: request,
+                workingDirectory: channelToolContext.workingDirectory,
+                workspaceRootURL: workspaceRootURL
+            ) {
+            case .allow(let rewritten):
+                effectiveRequest = rewritten
+            case .block(let blocked):
+                preHookBlockedResult = blocked
+            }
+        }
+
+        let loopDecision: ToolLoopGuard.Decision
+        if authorization.allowed, preHookBlockedResult == nil {
             loopDecision = await toolLoopGuard.evaluate(
                 sessionID: channelID,
-                request: request,
+                request: effectiveRequest,
                 policy: effectivePolicy,
                 workspaceRootURL: workspaceRootURL,
                 currentDirectoryURL: currentDirectoryURL
@@ -417,66 +465,71 @@ extension CoreService {
 
         let result: ToolInvocationResult
         if authorization.allowed {
-            switch loopDecision {
-            case .block(let message):
-                result = .init(
-                    tool: request.tool,
-                    ok: false,
-                    error: .init(
-                        code: "tool_loop_detected",
-                        message: message,
-                        retryable: false,
-                        hint: "Change the command or arguments, or summarize the blocker instead of retrying the same tool call."
-                    )
-                )
-
-            case .allow:
-                if let approval = await requestToolApprovalIfNeeded(
-                    agentID: normalizedAgentID,
-                    sessionID: nil,
-                    channelID: channelID,
-                    topicID: topicID,
-                    request: request,
-                    requireApproval: requireApproval || effectivePolicy.approval.enabled
-                ), let deniedResult = toolApprovalDeniedResult(tool: request.tool, approval: approval) {
-                    result = deniedResult
-                    break
-                }
-                await toolLoopGuard.recordStarted(
-                    sessionID: channelID,
-                    request: request,
-                    policy: effectivePolicy,
-                    workspaceRootURL: workspaceRootURL,
-                    currentDirectoryURL: currentDirectoryURL
-                )
-                let toolExecution = self.toolExecution
-                let invocationPolicy = effectivePolicy
-                let timeoutMs = toolInvocationHardTimeoutMs(request: request, policy: invocationPolicy)
-                result = await runToolInvocationWithHardTimeout(
-                    toolID: request.tool,
-                    timeoutMs: timeoutMs
-                ) {
-                    await withSpan("tool.invoke.channel", ofKind: .internal) { span in
-                        span.attributes["agent_id"] = "\(normalizedAgentID)"
-                        span.attributes["channel_id"] = "\(channelID)"
-                        span.attributes["tool_id"] = "\(request.tool)"
-                        return await toolExecution.invoke(
-                            agentID: normalizedAgentID,
-                            sessionID: channelID,
-                            request: request,
-                            policy: invocationPolicy,
-                            currentDirectoryURL: currentDirectoryURL
+            if let preHookBlockedResult {
+                result = preHookBlockedResult
+            } else {
+                switch loopDecision {
+                case .block(let message):
+                    result = .init(
+                        tool: effectiveRequest.tool,
+                        ok: false,
+                        error: .init(
+                            code: "tool_loop_detected",
+                            message: message,
+                            retryable: false,
+                            hint: "Change the command or arguments, or summarize the blocker instead of retrying the same tool call."
                         )
+                    )
+
+                case .allow:
+                    if let approval = await requestToolApprovalIfNeeded(
+                        agentID: normalizedAgentID,
+                        sessionID: nil,
+                        channelID: channelID,
+                        topicID: topicID,
+                        request: effectiveRequest,
+                        requireApproval: requireApproval || effectivePolicy.approval.enabled
+                    ), let deniedResult = toolApprovalDeniedResult(tool: effectiveRequest.tool, approval: approval) {
+                        result = deniedResult
+                        break
                     }
+                    await toolLoopGuard.recordStarted(
+                        sessionID: channelID,
+                        request: effectiveRequest,
+                        policy: effectivePolicy,
+                        workspaceRootURL: workspaceRootURL,
+                        currentDirectoryURL: currentDirectoryURL
+                    )
+                    let toolExecution = self.toolExecution
+                    let invocationPolicy = effectivePolicy
+                    let invocationRequest = effectiveRequest
+                    let timeoutMs = toolInvocationHardTimeoutMs(request: invocationRequest, policy: invocationPolicy)
+                    result = await runToolInvocationWithHardTimeout(
+                        toolID: invocationRequest.tool,
+                        timeoutMs: timeoutMs
+                    ) {
+                        await withSpan("tool.invoke.channel", ofKind: .internal) { span in
+                            span.attributes["agent_id"] = "\(normalizedAgentID)"
+                            span.attributes["channel_id"] = "\(channelID)"
+                            span.attributes["tool_id"] = "\(invocationRequest.tool)"
+                            return await toolExecution.invoke(
+                                agentID: normalizedAgentID,
+                                sessionID: channelID,
+                                request: invocationRequest,
+                                policy: invocationPolicy,
+                                currentDirectoryURL: currentDirectoryURL
+                            )
+                        }
+                    }
+                    await toolLoopGuard.recordResult(
+                        sessionID: channelID,
+                        request: effectiveRequest,
+                        result: result,
+                        policy: effectivePolicy,
+                        workspaceRootURL: workspaceRootURL,
+                        currentDirectoryURL: currentDirectoryURL
+                    )
                 }
-                await toolLoopGuard.recordResult(
-                    sessionID: channelID,
-                    request: request,
-                    result: result,
-                    policy: effectivePolicy,
-                    workspaceRootURL: workspaceRootURL,
-                    currentDirectoryURL: currentDirectoryURL
-                )
             }
         } else {
             result = .init(
@@ -585,10 +638,17 @@ extension CoreService {
 
     func toolContextForSession(
         sessionID: String,
-        sessionTitle: String
+        sessionTitle: String,
+        projectID: String?
     ) async -> (workingDirectory: String?, extraRoots: [String]) {
         if let roots = sessionExtraRoots[sessionID] {
             return (sessionWorkingDirectories[sessionID], roots)
+        }
+
+        if let projectContext = await toolContextForProject(projectID: projectID) {
+            sessionExtraRoots[sessionID] = projectContext.extraRoots
+            sessionWorkingDirectories[sessionID] = projectContext.workingDirectory
+            return projectContext
         }
 
         let trimmedTitle = sessionTitle.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -627,6 +687,18 @@ extension CoreService {
         }
 
         return (nil, [])
+    }
+
+    private func toolContextForProject(projectID: String?) async -> (workingDirectory: String?, extraRoots: [String])? {
+        guard let trimmedProjectID = projectID?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !trimmedProjectID.isEmpty,
+              let workingDirectoryURL = try? await resolveProjectWorkspaceRoot(projectID: trimmedProjectID)
+        else {
+            return nil
+        }
+
+        let workingDirectory = workingDirectoryURL.path
+        return (workingDirectory, sessionToolRoots(forWorkingDirectory: workingDirectory))
     }
 
     func toolContextForChannel(

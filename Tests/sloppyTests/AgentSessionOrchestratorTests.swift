@@ -392,7 +392,7 @@ func agentSessionOrchestratorAppendsFriendReminderToRuntimeUserMessage() async t
     )
 
     let prompt = await provider.requestedPromptsSnapshot().last ?? ""
-    #expect(prompt.contains("User request:\nДа, исправь это как можно скорее"))
+    #expect(prompt.contains("[User request]\nДа, исправь это как можно скорее"))
     #expect(prompt.contains("#[FRIEND_REMINDER.md]\n- Do not use mcps\n- always run git pull"))
 }
 
