@@ -155,6 +155,39 @@ func buildMetadataDisplayVersionFallsBackWithoutGitMetadata() {
 }
 
 @Test
+func buildMetadataResolverUsesExecutableSourceCheckout() throws {
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: root) }
+
+    try FileManager.default.createDirectory(
+        at: root.appendingPathComponent("Dashboard", isDirectory: true),
+        withIntermediateDirectories: true
+    )
+    try "// package\n".write(to: root.appendingPathComponent("Package.swift"), atomically: true, encoding: .utf8)
+    try "test\n".write(to: root.appendingPathComponent("README.md"), atomically: true, encoding: .utf8)
+
+    try runVersionTestGit(["init", "--initial-branch=main"], cwd: root)
+    try runVersionTestGit(["config", "user.email", "test@sloppy.dev"], cwd: root)
+    try runVersionTestGit(["config", "user.name", "SloppyTest"], cwd: root)
+    try runVersionTestGit(["add", "."], cwd: root)
+    try runVersionTestGit(["commit", "-m", "init"], cwd: root)
+
+    let executableURL = root
+        .appendingPathComponent(".build/release", isDirectory: true)
+        .appendingPathComponent("sloppy")
+    try FileManager.default.createDirectory(
+        at: executableURL.deletingLastPathComponent(),
+        withIntermediateDirectories: true
+    )
+    FileManager.default.createFile(atPath: executableURL.path, contents: Data(), attributes: nil)
+
+    let metadata = BuildMetadataResolver(executableURL: executableURL).resolve()
+
+    #expect(metadata.git?.repositoryRootPath == root.path)
+    #expect(metadata.git?.currentBranch == "main")
+}
+
+@Test
 func gitHubRemoteParserAcceptsGitHubUrls() {
     let parsed = GitRepositoryInspector.parseGitHubRemote(
         url: "git@github.com:TeamSloppy/Sloppy.git",
@@ -176,4 +209,16 @@ func gitHubRemoteParserRejectsNonGitHubUrls() {
 func buildMetadataDeploymentKindDetectsExplicitDockerFlag() {
     let kind = BuildMetadataResolver.resolveDeploymentKind(environment: ["SLOPPY_DEPLOYMENT_KIND": "docker"])
     #expect(kind == .docker)
+}
+
+private func runVersionTestGit(_ args: [String], cwd: URL) throws {
+    let process = Process()
+    process.executableURL = URL(fileURLWithPath: "/usr/bin/git")
+    process.arguments = args
+    process.currentDirectoryURL = cwd
+    process.standardOutput = FileHandle.nullDevice
+    process.standardError = FileHandle.nullDevice
+    try process.run()
+    process.waitUntilExit()
+    #expect(process.terminationStatus == 0)
 }

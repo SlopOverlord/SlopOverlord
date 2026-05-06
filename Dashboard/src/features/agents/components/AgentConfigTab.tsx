@@ -1008,7 +1008,7 @@ export function AgentConfigTab({ agentId, agentDisplayName = "", onDeleteAgent =
       );
 
       return (
-        <section className="entry-editor-card">
+        <section className="entry-editor-card agent-doc-files-card">
           <h3>Agent Files</h3>
           <div className={`pft-shell agent-doc-files-shell${narrowAgentFilesLayout ? " pft-shell--narrow" : ""}`}>
             <div className="pft-tree-panel agent-doc-files-tree-panel">

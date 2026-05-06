@@ -30,15 +30,32 @@ struct StatusCommand: AsyncParsableCommand {
 struct UpdateCommand: AsyncParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "update",
-        abstract: "Check for a newer version of Sloppy."
+        abstract: "Check for a newer version of Sloppy, or install source updates."
     )
 
     @Option(name: .long, help: "Sloppy server URL") var url: String?
     @Option(name: .long, help: "Auth token") var token: String?
     @Option(name: .long, help: "Output format: json, table") var format: String = "json"
+    @Option(name: .long, help: "Source checkout to update. Defaults to the checkout that built this sloppy binary.")
+    var dir: String?
+    @Flag(name: .long, help: "Pull and reinstall from the source checkout without requiring a running server.")
+    var install: Bool = false
+    @Flag(name: .long, help: "Build only the server stack when installing.")
+    var serverOnly: Bool = false
+    @Flag(name: .long, help: "Do not pull the source checkout before rebuilding.")
+    var noGitUpdate: Bool = false
+    @Flag(name: .long, help: "Do not create or refresh the sloppy command symlink.")
+    var noLink: Bool = false
+    @Flag(name: .long, help: "Print installer actions without executing them.")
+    var dryRun: Bool = false
     @Flag(name: .long, help: "Show detailed HTTP info") var verbose: Bool = false
 
     mutating func run() async throws {
+        if install {
+            try runSourceInstall()
+            return
+        }
+
         let client = SloppyCLIClient.resolve(url: url, token: token, verbose: verbose)
         do {
             let data = try await client.post("/v1/updates/check")
@@ -47,7 +64,15 @@ struct UpdateCommand: AsyncParsableCommand {
                 if updateAvailable {
                     let latest = json["latestVersion"] as? String ?? "unknown"
                     let current = json["currentVersion"] as? String ?? SloppyVersion.current
-                    print(CLIStyle.yellow("Update available:") + " \(CLIStyle.whiteBold(latest)) (current: \(current))")
+                    let updateKind = json["updateKind"] as? String ?? "release"
+                    if updateKind == "git" {
+                        let branch = json["latestBranch"] as? String ?? json["currentBranch"] as? String ?? "upstream"
+                        let commit = json["latestCommit"] as? String ?? latest
+                        print(CLIStyle.yellow("Update available:") + " \(CLIStyle.whiteBold(commit)) on \(branch) (current: \(current))")
+                        print(CLIStyle.dim("  Run: sloppy update --install"))
+                    } else {
+                        print(CLIStyle.yellow("Update available:") + " \(CLIStyle.whiteBold(latest)) (current: \(current))")
+                    }
                     if let releaseUrl = json["releaseUrl"] as? String {
                         print(CLIStyle.dim("  Release: \(releaseUrl)"))
                     }
@@ -61,6 +86,91 @@ struct UpdateCommand: AsyncParsableCommand {
             CLIStyle.error(error.localizedDescription)
             throw ExitCode.failure
         }
+    }
+
+    private func runSourceInstall() throws {
+        let repoURL = try resolveSourceCheckoutURL()
+        let scriptURL = repoURL
+            .appendingPathComponent("scripts", isDirectory: true)
+            .appendingPathComponent("install.sh")
+
+        guard FileManager.default.fileExists(atPath: scriptURL.path) else {
+            CLIStyle.error("Cannot find source installer at \(scriptURL.path).")
+            throw ExitCode.failure
+        }
+
+        let metadata = BuildMetadataResolver(repositoryRootURL: repoURL).resolve()
+        let branch = metadata.git?.currentBranch ?? metadata.git?.upstreamBranch ?? "current branch"
+        let mode = serverOnly ? "--server-only" : "--bundle"
+        print(CLIStyle.cyan("Updating source checkout:") + " \(repoURL.path)")
+        print(CLIStyle.cyan("Branch:") + " \(branch)")
+
+        var arguments = [
+            "bash",
+            scriptURL.path,
+            mode,
+            "--dir",
+            repoURL.path,
+            "--no-prompt"
+        ]
+        if noGitUpdate {
+            arguments.append("--no-git-update")
+        }
+        if noLink {
+            arguments.append("--no-link")
+        }
+        if dryRun {
+            arguments.append("--dry-run")
+        }
+        if verbose {
+            arguments.append("--verbose")
+        }
+
+        let status = runInstaller(arguments: arguments)
+        guard status == 0 else {
+            CLIStyle.error("Source update failed with exit code \(status).")
+            throw ExitCode.failure
+        }
+
+        CLIStyle.success("Source update complete.")
+    }
+
+    private func resolveSourceCheckoutURL() throws -> URL {
+        if let dir, !dir.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return URL(fileURLWithPath: NSString(string: dir).expandingTildeInPath, isDirectory: true)
+                .standardizedFileURL
+        }
+
+        let metadata = BuildMetadataResolver().resolve()
+        if let path = metadata.git?.repositoryRootPath {
+            return URL(fileURLWithPath: path, isDirectory: true).standardizedFileURL
+        }
+
+        if let executableURL = currentExecutableURL(),
+           let repoURL = repoRootDerivedFromExecutable(executableURL: executableURL) {
+            return repoURL
+        }
+
+        CLIStyle.error("Cannot determine the source checkout for this sloppy binary. Pass --dir /path/to/Sloppy.")
+        throw ExitCode.failure
+    }
+
+    private func runInstaller(arguments: [String]) -> Int32 {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
+        process.arguments = arguments
+        process.standardOutput = FileHandle.standardOutput
+        process.standardError = FileHandle.standardError
+        process.environment = childProcessEnvironment()
+
+        do {
+            try process.run()
+        } catch {
+            CLIStyle.error("Failed to start installer: \(error.localizedDescription)")
+            return 127
+        }
+        process.waitUntilExit()
+        return process.terminationStatus
     }
 }
 

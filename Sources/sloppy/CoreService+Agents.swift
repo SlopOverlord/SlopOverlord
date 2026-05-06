@@ -202,7 +202,7 @@ extension CoreService {
     }
 
     private var agentVisibleTopLevelNames: [String] {
-        ["AGENTS.md", "USER.md", "SOUL.md", "IDENTITY.md", "HEARTBEAT.md", "MEMORY.md", "skills"]
+        ["AGENTS.md", "USER.md", "SOUL.md", "IDENTITY.md", "HEARTBEAT.md", "FRIEND_REMINDER.md", "MEMORY.md", "skills"]
     }
 
     private func sortAgentEntries(_ entries: [ProjectFileEntry]) -> [ProjectFileEntry] {

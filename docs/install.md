@@ -106,6 +106,16 @@ bash scripts/install.sh --dir ~/.local/share/sloppy/source
 curl -fsSL https://sloppy.team/install.sh | bash -s -- --dir ~/.local/share/sloppy/source
 ```
 
+For source installs, `sloppy update` checks the upstream branch and `sloppy update --install`
+pulls and reinstalls from the current branch of that checkout:
+
+```bash
+sloppy update
+sloppy update --install
+sloppy update --install --server-only
+sloppy update --install --dir ~/.local/share/sloppy/source
+```
+
 Verify the installation and check connectivity:
 
 ```bash

@@ -2979,26 +2979,60 @@ body.agent-chat-no-page-scroll .page {
 }
 
 .agent-doc-files-shell {
+  box-sizing: border-box;
+  width: 100%;
+  max-width: 100%;
+  height: auto;
   margin-top: 12px;
+  min-width: 0;
   min-height: 480px;
 }
 
+.agent-doc-files-card {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  align-content: stretch;
+  min-width: 0;
+  min-height: 0;
+}
+
+.agent-doc-files-card > h3 {
+  margin: 0;
+}
+
+.agent-doc-files-card .agent-doc-files-shell {
+  margin-top: 12px;
+}
+
 .agent-doc-files-tree-panel {
+  flex: 0 0 260px;
   width: 260px;
+  min-width: 220px;
+  max-width: 34%;
+}
+
+.agent-doc-files-shell.pft-shell--narrow .agent-doc-files-tree-panel {
+  flex: 1 1 auto;
+  width: 100%;
+  min-width: 0;
+  max-width: none;
 }
 
 .agent-doc-files-viewer-panel {
   background: var(--bg);
+  min-width: 0;
 }
 
 .agent-doc-files-viewer-body {
   background: var(--bg);
   padding: 14px;
+  min-width: 0;
 }
 
 .agent-doc-files-editor-surface {
   display: grid;
   gap: 12px;
+  min-width: 0;
   min-height: 100%;
 }
 
@@ -3016,6 +3050,7 @@ body.agent-chat-no-page-scroll .page {
 .agent-doc-files-editor-label {
   display: grid;
   gap: 8px;
+  min-width: 0;
   min-height: 0;
   color: var(--text-main);
   font-size: 0.88rem;
@@ -3023,7 +3058,9 @@ body.agent-chat-no-page-scroll .page {
 
 .agent-doc-files-shell .agent-doc-files-editor-label textarea,
 .agent-doc-files-viewer-body .agent-doc-files-editor-label textarea {
+  box-sizing: border-box;
   width: 100%;
+  max-width: 100%;
   min-height: 360px;
   resize: vertical;
   font-family: "Fira Code", monospace;
@@ -3492,12 +3529,14 @@ body.agent-chat-no-page-scroll .page {
   grid-template-columns: minmax(0, 1fr) 320px;
   gap: 12px;
   min-height: 420px;
+  min-width: 0;
 }
 
 .agent-memories-main,
 .agent-memory-inspector {
   border: 1px solid var(--line);
   background: var(--surface);
+  min-width: 0;
 }
 
 .agent-memories-main {
@@ -3509,11 +3548,23 @@ body.agent-chat-no-page-scroll .page {
   min-height: 260px;
   display: grid;
   place-items: center;
+  min-width: 0;
+  padding: 16px;
+  text-align: center;
+}
+
+.agent-memories-empty .placeholder-text {
+  max-width: min(100%, 680px);
+  margin: 0;
+  line-height: 1.45;
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 
 .agent-memory-list-shell {
   display: grid;
   gap: 12px;
+  min-width: 0;
 }
 
 .agent-memory-list {
@@ -3912,6 +3963,8 @@ body.agent-chat-no-page-scroll .page {
 .agent-tools-head-copy {
   display: grid;
   gap: 4px;
+  flex: 1 1 auto;
+  min-width: 0;
 }
 
 .agent-tools-head-copy h3 {
@@ -3928,7 +3981,12 @@ body.agent-chat-no-page-scroll .page {
   padding: 5px 10px;
   color: var(--muted);
   font-size: 0.77rem;
-  white-space: nowrap;
+  flex: 0 1 auto;
+  max-width: min(720px, 58%);
+  line-height: 1.35;
+  text-align: right;
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 
 .agent-tools-form {

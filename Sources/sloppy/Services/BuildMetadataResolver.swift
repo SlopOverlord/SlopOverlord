@@ -166,15 +166,18 @@ struct GitRepositoryInspector: Sendable {
 
 struct BuildMetadataResolver: Sendable {
     let repositoryRootURL: URL?
+    let executableURL: URL?
     let environment: [String: String]
     let gitInspector: GitRepositoryInspector
 
     init(
         repositoryRootURL: URL? = nil,
+        executableURL: URL? = currentExecutableURL(),
         environment: [String: String] = ProcessInfo.processInfo.environment,
         gitInspector: GitRepositoryInspector = GitRepositoryInspector()
     ) {
         self.repositoryRootURL = repositoryRootURL
+        self.executableURL = executableURL
         self.environment = environment
         self.gitInspector = gitInspector
     }
@@ -192,9 +195,11 @@ struct BuildMetadataResolver: Sendable {
     }
 
     func resolveGitMetadata() -> GitRepositoryMetadata? {
-        let rootURL = repositoryRootURL ?? Self.findRepositoryRoot(
-            startingAt: URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true)
-        )
+        let rootURL = repositoryRootURL
+            ?? executableURL.flatMap { repoRootDerivedFromExecutable(executableURL: $0) }
+            ?? Self.findRepositoryRoot(
+                startingAt: URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true)
+            )
         guard let rootURL else { return nil }
         return gitInspector.inspectRepository(at: rootURL)
     }

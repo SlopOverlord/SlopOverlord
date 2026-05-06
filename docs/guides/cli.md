@@ -118,6 +118,7 @@ See [Install — Run as a background service](/install#run-as-a-background-servi
 ```bash
 sloppy status                     # GET /health — connectivity check
 sloppy update                     # POST /v1/updates/check
+sloppy update --install           # Pull and reinstall source checkout from its current branch
 sloppy logs                       # GET /v1/logs
 sloppy workers                    # GET /v1/workers
 sloppy bulletins                  # GET /v1/bulletins

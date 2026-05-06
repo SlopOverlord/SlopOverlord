@@ -217,7 +217,9 @@
   }
 
   .agent-tools-status {
+    max-width: 100%;
     white-space: normal;
+    text-align: left;
   }
 
   .logs-header {

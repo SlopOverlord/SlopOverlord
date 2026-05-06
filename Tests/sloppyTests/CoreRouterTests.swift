@@ -1321,6 +1321,20 @@ func createListAndGetAgentsEndpoints() async throws {
         let fileURL = workspaceAgentsURL.appendingPathComponent(file)
         #expect(FileManager.default.fileExists(atPath: fileURL.path))
     }
+
+    let filesResponse = await router.handle(method: "GET", path: "/v1/agents/agent-dev/files", body: nil)
+    #expect(filesResponse.status == 200)
+    let visibleFiles = try decoder.decode([ProjectFileEntry].self, from: filesResponse.body)
+    #expect(visibleFiles.contains { $0.name == "FRIEND_REMINDER.md" && $0.type == .file })
+
+    let friendReminderResponse = await router.handle(
+        method: "GET",
+        path: "/v1/agents/agent-dev/files/content?path=FRIEND_REMINDER.md",
+        body: nil
+    )
+    #expect(friendReminderResponse.status == 200)
+    let friendReminderFile = try decoder.decode(ProjectFileContentResponse.self, from: friendReminderResponse.body)
+    #expect(friendReminderFile.path == "FRIEND_REMINDER.md")
 }
 
 @Test
