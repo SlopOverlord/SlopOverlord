@@ -105,7 +105,7 @@ const CHAT_MODES = [
   { id: "plan", label: "Plan", icon: "schema", description: "Plan mode" },
   { id: "debug", label: "Debug", icon: "bug_report", description: "Debug mode" }
 ];
-const DEFAULT_CHAT_MODE = "ask";
+const DEFAULT_CHAT_MODE = "build";
 const CHAT_MODE_STORAGE_PREFIX = "sloppy.agentChat.mode";
 
 /** Must match `CoreService.sloppyProjectsDirectoryScopeID` — file search under workspace `projects/` when the chat is not project-scoped. */

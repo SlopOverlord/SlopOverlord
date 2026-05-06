@@ -574,6 +574,49 @@ func respondInlineIncludesBootstrapContextInPrompt() async {
 }
 
 @Test
+func respondInlineInjectsScopedMemoryForAgentSession() async {
+    let provider = PromptCapturingModelProvider()
+    let memory = InMemoryMemoryStore()
+    let channelId = "agent:test-agent:session:test-session"
+    let otherChannelId = "agent:test-agent:session:other-session"
+    _ = await memory.save(
+        entry: MemoryWriteRequest(
+            note: "The project codename is Aurora.",
+            summary: "Project codename Aurora",
+            kind: .fact,
+            memoryClass: .semantic,
+            scope: .channel(channelId)
+        )
+    )
+    _ = await memory.save(
+        entry: MemoryWriteRequest(
+            note: "The project codename is Borealis.",
+            summary: "Unrelated session codename Borealis",
+            kind: .fact,
+            memoryClass: .semantic,
+            scope: .channel(otherChannelId)
+        )
+    )
+    let system = RuntimeSystem(
+        modelProvider: provider,
+        defaultModel: "mock-model",
+        memoryStore: memory
+    )
+
+    _ = await system.postMessage(
+        channelId: channelId,
+        request: ChannelMessageRequest(userId: "dashboard", content: "What is the project codename?")
+    )
+
+    let prompt = await provider.lastPrompt() ?? ""
+    #expect(prompt.contains("[Recalled scoped memory]"))
+    #expect(prompt.contains("Project codename Aurora"))
+    #expect(prompt.contains("[Current user message]"))
+    #expect(prompt.contains("What is the project codename?"))
+    #expect(!prompt.contains("Borealis"))
+}
+
+@Test
 func respondInlineUsesRequestModelInsteadOfDefaultModel() async {
     let provider = PromptCapturingModelProvider(models: ["default-model", "reasoning-model"])
     let system = RuntimeSystem(modelProvider: provider, defaultModel: "default-model")

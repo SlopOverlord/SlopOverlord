@@ -13,7 +13,34 @@ struct MemorySearchTool: CoreTool {
     var parameters: GenerationSchema {
         .objectSchema([
             .init(name: "query", description: "Search query", schema: DynamicGenerationSchema(type: String.self)),
-            .init(name: "limit", description: "Max results to return", schema: DynamicGenerationSchema(type: Int.self), isOptional: true)
+            .init(name: "limit", description: "Max results to return", schema: DynamicGenerationSchema(type: Int.self), isOptional: true),
+            .init(
+                name: "scope_type",
+                description: "Together with scope_id, or omit if using `scope` object. One of: global, project, channel, agent.",
+                schema: DynamicGenerationSchema(type: String.self),
+                isOptional: true
+            ),
+            .init(
+                name: "scope_id",
+                description: "Together with scope_type, or omit if using `scope` object. For channel: agent:<agentId>:session:<sessionId>.",
+                schema: DynamicGenerationSchema(type: String.self),
+                isOptional: true
+            ),
+            .init(
+                name: "scope",
+                description: "Optional object with `type` and `id`, plus optional channel_id, project_id, or agent_id.",
+                schema: DynamicGenerationSchema(
+                    name: "MemoryScopeArgument",
+                    properties: [
+                        .init(name: "type", description: "One of: global, project, channel, agent.", schema: DynamicGenerationSchema(type: String.self)),
+                        .init(name: "id", description: "Scope identifier.", schema: DynamicGenerationSchema(type: String.self)),
+                        .init(name: "channel_id", description: "Optional channel id.", schema: DynamicGenerationSchema(type: String.self), isOptional: true),
+                        .init(name: "project_id", description: "Optional project id.", schema: DynamicGenerationSchema(type: String.self), isOptional: true),
+                        .init(name: "agent_id", description: "Optional agent id.", schema: DynamicGenerationSchema(type: String.self), isOptional: true)
+                    ]
+                ),
+                isOptional: true
+            )
         ])
     }
 

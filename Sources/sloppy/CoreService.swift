@@ -348,7 +348,8 @@ public actor CoreService {
             memoryStore: runtimeMemoryStore,
             visorCompletionProvider: visorCompletionProvider,
             visorStreamingProvider: visorStreamingProvider,
-            visorBulletinMaxWords: config.visor.bulletinMaxWords
+            visorBulletinMaxWords: config.visor.bulletinMaxWords,
+            preResponseMemoryLimit: config.memory.retrieval.topK
         )
         self.runtime = runtime
         self.memoryStore = runtimeMemoryStore

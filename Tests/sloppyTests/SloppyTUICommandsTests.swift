@@ -14,10 +14,12 @@ func slashCommandRouterIgnoresAbsolutePaths() {
 
 @Test
 func slashCommandRouterHandlesKnownCommandsAndAliases() {
-    let commandNames: Set<String> = ["help", "add-dir"]
+    let commandNames: Set<String> = ["help", "add-dir", "undo", "redo"]
 
     #expect(SloppyTUISlashCommandRouter.shouldHandle("/help", commandNames: commandNames, skillCommandNames: []))
     #expect(SloppyTUISlashCommandRouter.shouldHandle("/add-dir /tmp/demo", commandNames: commandNames, skillCommandNames: []))
+    #expect(SloppyTUISlashCommandRouter.shouldHandle("/undo", commandNames: commandNames, skillCommandNames: []))
+    #expect(SloppyTUISlashCommandRouter.shouldHandle("/redo", commandNames: commandNames, skillCommandNames: []))
 }
 
 @Test

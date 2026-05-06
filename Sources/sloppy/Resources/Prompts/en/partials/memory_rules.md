@@ -4,4 +4,4 @@
 - Use `memory.recall` or `memory.get` to retrieve relevant information from the past when starting a new task or if you need context about previous interactions.
 - Use `memory.search` if you need to perform a keyword-based search across memory entries.
 - Prefer `memory.recall` for general context gathering and `memory.get` for specific semantic queries.
-- When saving memory, provide a concise `summary` and use an appropriate `class` taxonomy (e.g., `user_preference`, `project_context`, `decision_log`).
+- When saving memory, provide a concise `summary`. Use valid `class` values only (`semantic`, `episodic`, `procedural`, `bulletin`); put categories such as preferences, project context, or decisions into `kind` and/or `metadata`.

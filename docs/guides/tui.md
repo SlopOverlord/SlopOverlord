@@ -153,6 +153,8 @@ For git context:
 | `/new` | Create a new session |
 | `/clear` | Clear local TUI cards |
 | `/stop` | Interrupt the current run |
+| `/undo` | Undo file changes from the last completed TUI turn |
+| `/redo` | Redo the last undone TUI turn |
 | `/btw <message>` | Ask a side question without changing the current main message flow |
 | `/compact` | Request session compaction |
 | `/add_dir <path>` | Add a working directory to the current session |
@@ -192,4 +194,3 @@ This state is stored at:
 ```
 
 The default workspace root is controlled by `workspace.basePath` and `workspace.name` in `sloppy.json`.
-

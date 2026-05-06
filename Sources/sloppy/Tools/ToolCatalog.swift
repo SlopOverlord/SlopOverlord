@@ -324,7 +324,20 @@ enum ToolCatalog {
             "type": .string("object"),
             "properties": .object([
                 "query": .object(["type": .string("string")]),
-                "limit": .object(["type": .string("number")])
+                "limit": .object(["type": .string("number")]),
+                "scope_type": .object(["type": .string("string")]),
+                "scope_id": .object(["type": .string("string")]),
+                "scope": .object([
+                    "type": .string("object"),
+                    "properties": .object([
+                        "type": .object(["type": .string("string")]),
+                        "id": .object(["type": .string("string")]),
+                        "channel_id": .object(["type": .string("string")]),
+                        "project_id": .object(["type": .string("string")]),
+                        "agent_id": .object(["type": .string("string")])
+                    ]),
+                    "required": .array([.string("type"), .string("id")])
+                ])
             ]),
             "required": .array([.string("query")])
         ]),
@@ -332,7 +345,20 @@ enum ToolCatalog {
             "type": .string("object"),
             "properties": .object([
                 "query": .object(["type": .string("string")]),
-                "limit": .object(["type": .string("number")])
+                "limit": .object(["type": .string("number")]),
+                "scope_type": .object(["type": .string("string")]),
+                "scope_id": .object(["type": .string("string")]),
+                "scope": .object([
+                    "type": .string("object"),
+                    "properties": .object([
+                        "type": .object(["type": .string("string")]),
+                        "id": .object(["type": .string("string")]),
+                        "channel_id": .object(["type": .string("string")]),
+                        "project_id": .object(["type": .string("string")]),
+                        "agent_id": .object(["type": .string("string")])
+                    ]),
+                    "required": .array([.string("type"), .string("id")])
+                ])
             ]),
             "required": .array([.string("query")])
         ]),

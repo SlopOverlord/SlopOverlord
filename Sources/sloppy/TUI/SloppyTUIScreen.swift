@@ -67,6 +67,8 @@ final class SloppyTUIScreen: @preconcurrency Component, @unchecked Sendable {
         SloppyTUISlashCommand("new", "Create a new session"),
         SloppyTUISlashCommand("clear", "Clear local cards"),
         SloppyTUISlashCommand("stop", "Interrupt the current run"),
+        SloppyTUISlashCommand("undo", "Undo file changes from the last completed turn"),
+        SloppyTUISlashCommand("redo", "Redo the last undone turn"),
         SloppyTUISlashCommand("btw", "Ask a quick side question without interrupting the main conversation", argument: "message"),
         SloppyTUISlashCommand("compact", "Free up context by summarizing the conversation so far"),
         SloppyTUISlashCommand("add_dir", "Add a working directory to this session", argument: "path"),
@@ -98,6 +100,8 @@ final class SloppyTUIScreen: @preconcurrency Component, @unchecked Sendable {
         "new",
         "clear",
         "stop",
+        "undo",
+        "redo",
         "btw",
         "compact",
         "add_dir",
@@ -178,6 +182,7 @@ final class SloppyTUIScreen: @preconcurrency Component, @unchecked Sendable {
     private var transientNoticeLine: String?
     private var transientNoticeTask: Task<Void, Never>?
     private var transcriptExpanded = false
+    private var undoManager = SloppyTUIUndoManager()
     private var thinkingFrame = 0
     private var thinkingWord = "thinking"
     private var petMood: AgentPetAnimationState = .idle
@@ -839,6 +844,7 @@ final class SloppyTUIScreen: @preconcurrency Component, @unchecked Sendable {
         refreshStaticChrome()
         let uploads = pendingUploads
         let content = await messageContentWithInlineAttachments(value, uploads: uploads)
+        let undoBaseline = await makeUndoBaseline()
         do {
             if !runtime.config.onboarding.completed {
                 var config = await runtime.service.getConfig()
@@ -860,6 +866,7 @@ final class SloppyTUIScreen: @preconcurrency Component, @unchecked Sendable {
             )
             pendingContext = nil
             pendingUploads.removeAll()
+            recordUndoPointIfNeeded(undoBaseline)
             await reloadSession()
             petMood = .happy
         } catch {
@@ -904,6 +911,10 @@ final class SloppyTUIScreen: @preconcurrency Component, @unchecked Sendable {
             renderTimeline()
         case "stop":
             await stopCurrentRun()
+        case "undo":
+            await undoLastTurn()
+        case "redo":
+            await redoLastTurn()
         case "btw":
             let message = args.joined(separator: " ").trimmingCharacters(in: .whitespacesAndNewlines)
             guard !message.isEmpty else {
@@ -1062,6 +1073,80 @@ final class SloppyTUIScreen: @preconcurrency Component, @unchecked Sendable {
             failurePrefix: "Stop failed",
             useNotice: false
         )
+    }
+
+    private func makeUndoBaseline() async -> SloppyTUIUndoManager.Baseline? {
+        do {
+            let rootURL = try await runtime.service.resolveProjectWorkspaceRoot(projectID: project.id)
+            return undoManager.makeBaseline(rootURL: rootURL)
+        } catch {
+            return nil
+        }
+    }
+
+    private func recordUndoPointIfNeeded(_ baseline: SloppyTUIUndoManager.Baseline?) {
+        guard let baseline else {
+            return
+        }
+
+        switch undoManager.recordChanges(rootURL: baseline.rootURL, baseline: baseline) {
+        case .recorded:
+            break
+        case .noChanges:
+            break
+        case .skipped(let reason):
+            appendLocalCard(reason, autoDismissAfter: 10)
+        }
+    }
+
+    private func undoLastTurn() async {
+        await applyUndoRedo(direction: .undo)
+    }
+
+    private func redoLastTurn() async {
+        await applyUndoRedo(direction: .redo)
+    }
+
+    private func applyUndoRedo(direction: SloppyTUIUndoManager.ApplyDirection) async {
+        guard !isPosting else {
+            appendLocalCard("A message is in flight. Use `/stop` before changing files with `/undo` or `/redo`.")
+            return
+        }
+
+        do {
+            let rootURL = try await runtime.service.resolveProjectWorkspaceRoot(projectID: project.id)
+            let result: SloppyTUIUndoManager.ApplyResult
+            switch direction {
+            case .undo:
+                result = try undoManager.undo(rootURL: rootURL)
+            case .redo:
+                result = try undoManager.redo(rootURL: rootURL)
+            }
+            appendLocalCard(undoRedoSummary(result), autoDismissAfter: 10)
+            scheduleProjectFileReindex()
+        } catch let error as SloppyTUIUndoManager.Error {
+            appendLocalCard(error.localizedDescription, autoDismissAfter: 8)
+        } catch {
+            appendLocalCard("Could not update files: \(String(describing: error))")
+        }
+    }
+
+    private func undoRedoSummary(_ result: SloppyTUIUndoManager.ApplyResult) -> String {
+        let title: String
+        switch result.direction {
+        case .undo:
+            title = "Undid file changes from the last turn."
+        case .redo:
+            title = "Redid file changes from the last undone turn."
+        }
+
+        let paths = result.paths.prefix(12).map { "- `\($0)`" }.joined(separator: "\n")
+        let remaining = result.paths.count > 12 ? "\n- ...and \(result.paths.count - 12) more" : ""
+        return """
+        \(title)
+
+        \(paths)\(remaining)
+        """
     }
 
     private func interruptCurrentRun(

@@ -181,9 +181,24 @@ public actor HybridMemoryStore: MemoryStore {
             mergedScores[match.id] = max(mergedScores[match.id] ?? 0, weighted)
         }
 
+        let seedVisibilityDate = Date()
+        mergedScores = mergedScores.filter { id, _ in
+            guard let entry = loadEntry(id: id) else {
+                return false
+            }
+            return isRecallVisible(entry, now: seedVisibilityDate)
+        }
+
         let expanded = graphExpand(seedIDs: Array(mergedScores.keys), limit: semanticLimit)
         for id in expanded {
             mergedScores[id] = max(mergedScores[id] ?? 0, retrieval.graphWeight)
+        }
+        let finalVisibilityDate = Date()
+        mergedScores = mergedScores.filter { id, _ in
+            guard let entry = loadEntry(id: id) else {
+                return false
+            }
+            return isRecallVisible(entry, now: finalVisibilityDate)
         }
 
         let sortedIDs = mergedScores
@@ -191,9 +206,13 @@ public actor HybridMemoryStore: MemoryStore {
             .map(\.key)
         let topIDs = Array(sortedIDs.prefix(max(limit, retrieval.topK)))
 
+        let now = Date()
         var hits: [MemoryHit] = []
         for id in topIDs {
             guard let entry = loadEntry(id: id) else {
+                continue
+            }
+            guard isRecallVisible(entry, now: now) else {
                 continue
             }
             if let scope = request.scope,
@@ -329,7 +348,8 @@ public actor HybridMemoryStore: MemoryStore {
 #if canImport(CSQLite3)
         guard let db else { return nil }
         var setClauses: [String] = []
-        if note != nil { setClauses.append("note = ?") }
+        let noteChanged = note != nil
+        if note != nil { setClauses.append("text = ?") }
         if summary != nil { setClauses.append("summary = ?") }
         if kind != nil { setClauses.append("kind = ?") }
         if importance != nil { setClauses.append("importance = ?") }
@@ -339,7 +359,6 @@ public actor HybridMemoryStore: MemoryStore {
         let sql = "UPDATE memory_entries SET \(setClauses.joined(separator: ", ")) WHERE id = ? AND deleted_at IS NULL;"
         var statement: OpaquePointer?
         guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK else { return nil }
-        defer { sqlite3_finalize(statement) }
         var idx: Int32 = 1
         if let note { bindText(note, at: idx, statement: statement); idx += 1 }
         if let summary { bindText(summary, at: idx, statement: statement); idx += 1 }
@@ -350,8 +369,21 @@ public actor HybridMemoryStore: MemoryStore {
         bindText(now, at: idx, statement: statement); idx += 1
         bindText(id, at: idx, statement: statement)
         _ = sqlite3_step(statement)
-        guard sqlite3_changes(db) > 0 else { return nil }
-        return loadEntry(id: id)
+        let changed = sqlite3_changes(db)
+        sqlite3_finalize(statement)
+        guard changed > 0 else { return nil }
+        guard let updated = loadEntry(id: id) else { return nil }
+        upsertFTS(id: updated.id, note: updated.note, summary: updated.summary)
+        await syncProviderUpsert(entry: updated, now: Date())
+        if noteChanged, let embeddingService {
+            do {
+                let vector = try await embeddingService.embed(text: updated.note)
+                persistEmbedding(memoryId: updated.id, vector: vector)
+            } catch {
+                logger.warning("Memory embedding refresh failed for \(updated.id): \(String(describing: error))")
+            }
+        }
+        return updated
 #else
         return nil
 #endif
@@ -364,12 +396,25 @@ public actor HybridMemoryStore: MemoryStore {
         let sql = "UPDATE memory_entries SET deleted_at = ?, updated_at = ? WHERE id = ? AND deleted_at IS NULL;"
         var statement: OpaquePointer?
         guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK else { return false }
-        defer { sqlite3_finalize(statement) }
         bindText(now, at: 1, statement: statement)
         bindText(now, at: 2, statement: statement)
         bindText(id, at: 3, statement: statement)
         _ = sqlite3_step(statement)
-        return sqlite3_changes(db) > 0
+        let changed = sqlite3_changes(db)
+        sqlite3_finalize(statement)
+        guard changed > 0 else { return false }
+        deleteFTS(id: id)
+        deleteEmbedding(memoryId: id)
+        enqueueOutbox(memoryId: id, op: "delete", payload: "{}", now: Date())
+        if let provider {
+            do {
+                try await provider.delete(id: id)
+                deleteOutboxRows(memoryId: id, op: "delete")
+            } catch {
+                logger.warning("Memory provider delete failed for \(id): \(String(describing: error))")
+            }
+        }
+        return true
 #else
         return false
 #endif
@@ -482,17 +527,19 @@ extension HybridMemoryStore {
                 INNER JOIN memory_entries me
                     ON me.id = me2.memory_id
                    AND me.deleted_at IS NULL
+                   AND (me.expires_at IS NULL OR me.expires_at > ?)
                    AND me.scope_type = ?
                    AND me.scope_id = ?
                 """
-            scopeBindings = [scope.type.rawValue, scope.id]
+            scopeBindings = [isoFormatter.string(from: Date()), scope.type.rawValue, scope.id]
         } else {
             scopeJoin = """
                 INNER JOIN memory_entries me
                     ON me.id = me2.memory_id
                    AND me.deleted_at IS NULL
+                   AND (me.expires_at IS NULL OR me.expires_at > ?)
                 """
-            scopeBindings = []
+            scopeBindings = [isoFormatter.string(from: Date())]
         }
 
         let sql = """
@@ -537,6 +584,16 @@ extension HybridMemoryStore {
 // MARK: - Private SQL helpers
 
 private extension HybridMemoryStore {
+    func isRecallVisible(_ entry: MemoryEntry, now: Date) -> Bool {
+        if entry.deletedAt != nil {
+            return false
+        }
+        if let expiresAt = entry.expiresAt, expiresAt < now {
+            return false
+        }
+        return true
+    }
+
 #if canImport(CSQLite3)
     struct KeywordMatch: Sendable {
         var id: String
@@ -549,6 +606,34 @@ private extension HybridMemoryStore {
         var op: String
         var payloadJSON: String
         var attempt: Int
+    }
+
+    func syncProviderUpsert(entry: MemoryEntry, now: Date) async {
+        let document = MemoryProviderDocument(
+            id: entry.id,
+            text: entry.note,
+            summary: entry.summary,
+            kind: entry.kind,
+            memoryClass: entry.memoryClass,
+            scope: entry.scope,
+            source: entry.source,
+            metadata: entry.metadata,
+            createdAt: entry.createdAt
+        )
+
+        if let payload = try? JSONEncoder().encode(document),
+           let payloadString = String(data: payload, encoding: .utf8) {
+            enqueueOutbox(memoryId: entry.id, op: "upsert", payload: payloadString, now: now)
+        }
+
+        if let provider {
+            do {
+                try await provider.upsert(document: document)
+                deleteOutboxRows(memoryId: entry.id, op: "upsert")
+            } catch {
+                logger.warning("Memory provider upsert refresh failed for \(entry.id): \(String(describing: error))")
+            }
+        }
     }
 
     static func applySchema(db: OpaquePointer?) {
@@ -727,12 +812,7 @@ private extension HybridMemoryStore {
             return
         }
 
-        var deleteStatement: OpaquePointer?
-        if sqlite3_prepare_v2(db, "DELETE FROM memory_entries_fts WHERE id = ?;", -1, &deleteStatement, nil) == SQLITE_OK {
-            bindText(id, at: 1, statement: deleteStatement)
-            _ = sqlite3_step(deleteStatement)
-        }
-        sqlite3_finalize(deleteStatement)
+        deleteFTS(id: id)
 
         let insertSQL = "INSERT INTO memory_entries_fts(id, text, summary) VALUES(?, ?, ?);"
         var statement: OpaquePointer?
@@ -745,6 +825,32 @@ private extension HybridMemoryStore {
         bindText(note, at: 2, statement: statement)
         bindOptionalText(summary, at: 3, statement: statement)
         _ = sqlite3_step(statement)
+    }
+
+    func deleteFTS(id: String) {
+        guard let db else {
+            return
+        }
+
+        var statement: OpaquePointer?
+        if sqlite3_prepare_v2(db, "DELETE FROM memory_entries_fts WHERE id = ?;", -1, &statement, nil) == SQLITE_OK {
+            bindText(id, at: 1, statement: statement)
+            _ = sqlite3_step(statement)
+        }
+        sqlite3_finalize(statement)
+    }
+
+    func deleteEmbedding(memoryId: String) {
+        guard let db else {
+            return
+        }
+
+        var statement: OpaquePointer?
+        if sqlite3_prepare_v2(db, "DELETE FROM memory_embeddings WHERE memory_id = ?;", -1, &statement, nil) == SQLITE_OK {
+            bindText(memoryId, at: 1, statement: statement)
+            _ = sqlite3_step(statement)
+        }
+        sqlite3_finalize(statement)
     }
 
     private func floatsToData(_ floats: [Float]) -> Data {
@@ -781,8 +887,12 @@ private extension HybridMemoryStore {
         var seen = Set<String>()
         let uniqueIDs = ids.filter { seen.insert($0).inserted }
 
+        let now = Date()
         return uniqueIDs.compactMap { id in
             guard let entry = loadEntry(id: id) else {
+                return nil
+            }
+            guard isRecallVisible(entry, now: now) else {
                 return nil
             }
             if let scope,

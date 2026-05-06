@@ -16,15 +16,19 @@ func agentChatModeIncludesBuildInPublicContract() throws {
 
     #expect(decoded.mode == .build)
     #expect(AgentChatMode.allCases == [.ask, .build, .plan, .debug])
+    #expect(AgentChatMode.defaultMode == .build)
 }
 
 @Test
 func agentChatModeRuntimeInstructionsMatchModeSemantics() {
+    let defaulted = AgentSessionOrchestrator.runtimeContent("Add the endpoint", mode: nil)
     let ask = AgentSessionOrchestrator.runtimeContent("What changed?", mode: .ask)
     let build = AgentSessionOrchestrator.runtimeContent("Add the endpoint", mode: .build)
     let plan = AgentSessionOrchestrator.runtimeContent("Add the endpoint", mode: .plan)
     let debug = AgentSessionOrchestrator.runtimeContent("Trace the failure", mode: .debug)
 
+    #expect(defaulted.contains("mode: build"))
+    #expect(defaulted.contains("Implement the requested change"))
     #expect(ask.contains("Answer the user's question directly"))
     #expect(ask.contains("Do not edit files"))
     #expect(build.contains("Implement the requested change"))

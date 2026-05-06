@@ -2368,6 +2368,69 @@ func actorBoardEndpointsSyncSystemActorsAndPersistLayout() async throws {
 }
 
 @Test
+func actorBoardPreservesTeamMemberOrder() async throws {
+    let config = CoreConfig.test
+    let service = CoreService(config: config, persistenceBuilder: InMemoryCorePersistenceBuilder())
+    let router = CoreRouter(service: service)
+    let decoder = JSONDecoder()
+    decoder.dateDecodingStrategy = .iso8601
+    let encoder = JSONEncoder()
+    encoder.dateEncodingStrategy = .iso8601
+
+    let boardResponse = await router.handle(method: "GET", path: "/v1/actors/board", body: nil)
+    #expect(boardResponse.status == 200)
+    let board = try decoder.decode(ActorBoardSnapshot.self, from: boardResponse.body)
+
+    let orderedMemberIDs = ["human:manager", "action:developer", "action:reviewer"]
+    let updateRequest = ActorBoardUpdateRequest(
+        nodes: board.nodes + [
+            ActorNode(
+                id: "human:manager",
+                displayName: "Manager",
+                kind: .human,
+                channelId: "channel:manager",
+                role: "Manager"
+            ),
+            ActorNode(
+                id: "action:developer",
+                displayName: "Developer",
+                kind: .action,
+                channelId: "channel:developer",
+                role: "Developer"
+            ),
+            ActorNode(
+                id: "action:reviewer",
+                displayName: "Reviewer",
+                kind: .action,
+                channelId: "channel:reviewer",
+                role: "Reviewer"
+            )
+        ],
+        links: board.links,
+        teams: [
+            ActorTeam(
+                id: "team:ordered",
+                name: "Ordered Team",
+                memberActorIds: orderedMemberIDs
+            )
+        ]
+    )
+
+    let updateBody = try encoder.encode(updateRequest)
+    let updateResponse = await router.handle(method: "PUT", path: "/v1/actors/board", body: updateBody)
+    #expect(updateResponse.status == 200)
+    let updatedBoard = try decoder.decode(ActorBoardSnapshot.self, from: updateResponse.body)
+    let updatedTeam = try #require(updatedBoard.teams.first(where: { $0.id == "team:ordered" }))
+    #expect(updatedTeam.memberActorIds == orderedMemberIDs)
+
+    let persistedResponse = await router.handle(method: "GET", path: "/v1/actors/board", body: nil)
+    #expect(persistedResponse.status == 200)
+    let persistedBoard = try decoder.decode(ActorBoardSnapshot.self, from: persistedResponse.body)
+    let persistedTeam = try #require(persistedBoard.teams.first(where: { $0.id == "team:ordered" }))
+    #expect(persistedTeam.memberActorIds == orderedMemberIDs)
+}
+
+@Test
 func actorRouteEndpointResolvesRecipientsFromLinks() async throws {
     let config = CoreConfig.test
     let service = CoreService(config: config)

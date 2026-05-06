@@ -128,6 +128,55 @@ func nextTeamHandoffDelegateFallsBackToArrayIndex() async throws {
 }
 
 @Test
+func readyTeamTaskStartsWithFirstOrderedTeamMember() async throws {
+    let service = CoreService(config: CoreConfig.test, persistenceBuilder: InMemoryCorePersistenceBuilder())
+    try await createAgents(["sloppy_manager", "serega_swift_dev", "review_bro"], service: service)
+
+    let manager = actorID("sloppy_manager")
+    let developer = actorID("serega_swift_dev")
+    let reviewer = actorID("review_bro")
+    let board = ActorBoardSnapshot(
+        nodes: [
+            node(manager, agent: "sloppy_manager", role: .manager),
+            node(developer, agent: "serega_swift_dev", role: .developer),
+            node(reviewer, agent: "review_bro", role: .reviewer)
+        ],
+        links: [],
+        teams: [
+            ActorTeam(id: "team:ordered", name: "Ordered Team", memberActorIds: [manager, developer, reviewer])
+        ]
+    )
+    _ = try await service.updateActorBoard(request: ActorBoardUpdateRequest(nodes: board.nodes, links: board.links, teams: board.teams))
+
+    let task = ProjectTask(
+        id: "task-ordered",
+        title: "Start with manager",
+        description: "",
+        priority: "medium",
+        status: ProjectTaskStatus.ready.rawValue,
+        teamId: "team:ordered"
+    )
+    let project = ProjectRecord(
+        id: "proj-ordered-\(UUID().uuidString)",
+        name: "Ordered Team Project",
+        description: "",
+        channels: [channel()],
+        tasks: [task],
+        reviewSettings: ProjectReviewSettings(enabled: false)
+    )
+    await saveProject(project, service: service)
+
+    await service.handleTaskBecameReady(projectID: project.id, taskID: task.id)
+
+    let saved = try await service.getProject(id: project.id)
+    let savedTask = try #require(saved.tasks.first(where: { $0.id == task.id }))
+    #expect(savedTask.status == ProjectTaskStatus.inProgress.rawValue)
+    #expect(savedTask.claimedActorId == manager)
+    #expect(savedTask.claimedAgentId == "sloppy_manager")
+    #expect(savedTask.routeHistory.map(\.actorId) == [manager])
+}
+
+@Test
 func handoffLoopBlocksBeforeRevisitingActor() async throws {
     let service = CoreService(config: CoreConfig.test, persistenceBuilder: InMemoryCorePersistenceBuilder())
     try await createAgents(["a", "b"], service: service)

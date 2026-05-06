@@ -1,4 +1,9 @@
+import Foundation
+import AnyLanguageModel
+import Logging
 import Testing
+@testable import AgentRuntime
+@testable import Protocols
 @testable import sloppy
 
 @Suite("ToolRegistry")
@@ -93,6 +98,34 @@ struct ToolRegistryTests {
         #expect(tools.count == catalog.count)
     }
 
+    @Test("Memory recall and search schemas advertise scope arguments")
+    func memoryRecallAndSearchSchemasAdvertiseScopeArguments() throws {
+        let tools = Dictionary(uniqueKeysWithValues: registry.allTools.map { ($0.name, $0) })
+        let recall = try #require(tools["memory.recall"])
+        let search = try #require(tools["memory.search"])
+
+        let recallProperties = try schemaPropertyNames(recall.parameters)
+        let searchProperties = try schemaPropertyNames(search.parameters)
+
+        for key in ["scope", "scope_type", "scope_id"] {
+            #expect(recallProperties.contains(key), "memory.recall missing \(key)")
+            #expect(searchProperties.contains(key), "memory.search missing \(key)")
+        }
+    }
+
+    @Test("Memory save still rejects missing scope")
+    func memorySaveRejectsMissingScope() async {
+        let tool = MemorySaveTool()
+        let result = await tool.invoke(
+            arguments: ["note": .string("remember this without scope")],
+            context: makeMemoryToolContext()
+        )
+
+        #expect(result.ok == false)
+        #expect(result.error?.code == "invalid_arguments")
+        #expect(result.error?.message.contains("Set memory scope") == true)
+    }
+
     @Test("Dynamic MCP tool ids use configured prefix or server default")
     func dynamicMCPToolIDNaming() {
         #expect(
@@ -102,6 +135,49 @@ struct ToolRegistryTests {
         #expect(
             MCPClientRegistry.dynamicToolID(serverID: "fs", toolName: "read_file", prefix: "workspace")
                 == "workspace.read_file"
+        )
+    }
+
+    private func schemaPropertyNames(_ schema: GenerationSchema) throws -> Set<String> {
+        let data = try JSONEncoder().encode(schema)
+        let object = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        let properties: [String: Any]
+        if let inline = object["properties"] as? [String: Any] {
+            properties = inline
+        } else {
+            let ref = try #require(object["$ref"] as? String)
+            let name = ref.replacingOccurrences(of: "#/$defs/", with: "")
+            let defs = try #require(object["$defs"] as? [String: Any])
+            let root = try #require(defs[name] as? [String: Any])
+            properties = try #require(root["properties"] as? [String: Any])
+        }
+        return Set(properties.keys)
+    }
+
+    private func makeMemoryToolContext() -> ToolContext {
+        let tmp = FileManager.default.temporaryDirectory
+        return ToolContext(
+            agentID: "test-agent",
+            sessionID: "test-session",
+            policy: AgentToolsPolicy(),
+            workspaceRootURL: tmp,
+            runtime: RuntimeSystem(),
+            memoryStore: InMemoryMemoryStore(),
+            sessionStore: AgentSessionFileStore(agentsRootURL: tmp),
+            agentCatalogStore: AgentCatalogFileStore(agentsRootURL: tmp),
+            agentSkillsStore: nil,
+            processRegistry: SessionProcessRegistry(),
+            channelSessionStore: ChannelSessionFileStore(workspaceRootURL: tmp),
+            store: InMemoryCorePersistenceBuilder().makeStore(config: CoreConfig.test),
+            searchProviderService: SearchProviderService(config: CoreConfig.default.searchTools),
+            mcpRegistry: MCPClientRegistry(config: CoreConfig.default.mcp),
+            logger: Logger(label: "test"),
+            projectService: nil,
+            configService: nil,
+            skillsService: nil,
+            lspManager: nil,
+            applyAgentMarkdown: nil,
+            delegateSubagent: nil
         )
     }
 }

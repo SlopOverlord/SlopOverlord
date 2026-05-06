@@ -209,7 +209,7 @@ actor AgentSessionOrchestrator {
                 "agent_id": .string(agentID),
                 "session_id": .string(sessionID),
                 "user_id": .string(request.userId),
-                "mode": .string(request.mode?.rawValue ?? AgentChatMode.ask.rawValue),
+                "mode": .string((request.mode ?? AgentChatMode.defaultMode).rawValue),
                 "attachment_count": .stringConvertible(request.attachments.count),
                 "prompt": .string(truncateForLog(content.isEmpty ? "[attachments_only_prompt]" : content))
             ]
@@ -305,7 +305,7 @@ actor AgentSessionOrchestrator {
             content: runtimeContent,
             attachments: attachments
         )
-        let requestMode = request.mode ?? .ask
+        let requestMode = request.mode ?? .defaultMode
         let runtimeOutcome: SessionRuntimeOutcome
         switch agentConfig.runtime.type {
         case .native:
@@ -692,9 +692,9 @@ actor AgentSessionOrchestrator {
 
     static func runtimeContent(_ content: String, mode: AgentChatMode?) -> String {
         let trimmed = content.trimmingCharacters(in: .whitespacesAndNewlines)
-        let resolvedMode = mode ?? .ask
+        let resolvedMode = mode ?? .defaultMode
         let instruction: String
-        switch mode ?? .ask {
+        switch resolvedMode {
         case .ask:
             instruction = "Answer the user's question directly. Do not edit files, run mutating commands, or make code changes unless the authoritative runtime mode is build or debug for this turn."
         case .build:

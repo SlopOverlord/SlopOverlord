@@ -83,7 +83,7 @@ struct SloppyTUIDoubleEscapeDetector {
 
 final class SloppyTUIAutocompleteProvider: AutocompleteProvider {
     private let base: CombinedAutocompleteProvider
-    private static let debugEnabled = ProcessInfo.processInfo.environment["SLOPPY_TUI_AUTOCOMPLETE_DEBUG"] == "1"
+    private static let debugEnabled = true
 
     init(basePath: String) {
         self.base = CombinedAutocompleteProvider(basePath: basePath)

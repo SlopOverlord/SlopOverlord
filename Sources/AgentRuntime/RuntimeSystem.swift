@@ -85,6 +85,7 @@ public actor RuntimeSystem {
     private let compactor: Compactor
     private let visor: Visor
     private let logger: Logger
+    private let preResponseMemoryLimit: Int
     private var modelProvider: (any ModelProvider)?
     private var defaultModel: String?
 
@@ -112,12 +113,14 @@ public actor RuntimeSystem {
         memoryStore: (any MemoryStore)? = nil,
         visorCompletionProvider: (@Sendable (String, Int) async -> String?)? = nil,
         visorStreamingProvider: (@Sendable (String, Int) -> AsyncStream<String>)? = nil,
-        visorBulletinMaxWords: Int = 300
+        visorBulletinMaxWords: Int = 300,
+        preResponseMemoryLimit: Int = 8
     ) {
         let bus = EventBus()
         let memory = memoryStore ?? InMemoryMemoryStore()
         self.eventBus = bus
         self.memoryStore = memory
+        self.preResponseMemoryLimit = max(0, preResponseMemoryLimit)
         self.channels = ChannelRuntime(eventBus: bus)
         self.workers = WorkerRuntime(
             eventBus: bus,
@@ -329,6 +332,10 @@ public actor RuntimeSystem {
             let options = modelProvider.generationOptions(for: activeModel, maxTokens: 1024, reasoningEffort: reasoningEffort)
             let transcriptSize = session.transcript.count
             let streamMode = toolInvoker != nil ? "native_tool_stream" : "respond_stream"
+            let modelUserMessage = await userMessageWithAutoRecalledMemory(
+                channelId: channelId,
+                userMessage: userMessage
+            )
 
             logger.info(
                 "Model stream started",
@@ -336,7 +343,7 @@ public actor RuntimeSystem {
                     channelId: channelId,
                     model: activeModel,
                     reasoningEffort: reasoningEffort,
-                    promptChars: userMessage.count,
+                    promptChars: modelUserMessage.count,
                     mode: streamMode,
                     transcriptEntries: transcriptSize
                 )
@@ -345,7 +352,7 @@ public actor RuntimeSystem {
             let streamStartedAt = Date()
             let streamIdleTimeoutSeconds: Int = 120
 
-            let responseStream = session.streamResponse(to: userMessage, options: options)
+            let responseStream = session.streamResponse(to: modelUserMessage, options: options)
             do {
                 try await withThrowingTaskGroup(of: Void.self) { group in
                     group.addTask {
@@ -381,7 +388,7 @@ public actor RuntimeSystem {
                         channelId: channelId,
                         model: activeModel,
                         reasoningEffort: reasoningEffort,
-                        promptChars: userMessage.count,
+                        promptChars: modelUserMessage.count,
                         mode: streamMode,
                         durationMs: elapsedMilliseconds(since: streamStartedAt),
                         outputChars: content.count,
@@ -409,7 +416,7 @@ public actor RuntimeSystem {
                         channelId: channelId,
                         model: activeModel,
                         reasoningEffort: reasoningEffort,
-                        promptChars: userMessage.count,
+                        promptChars: modelUserMessage.count,
                         mode: "non_streaming_fallback"
                     )
                 )
@@ -439,7 +446,7 @@ public actor RuntimeSystem {
                             toolCallHandler: observingHandler
                         )
                     }
-                    let fallbackResponse = try await freshSession.respond(to: userMessage, options: options)
+                    let fallbackResponse = try await freshSession.respond(to: modelUserMessage, options: options)
                     let fallbackContent = fallbackResponse.content
                     logger.info(
                         "Non-streaming fallback succeeded",
@@ -447,7 +454,7 @@ public actor RuntimeSystem {
                             channelId: channelId,
                             model: activeModel,
                             reasoningEffort: reasoningEffort,
-                            promptChars: userMessage.count,
+                            promptChars: modelUserMessage.count,
                             mode: "non_streaming_fallback",
                             durationMs: elapsedMilliseconds(since: streamStartedAt),
                             outputChars: fallbackContent.count
@@ -465,7 +472,7 @@ public actor RuntimeSystem {
                             channelId: channelId,
                             model: activeModel,
                             reasoningEffort: reasoningEffort,
-                            promptChars: userMessage.count,
+                            promptChars: modelUserMessage.count,
                             mode: "non_streaming_fallback",
                             error: String(describing: error)
                         )
@@ -482,14 +489,14 @@ public actor RuntimeSystem {
                             channelId: channelId,
                             model: activeModel,
                             reasoningEffort: reasoningEffort,
-                            promptChars: userMessage.count,
+                            promptChars: modelUserMessage.count,
                             mode: streamMode,
                             error: String(describing: error)
                         )
                     )
                     let recovered = await respondAfterContextReset(
                         channelId: channelId,
-                        userMessage: userMessage,
+                        userMessage: modelUserMessage,
                         activeModel: activeModel,
                         modelProvider: modelProvider,
                         reasoningEffort: reasoningEffort,
@@ -508,7 +515,7 @@ public actor RuntimeSystem {
                         channelId: channelId,
                         model: activeModel,
                         reasoningEffort: reasoningEffort,
-                        promptChars: userMessage.count,
+                        promptChars: modelUserMessage.count,
                         mode: streamMode,
                         durationMs: elapsedMilliseconds(since: streamStartedAt),
                         outputChars: latest.count,
@@ -526,7 +533,7 @@ public actor RuntimeSystem {
                         channelId: channelId,
                         model: activeModel,
                         reasoningEffort: reasoningEffort,
-                        promptChars: userMessage.count,
+                        promptChars: modelUserMessage.count,
                         mode: streamMode,
                         durationMs: elapsedMilliseconds(since: streamStartedAt),
                         outputChars: latest.count,
@@ -547,7 +554,7 @@ public actor RuntimeSystem {
                         channelId: channelId,
                         model: activeModel,
                         reasoningEffort: reasoningEffort,
-                        promptChars: userMessage.count,
+                        promptChars: modelUserMessage.count,
                         mode: streamMode,
                         durationMs: elapsedMilliseconds(since: streamStartedAt),
                         outputChars: latest.count,
@@ -568,7 +575,7 @@ public actor RuntimeSystem {
                     channelId: channelId,
                     model: activeModel,
                     reasoningEffort: reasoningEffort,
-                    promptChars: userMessage.count,
+                    promptChars: modelUserMessage.count,
                     mode: streamMode,
                     durationMs: elapsedMilliseconds(since: streamStartedAt),
                     outputChars: latest.count,
@@ -595,12 +602,12 @@ public actor RuntimeSystem {
                         channelId: channelId,
                         model: activeModel,
                         reasoningEffort: reasoningEffort,
-                        promptChars: userMessage.count,
+                        promptChars: modelUserMessage.count,
                         mode: "respond_complete"
                     )
                 )
                 do {
-                    let response = try await session.respond(to: userMessage, options: options)
+                    let response = try await session.respond(to: modelUserMessage, options: options)
                     latest = response.content
                 } catch {
                     logger.warning(
@@ -609,7 +616,7 @@ public actor RuntimeSystem {
                             channelId: channelId,
                             model: activeModel,
                             reasoningEffort: reasoningEffort,
-                            promptChars: userMessage.count,
+                            promptChars: modelUserMessage.count,
                             mode: "respond_complete",
                             durationMs: elapsedMilliseconds(since: completionStartedAt),
                             error: String(describing: error)
@@ -623,7 +630,7 @@ public actor RuntimeSystem {
                         channelId: channelId,
                         model: activeModel,
                         reasoningEffort: reasoningEffort,
-                        promptChars: userMessage.count,
+                        promptChars: modelUserMessage.count,
                         mode: "respond_complete",
                         durationMs: elapsedMilliseconds(since: completionStartedAt),
                         outputChars: latest.count
@@ -642,7 +649,7 @@ public actor RuntimeSystem {
                         channelId: channelId,
                         model: activeModel,
                         reasoningEffort: reasoningEffort,
-                        promptChars: userMessage.count,
+                        promptChars: modelUserMessage.count,
                         mode: "respond_empty_fallback"
                     )
                 )
@@ -663,6 +670,73 @@ public actor RuntimeSystem {
                 content: text
             )
         }
+    }
+
+    private func userMessageWithAutoRecalledMemory(channelId: String, userMessage: String) async -> String {
+        guard preResponseMemoryLimit > 0,
+              Self.isAgentSessionChannel(channelId),
+              !userMessage.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        else {
+            return userMessage
+        }
+
+        let hits = await memoryStore.recall(
+            request: MemoryRecallRequest(
+                query: userMessage,
+                limit: preResponseMemoryLimit,
+                scope: .channel(channelId)
+            )
+        )
+        guard !hits.isEmpty else {
+            return userMessage
+        }
+
+        let maxBlockCharacters = 6_000
+        var lines = [
+            "[Recalled scoped memory]",
+            "Relevant memories from this agent session. Use them as background context; ignore anything irrelevant.",
+        ]
+
+        for hit in hits.prefix(preResponseMemoryLimit) {
+            let score = String(format: "%.2f", hit.ref.score)
+            let kind = hit.ref.kind?.rawValue ?? "unknown"
+            let memoryClass = hit.ref.memoryClass?.rawValue ?? "unknown"
+            let content = compactMemoryContent(summary: hit.summary, note: hit.note, maxCharacters: 500)
+            let line = "- id: \(hit.ref.id) | score: \(score) | kind: \(kind) | class: \(memoryClass) | \(content)"
+            let candidateLength = lines.joined(separator: "\n").count + line.count + 1
+            guard candidateLength <= maxBlockCharacters else {
+                break
+            }
+            lines.append(line)
+        }
+
+        guard lines.count > 2 else {
+            return userMessage
+        }
+
+        return """
+        \(lines.joined(separator: "\n"))
+
+        [Current user message]
+        \(userMessage)
+        """
+    }
+
+    private static func isAgentSessionChannel(_ channelId: String) -> Bool {
+        channelId.hasPrefix("agent:") && channelId.contains(":session:")
+    }
+
+    private func compactMemoryContent(summary: String?, note: String, maxCharacters: Int) -> String {
+        let trimmedSummary = summary?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let source = trimmedSummary.isEmpty ? note : trimmedSummary
+        let normalized = source
+            .replacingOccurrences(of: "\n", with: " ")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard normalized.count > maxCharacters else {
+            return normalized
+        }
+        let index = normalized.index(normalized.startIndex, offsetBy: maxCharacters)
+        return String(normalized[..<index]) + "..."
     }
 
     private func filteredModelTools(

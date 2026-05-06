@@ -1075,7 +1075,7 @@ export function ActorsView() {
     const payload = {
       id: editingTeamId || `team:${slugify(name) || Date.now()}`,
       name,
-      memberActorIds: Array.from(new Set(teamMembers)).sort(),
+      memberActorIds: Array.from(new Set(teamMembers)),
       createdAt: new Date().toISOString()
     };
 

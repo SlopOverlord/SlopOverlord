@@ -3274,6 +3274,8 @@ public enum AgentChatMode: String, Codable, Sendable, Equatable, CaseIterable {
     case build
     case plan
     case debug
+
+    public static let defaultMode: AgentChatMode = .build
 }
 
 public struct AgentSessionPostMessageRequest: Codable, Sendable {

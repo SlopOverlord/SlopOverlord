@@ -63,6 +63,126 @@ import Testing
     #expect(hits.first?.note.contains("swift") == true)
 }
 
+@Test func recallDoesNotReturnSoftDeletedKeywordMatch() async throws {
+    let store = HybridMemoryStore(config: CoreConfig.test)
+    let ref = await store.save(
+        entry: MemoryWriteRequest(
+            note: "soft deleted keyword alpha-unique-memory",
+            scope: .default
+        )
+    )
+
+    let beforeDelete = await store.recall(
+        request: MemoryRecallRequest(query: "alpha-unique-memory", limit: 5)
+    )
+    #expect(beforeDelete.contains { $0.ref.id == ref.id })
+
+    let deleted = await store.softDelete(id: ref.id)
+    #expect(deleted == true)
+
+    let afterDelete = await store.recall(
+        request: MemoryRecallRequest(query: "alpha-unique-memory", limit: 5)
+    )
+    #expect(!afterDelete.contains { $0.ref.id == ref.id })
+}
+
+@Test func recallDoesNotReturnExpiredEntry() async throws {
+    let store = HybridMemoryStore(config: CoreConfig.test)
+    let ref = await store.save(
+        entry: MemoryWriteRequest(
+            note: "expired keyword beta-unique-memory",
+            scope: .default,
+            expiresAt: Date().addingTimeInterval(-60)
+        )
+    )
+
+    let hits = await store.recall(
+        request: MemoryRecallRequest(query: "beta-unique-memory", limit: 5)
+    )
+
+    #expect(!hits.contains { $0.ref.id == ref.id })
+}
+
+@Test func graphExpansionDoesNotReturnSoftDeletedNeighbor() async throws {
+    let store = HybridMemoryStore(config: CoreConfig.test)
+    let seed = await store.save(
+        entry: MemoryWriteRequest(
+            note: "graph seed gamma-unique-memory",
+            scope: .default
+        )
+    )
+    let neighbor = await store.save(
+        entry: MemoryWriteRequest(
+            note: "deleted graph neighbor delta-unique-memory",
+            scope: .default
+        )
+    )
+    _ = await store.link(
+        MemoryEdgeWriteRequest(
+            fromMemoryId: seed.id,
+            toMemoryId: neighbor.id,
+            relation: .about
+        )
+    )
+    _ = await store.softDelete(id: neighbor.id)
+
+    let hits = await store.recall(
+        request: MemoryRecallRequest(query: "gamma-unique-memory", limit: 5)
+    )
+
+    #expect(hits.contains { $0.ref.id == seed.id })
+    #expect(!hits.contains { $0.ref.id == neighbor.id })
+}
+
+@Test func cosineMatchesExcludeSoftDeletedEmbeddings() async throws {
+    let store = HybridMemoryStore(config: CoreConfig.test)
+    let ref = await store.save(
+        entry: MemoryWriteRequest(
+            note: "vector deleted epsilon-unique-memory",
+            scope: .default
+        )
+    )
+    await store.persistEmbedding(memoryId: ref.id, vector: [1, 0, 0])
+
+    let beforeDelete = await store.queryCosineMatches(queryVector: [1, 0, 0], limit: 5, scope: nil)
+    #expect(beforeDelete.contains { $0.0 == ref.id })
+
+    _ = await store.softDelete(id: ref.id)
+
+    let afterDelete = await store.queryCosineMatches(queryVector: [1, 0, 0], limit: 5, scope: nil)
+    #expect(!afterDelete.contains { $0.0 == ref.id })
+}
+
+@Test func updateEntryRefreshesKeywordIndex() async throws {
+    let store = HybridMemoryStore(config: CoreConfig.test)
+    let ref = await store.save(
+        entry: MemoryWriteRequest(
+            note: "obsoletezeta",
+            scope: .default
+        )
+    )
+
+    let updated = await store.updateEntry(
+        id: ref.id,
+        note: "freshomega",
+        summary: "fresh omega summary",
+        kind: nil,
+        importance: nil,
+        confidence: nil
+    )
+    #expect(updated?.id == ref.id)
+
+    let oldHits = await store.recall(
+        request: MemoryRecallRequest(query: "obsoletezeta", limit: 5)
+    )
+    let newHits = await store.recall(
+        request: MemoryRecallRequest(query: "freshomega", limit: 5)
+    )
+
+    #expect(!oldHits.contains { $0.ref.id == ref.id })
+    #expect(newHits.contains { $0.ref.id == ref.id })
+}
+
 @Test func cosineRecallBooststSimilarVector() async throws {
     let config = CoreConfig.test
     let store = HybridMemoryStore(config: config)

@@ -156,9 +156,7 @@ final class ActorBoardFileStore {
             }
 
             let teamName = normalizedDisplayName(rawTeam.name, fallback: teamID)
-            let memberActorIDs = Array(
-                Set(rawTeam.memberActorIds.map(normalizedIdentifier).filter { nodeIDs.contains($0) })
-            ).sorted()
+            let memberActorIDs = orderedMemberActorIDs(rawTeam.memberActorIds, validNodeIDs: nodeIDs)
 
             var team = rawTeam
             team.id = teamID
@@ -257,7 +255,7 @@ final class ActorBoardFileStore {
             ActorTeam(
                 id: team.id,
                 name: team.name,
-                memberActorIds: team.memberActorIds.filter { allNodeIDs.contains($0) }.sorted(),
+                memberActorIds: orderedMemberActorIDs(team.memberActorIds, validNodeIDs: allNodeIDs),
                 createdAt: team.createdAt
             )
         }
@@ -336,6 +334,21 @@ final class ActorBoardFileStore {
     private func normalizedDisplayName(_ raw: String, fallback: String) -> String {
         let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         return trimmed.isEmpty ? fallback : trimmed
+    }
+
+    private func orderedMemberActorIDs(_ rawIDs: [String], validNodeIDs: Set<String>) -> [String] {
+        var seen = Set<String>()
+        var orderedIDs: [String] = []
+
+        for rawID in rawIDs {
+            let actorID = normalizedIdentifier(rawID)
+            guard validNodeIDs.contains(actorID), seen.insert(actorID).inserted else {
+                continue
+            }
+            orderedIDs.append(actorID)
+        }
+
+        return orderedIDs
     }
 
     private func normalizedOptionalValue(_ raw: String?) -> String? {
