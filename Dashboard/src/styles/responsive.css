@@ -251,6 +251,10 @@
     gap: 12px;
   }
 
+  .providers-cli-grid {
+    grid-template-columns: 1fr;
+  }
+
   .provider-list-icon {
     width: 44px;
     height: 44px;

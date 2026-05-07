@@ -107,6 +107,7 @@ extension EmbeddingService {
 
         let openAIConfigs = config.models.filter {
             CoreModelProviderFactory.resolvedIdentifier(for: $0)?.hasPrefix("openai:") == true
+                && !isOpenAIOAuthEntry($0)
         }
         let preferredOpenAI = openAIConfigs.first {
             !$0.apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
@@ -147,5 +148,14 @@ extension EmbeddingService {
             apiKey: apiKey,
             logger: logger
         )
+    }
+
+    private static func isOpenAIOAuthEntry(_ model: CoreConfig.ModelConfig) -> Bool {
+        let catalog = model.providerCatalogId?.trimmingCharacters(in: .whitespacesAndNewlines)
+        if catalog == "openai-oauth" {
+            return true
+        }
+        let title = model.title.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        return title.contains("oauth") || title.contains("deeplink")
     }
 }

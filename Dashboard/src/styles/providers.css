@@ -121,6 +121,87 @@
   margin: 0 4px 12px;
 }
 
+.providers-cli-auth-block {
+  max-width: 860px;
+  display: grid;
+  gap: 10px;
+}
+
+.providers-cli-auth-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.providers-cli-auth-head h4 {
+  margin: 0;
+  font-size: 1.05rem;
+}
+
+.providers-cli-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.providers-cli-card {
+  display: grid;
+  grid-template-columns: 34px minmax(0, 1fr);
+  gap: 10px;
+  align-items: start;
+  min-width: 0;
+  border: 1px solid var(--line);
+  border-radius: 0;
+  background: var(--surface-2);
+  color: var(--text);
+  padding: 12px;
+  text-align: left;
+}
+
+.providers-cli-card:hover {
+  border-color: var(--line-strong);
+  background: var(--surface-3);
+}
+
+.providers-cli-card-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  border: 1px solid var(--line);
+  color: var(--muted);
+}
+
+.providers-cli-card-main {
+  min-width: 0;
+  display: grid;
+  gap: 5px;
+}
+
+.providers-cli-card-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  font-weight: 700;
+}
+
+.providers-cli-card code,
+.provider-cli-command {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  color: var(--accent);
+  font-family: "Fira Code", "JetBrains Mono", monospace;
+  font-size: 0.82rem;
+}
+
+.providers-cli-card-main > span:last-child {
+  color: var(--muted);
+  font-size: 0.82rem;
+  line-height: 1.35;
+}
+
 .providers-presets-grid {
   grid-template-columns: 1fr;
 }
@@ -329,6 +410,15 @@
   border: 1px solid;
 }
 
+.providers-cli-card .provider-state {
+  display: inline-flex;
+  align-items: center;
+  flex: none;
+  font-size: 0.72rem;
+  padding: 2px 6px;
+  border: 1px solid;
+}
+
 .provider-model-line {
   font-size: 0.94rem;
   color: #c5cbda;
@@ -432,6 +522,25 @@
   display: flex;
   gap: 8px;
   flex-wrap: wrap;
+}
+
+.provider-cli-auth-panel {
+  display: grid;
+  gap: 8px;
+  border: 1px solid var(--line);
+  background: var(--surface-2);
+  padding: 12px;
+}
+
+.provider-cli-auth-panel-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.provider-cli-auth-panel-head .material-symbols-rounded {
+  color: var(--muted);
+  font-size: 1.2rem;
 }
 
 .provider-modal-probe-row {

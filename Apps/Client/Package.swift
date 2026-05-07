@@ -119,6 +119,11 @@ let package = Package(
             name: "SloppyClientCoreTests",
             dependencies: ["SloppyClientCore"],
             path: "Tests/SloppyClientCoreTests"
+        ),
+        .testTarget(
+            name: "SloppyFeatureChatTests",
+            dependencies: ["SloppyClientCore", "SloppyFeatureChat"],
+            path: "Tests/SloppyFeatureChatTests"
         )
     ]
 )

@@ -30,6 +30,24 @@ struct SloppyTUILocalCard {
     var block: SloppyTUITimelineBlock
 }
 
+enum SloppyTUIWelcomeVisibility {
+    static func shouldRender(
+        welcomeDismissed: Bool,
+        hasSessionCards: Bool,
+        hasLiveAssistantDraft: Bool,
+        hasQueuedMessages: Bool,
+        hasLocalCards: Bool,
+        hasTransientNotice: Bool
+    ) -> Bool {
+        !welcomeDismissed
+            && !hasSessionCards
+            && !hasLiveAssistantDraft
+            && !hasQueuedMessages
+            && !hasLocalCards
+            && !hasTransientNotice
+    }
+}
+
 struct SloppyTUISubSessionCard: Equatable {
     var childSessionId: String
     var title: String
@@ -38,6 +56,7 @@ struct SloppyTUISubSessionCard: Equatable {
 enum SloppyTUITimelineBlock {
     case message(role: AgentMessageRole, text: String)
     case local(String)
+    case queuedMessage(SloppyTUIQueuedMessage)
     case error(String)
     case thinking(String)
     case attachment(name: String, mimeType: String, sizeBytes: Int)
@@ -50,6 +69,8 @@ enum SloppyTUITimelineBlock {
         switch self {
         case .message(_, let text), .local(let text), .error(let text):
             return text
+        case .queuedMessage(let message):
+            return "Queued message\n\(message.displayText)"
         case .thinking(let text):
             return text
         case .attachment(let name, let mimeType, _):

@@ -70,6 +70,13 @@ final class GeminiOAuthURLProtocol: URLProtocol {
             .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         mutable.setValue(nil, forHTTPHeaderField: "x-goog-api-key")
         mutable.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        let userProject = ProcessInfo.processInfo.environment["GOOGLE_CLOUD_PROJECT"]?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            ?? ProcessInfo.processInfo.environment["GOOGLE_CLOUD_PROJECT_ID"]?
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+        if let userProject, !userProject.isEmpty {
+            mutable.setValue(userProject, forHTTPHeaderField: "x-goog-user-project")
+        }
         return mutable
     }
 }

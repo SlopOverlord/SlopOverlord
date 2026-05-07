@@ -11,17 +11,28 @@ struct OpenAIModelProviderFactory: ModelProviderFactory {
         let primaryConfig = config.coreConfig.models.first {
             CoreModelProviderFactory.resolvedIdentifier(for: $0)?.hasPrefix("openai:") == true
         }
+        let primaryIsOAuth = primaryConfig.map(isOpenAIOAuthEntry) ?? false
 
         let apiKey = ProcessInfo.processInfo.environment["OPENAI_API_KEY"] ?? ""
         let configuredKey = (primaryConfig?.apiKey ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-        let resolvedStaticKey = configuredKey.isEmpty ? apiKey : configuredKey
+        let resolvedStaticKey = primaryIsOAuth ? "" : (configuredKey.isEmpty ? apiKey : configuredKey)
 
         let parsedPrimaryURL = CoreModelProviderFactory.parseURL(primaryConfig?.apiUrl)
         let allowKeylessLAN = parsedPrimaryURL.map { OpenAICompatibleCatalogEndpoint.hostAllowsKeylessOpenAIProbe(host: $0.host) } ?? false
 
         let keyProvider: (@Sendable () -> String)?
         let isOAuth: Bool
-        if !resolvedStaticKey.isEmpty {
+        if primaryIsOAuth {
+            if let oauthProvider = config.oauthTokenProvider, oauthProvider() != nil {
+                keyProvider = { config.oauthTokenProvider?() ?? "" }
+                isOAuth = true
+            } else if !configuredKey.isEmpty {
+                keyProvider = { configuredKey }
+                isOAuth = true
+            } else {
+                return nil
+            }
+        } else if !resolvedStaticKey.isEmpty {
             keyProvider = { resolvedStaticKey }
             isOAuth = false
         } else if allowKeylessLAN {
@@ -38,6 +49,7 @@ struct OpenAIModelProviderFactory: ModelProviderFactory {
 
         let resolvedAccountId = isOAuth ? config.oauthAccountId : nil
         let resolvedRefresh = isOAuth ? config.oauthTokenRefresh : nil
+        let resolvedForceRefresh = isOAuth ? config.oauthTokenForceRefresh : nil
 
         let baseURL = CoreModelProviderFactory.parseURL(primaryConfig?.apiUrl)
             ?? OpenAILanguageModel.defaultBaseURL
@@ -47,6 +59,7 @@ struct OpenAIModelProviderFactory: ModelProviderFactory {
             baseURL: baseURL,
             accountId: resolvedAccountId,
             refreshTokenIfNeeded: resolvedRefresh,
+            refreshTokenAfterInvalidToken: resolvedForceRefresh,
             session: config.proxySession
         )
 
@@ -56,5 +69,14 @@ struct OpenAIModelProviderFactory: ModelProviderFactory {
             tools: config.tools,
             systemInstructions: config.systemInstructions
         )
+    }
+
+    private func isOpenAIOAuthEntry(_ model: CoreConfig.ModelConfig) -> Bool {
+        let catalog = model.providerCatalogId?.trimmingCharacters(in: .whitespacesAndNewlines)
+        if catalog == "openai-oauth" {
+            return true
+        }
+        let title = model.title.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        return title.contains("oauth") || title.contains("deeplink")
     }
 }

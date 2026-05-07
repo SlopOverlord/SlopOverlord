@@ -19,6 +19,8 @@ enum SloppyTUITheme {
     private static let toolBackground = AnsiStyling.Background.rgb(31, 41, 55)
     private static let thinkingBackground = AnsiStyling.Background.rgb(38, 38, 38)
     private static let attachmentBackground = AnsiStyling.Background.rgb(32, 45, 42)
+    private static let blockHorizontalPadding = 2
+    private static let blockVerticalPadding = 1
     private static let waitingFrames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
     private static let thinkingWords = [
         "thinking",
@@ -153,7 +155,7 @@ enum SloppyTUITheme {
         tipOffset: Int = 0,
         includeFooter: Bool = true
     ) -> [String] {
-        let contentWidth = max(1, min(max(1, width - 4), 112))
+        let contentWidth = welcomeContentWidth(for: width)
         let left = max(0, (width - contentWidth) / 2)
         let indent = String(repeating: " ", count: left)
         var lines: [String] = []
@@ -173,6 +175,10 @@ enum SloppyTUITheme {
         }
         lines.append("")
         return lines
+    }
+
+    private static func welcomeContentWidth(for width: Int) -> Int {
+        max(1, min(max(1, width - 4), 64))
     }
 
     static func composerMetaLine(width: Int, mode: AgentChatMode, model: String, agent: String, provider: String) -> String {
@@ -281,7 +287,8 @@ enum SloppyTUITheme {
     }
 
     static func userMessageLines(_ text: String, width: Int) -> [String] {
-        let contentWidth = max(1, width - 4)
+        let prefixWidth = VisibleWidth.measure("› ")
+        let contentWidth = paddedBlockContentWidth(width: width, prefixWidth: prefixWidth)
         let rawLines = text
             .trimmingCharacters(in: .whitespacesAndNewlines)
             .split(separator: "\n", omittingEmptySubsequences: false)
@@ -290,18 +297,45 @@ enum SloppyTUITheme {
             }
 
         let lines = rawLines.isEmpty ? [""] : rawLines
-        return lines.enumerated().map { index, line in
+        let contentLines = lines.enumerated().map { index, line in
             let prefix = index == 0 ? "› " : "  "
             return applyBackground(
-                " " + muted(prefix) + highlightedFileReferences(in: line),
+                blockLeftPadding + muted(prefix) + highlightedFileReferences(in: line),
                 width: width,
                 background: userMessageBackground
             )
         }
+        return paddedBackgroundBlock(contentLines, width: width, background: userMessageBackground)
+    }
+
+    static func queuedMessageLines(_ message: SloppyTUIQueuedMessage, width: Int) -> [String] {
+        let attachmentSuffix = message.uploads.isEmpty ? "" : " · attachments: \(message.uploads.count)"
+        let contextSuffix = message.context == nil ? "" : " · context"
+        let header = "queued · ctrl+b cancels" + attachmentSuffix + contextSuffix
+        let prefixWidth = VisibleWidth.measure("⏳ ")
+        let contentWidth = paddedBlockContentWidth(width: width, prefixWidth: prefixWidth)
+        let rawLines = message.displayText
+            .split(separator: "\n", omittingEmptySubsequences: false)
+            .flatMap { line in
+                AnsiWrapping.wrapText(String(line), width: contentWidth)
+            }
+        let bodyLines = rawLines.isEmpty ? [""] : rawLines
+        let lines = [header] + bodyLines
+        let contentLines = lines.enumerated().map { index, line in
+            let prefix = index == 0 ? "⏳ " : "  "
+            let styled = index == 0 ? muted(line) : highlightedFileReferences(in: line)
+            return applyBackground(
+                blockLeftPadding + muted(prefix) + styled,
+                width: width,
+                background: userMessageBackground
+            )
+        }
+        return paddedBackgroundBlock(contentLines, width: width, background: userMessageBackground)
     }
 
     static func thinkingLines(_ text: String, width: Int) -> [String] {
-        let contentWidth = max(1, width - 6)
+        let prefixWidth = VisibleWidth.measure("thought ")
+        let contentWidth = paddedBlockContentWidth(width: width, prefixWidth: prefixWidth)
         let rawLines = text
             .trimmingCharacters(in: .whitespacesAndNewlines)
             .split(separator: "\n", omittingEmptySubsequences: false)
@@ -309,14 +343,15 @@ enum SloppyTUITheme {
                 AnsiWrapping.wrapText(String(line), width: contentWidth)
             }
         let lines = rawLines.isEmpty ? [""] : rawLines
-        return lines.enumerated().map { index, line in
+        let contentLines = lines.enumerated().map { index, line in
             let prefix = index == 0 ? "thought " : "        "
             return applyBackground(
-                " " + muted(prefix) + foreground(line),
+                blockLeftPadding + muted(prefix) + foreground(line),
                 width: width,
                 background: thinkingBackground
             )
         }
+        return paddedBackgroundBlock(contentLines, width: width, background: thinkingBackground)
     }
 
     static func toolCallLine(tool: String, reason: String?, summary: String?, width: Int) -> String {
@@ -324,7 +359,7 @@ enum SloppyTUITheme {
         let args = summaryText?.isEmpty == false ? muted(" · \(summaryText!)") : ""
         let suffix = reason?.trimmingCharacters(in: .whitespacesAndNewlines)
         let reasonText = suffix?.isEmpty == false ? muted(" · \(suffix!)") : ""
-        let line = fittedLine(" " + blue("tool") + foreground(" \(tool)") + args + reasonText, width: width)
+        let line = fittedPaddedBlockLine(blue("tool") + foreground(" \(tool)") + args + reasonText, width: width)
         return applyBackground(padded(line, width: width), width: width, background: toolBackground)
     }
 
@@ -333,20 +368,24 @@ enum SloppyTUITheme {
         let duration = durationMs.map { muted(" · \($0)ms") } ?? ""
         let errorText = error?.trimmingCharacters(in: .whitespacesAndNewlines)
         let suffix = errorText?.isEmpty == false ? muted(" · \(errorText!)") : ""
-        let line = fittedLine(" " + status + foreground(" \(tool)") + duration + suffix, width: width)
+        let line = fittedPaddedBlockLine(status + foreground(" \(tool)") + duration + suffix, width: width)
         return applyBackground(padded(line, width: width), width: width, background: toolBackground)
     }
 
     static func toolOverflowLine(hiddenCount: Int, width: Int) -> String {
         let suffix = hiddenCount == 1 ? "1 tool event" : "\(hiddenCount) tool events"
-        let line = fittedLine(" " + muted("... +\(suffix) (ctrl+o to expand)"), width: width)
+        let line = fittedPaddedBlockLine(muted("... +\(suffix) (ctrl+o to expand)"), width: width)
         return applyBackground(padded(line, width: width), width: width, background: toolBackground)
+    }
+
+    static func toolPaddingLine(width: Int) -> String {
+        backgroundPaddingLine(width: width, background: toolBackground)
     }
 
     static func subSessionLine(title: String, childSessionId: String, width: Int) -> String {
         let line = fittedLine(
-            " " + green("subagent") + foreground(" \(title)") + muted(" · \(shortID(childSessionId)) · ctrl+o, then ctrl+right to enter"),
-            width: width
+            blockLeftPadding + green("subagent") + foreground(" \(title)") + muted(" · \(shortID(childSessionId)) · ctrl+o, then ctrl+right to enter"),
+            width: paddedBlockLineWidth(width)
         )
         return applyBackground(padded(line, width: width), width: width, background: toolBackground)
     }
@@ -360,7 +399,7 @@ enum SloppyTUITheme {
 
     static func attachmentLine(name: String, mimeType: String, sizeBytes: Int, width: Int) -> String {
         let size = formattedBytes(sizeBytes)
-        let line = fittedLine(" " + green("attached") + foreground(" ") + yellow(name) + muted("  \(mimeType), \(size)"), width: width)
+        let line = fittedPaddedBlockLine(green("attached") + foreground(" ") + yellow(name) + muted("  \(mimeType), \(size)"), width: width)
         return applyBackground(padded(line, width: width), width: width, background: attachmentBackground)
     }
 
@@ -649,7 +688,7 @@ enum SloppyTUITheme {
                 "Use /btw for a side question without disturbing the main task.",
                 "Use /diff or /context diff when you want the agent to inspect local changes.",
             ]
-        let count = min(tips.count, compact ? 3 : 4)
+        let count = min(tips.count, 1)
         let start = tips.isEmpty ? 0 : ((offset % tips.count) + tips.count) % tips.count
         let visibleTips = (0..<count).map { tips[(start + $0) % tips.count] }
         return visibleTips.map { tip in
@@ -677,6 +716,35 @@ enum SloppyTUITheme {
 
     private static func applyBackground(_ line: String, width: Int, background: AnsiStyling.Background) -> String {
         AnsiWrapping.applyBackgroundToLine(line, width: width, background: background) + resetBackground
+    }
+
+    private static var blockLeftPadding: String {
+        String(repeating: " ", count: blockHorizontalPadding)
+    }
+
+    private static func paddedBlockContentWidth(width: Int, prefixWidth: Int) -> Int {
+        max(1, width - (blockHorizontalPadding * 2) - prefixWidth)
+    }
+
+    private static func paddedBlockLineWidth(_ width: Int) -> Int {
+        max(1, width - blockHorizontalPadding)
+    }
+
+    private static func fittedPaddedBlockLine(_ line: String, width: Int) -> String {
+        fittedLine(blockLeftPadding + line, width: paddedBlockLineWidth(width))
+    }
+
+    private static func paddedBackgroundBlock(
+        _ lines: [String],
+        width: Int,
+        background: AnsiStyling.Background
+    ) -> [String] {
+        let padding = Array(repeating: backgroundPaddingLine(width: width, background: background), count: blockVerticalPadding)
+        return padding + lines + padding
+    }
+
+    private static func backgroundPaddingLine(width: Int, background: AnsiStyling.Background) -> String {
+        applyBackground(padded("", width: width), width: width, background: background)
     }
 
     private static func selectedLine(_ line: String) -> String {

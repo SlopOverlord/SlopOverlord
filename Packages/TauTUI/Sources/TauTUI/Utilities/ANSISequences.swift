@@ -6,6 +6,7 @@ public enum ANSI {
     public static let syncEnd = "\u{001B}[?2026l"
 
     // Clearing helpers
+    public static let resetStyle = "\u{001B}[0m"
     public static let clearToScreenEnd = "\u{001B}[J"
     public static let clearLine = "\u{001B}[2K"
     public static let clearScreen = "\u{001B}[2J\u{001B}[H"

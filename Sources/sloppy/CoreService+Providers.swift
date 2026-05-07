@@ -137,6 +137,7 @@ extension CoreService {
             oauthTokenProvider: { oauthService.currentAccessToken() },
             oauthAccountId: oauthService.currentAccountId(),
             oauthTokenRefresh: { try await oauthService.ensureValidToken() },
+            oauthTokenForceRefresh: { try await oauthService.ensureValidToken(forceRefresh: true) },
             anthropicOAuthTokenProvider: { anthropicOAuthService.currentAccessToken() },
             anthropicOAuthTokenRefresh: { try await anthropicOAuthService.ensureValidToken() },
             anthropicSettingsProvider: { ClaudeSettingsEnvironment.load(workspaceRootURL: workspaceRootURL) },
@@ -179,6 +180,7 @@ extension CoreService {
 
     public func disconnectOpenAIOAuth() throws {
         try openAIOAuthService.disconnect()
+        oauthModelCache.removeAll()
     }
 
     public func startAnthropicOAuth(request: AnthropicOAuthStartRequest) throws -> AnthropicOAuthStartResponse {
@@ -240,8 +242,11 @@ extension CoreService {
     func availableAgentModels() -> [ProviderModelOption] {
         let hasOAuth = openAIOAuthService.currentAccessToken() != nil
         let base = Self.availableAgentModels(config: currentConfig, hasOAuthCredentials: hasOAuth)
-        guard !oauthModelCache.isEmpty else { return base }
-        return base.map { option in
+        guard hasOAuth, !oauthModelCache.isEmpty else { return base }
+
+        var seen = Set<String>()
+        var options: [ProviderModelOption] = base.map { option in
+            seen.insert(option.id)
             guard let cached = oauthModelCache[option.id] ?? oauthModelCache[stripProviderPrefix(option.id)] else {
                 return option
             }
@@ -252,6 +257,21 @@ extension CoreService {
                 capabilities: cached.capabilities.isEmpty ? option.capabilities : cached.capabilities
             )
         }
+
+        for cached in oauthModelCache.values.sorted(by: { $0.id < $1.id }) {
+            let id = cached.id.hasPrefix("openai:") ? cached.id : "openai:\(cached.id)"
+            guard seen.insert(id).inserted else { continue }
+            options.append(
+                ProviderModelOption(
+                    id: id,
+                    title: cached.title,
+                    contextWindow: cached.contextWindow,
+                    capabilities: cached.capabilities
+                )
+            )
+        }
+
+        return options
     }
 
     func stripProviderPrefix(_ id: String) -> String {
@@ -353,11 +373,12 @@ extension CoreService {
             return knowsProvider
         case "gemini":
             guard knowsProvider else { return false }
-            if GeminiOAuthCredentials.load() != nil { return true }
-            let env = ProcessInfo.processInfo.environment["GEMINI_API_KEY"]?
-                .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            let env = ["GEMINI_API_KEY", "GOOGLE_API_KEY"]
+                .compactMap { ProcessInfo.processInfo.environment[$0]?.trimmingCharacters(in: .whitespacesAndNewlines) }
+                .first { !$0.isEmpty } ?? ""
             if !env.isEmpty { return true }
             return geminiHasApiKey(config: config)
+                || GeminiOAuthCredentials.load()?.isUsableForGenerativeLanguageAPI == true
         case "anthropic":
             guard knowsProvider else { return false }
             let env = ProcessInfo.processInfo.environment["ANTHROPIC_API_KEY"]?

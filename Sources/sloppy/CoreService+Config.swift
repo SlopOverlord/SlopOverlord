@@ -65,6 +65,7 @@ extension CoreService {
             oauthTokenProvider: { oauthSvc.currentAccessToken() },
             oauthAccountId: oauthSvc.currentAccountId(),
             oauthTokenRefresh: { try await oauthSvc.ensureValidToken() },
+            oauthTokenForceRefresh: { try await oauthSvc.ensureValidToken(forceRefresh: true) },
             anthropicOAuthTokenProvider: { anthropicOAuthSvc.currentAccessToken() },
             anthropicOAuthTokenRefresh: { try await anthropicOAuthSvc.ensureValidToken() },
             anthropicSettingsProvider: anthropicSettingsProvider,

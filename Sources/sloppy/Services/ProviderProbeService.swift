@@ -8,6 +8,28 @@ import Protocols
 struct ProviderProbeService {
     typealias Transport = @Sendable (URLRequest) async throws -> (Data, HTTPURLResponse)
 
+    private enum ProviderProbeError: Error, LocalizedError {
+        case httpFailure(statusCode: Int, body: String)
+
+        var isAccessTokenScopeInsufficient: Bool {
+            switch self {
+            case .httpFailure(_, let body):
+                return body.contains("ACCESS_TOKEN_SCOPE_INSUFFICIENT")
+                    || body.localizedCaseInsensitiveContains("insufficient authentication scopes")
+            }
+        }
+
+        var errorDescription: String? {
+            switch self {
+            case .httpFailure(let statusCode, let body):
+                if body.isEmpty {
+                    return "provider returned HTTP \(statusCode)"
+                }
+                return "provider returned HTTP \(statusCode): \(body)"
+            }
+        }
+    }
+
     private struct OpenAIModelsResponse: Decodable {
         struct ModelItem: Decodable {
             let id: String
@@ -51,6 +73,16 @@ struct ProviderProbeService {
             }
             return (data, httpResponse)
         }
+    }
+
+    private static func sanitizedPayloadSnippet(_ data: Data, limit: Int = 512) -> String {
+        guard !data.isEmpty else { return "" }
+        let text = String(decoding: data.prefix(limit), as: UTF8.self)
+        return text.replacingOccurrences(
+            of: #"(?i)(access_token|refresh_token|id_token|api_key|key|authorization)"\s*:\s*"[^"]*""#,
+            with: #"$1":"[REDACTED]""#,
+            options: .regularExpression
+        )
     }
 
     func probe(config: CoreConfig, request: ProviderProbeRequest) async -> ProviderProbeResponse {
@@ -408,19 +440,22 @@ struct ProviderProbeService {
             CoreModelProviderFactory.resolvedIdentifier(for: $0)?.hasPrefix("gemini:") == true
         }
 
-        let envKey = environmentLookup("GEMINI_API_KEY")?
-            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let envKey = [
+            ("GEMINI_API_KEY", environmentLookup("GEMINI_API_KEY")),
+            ("GOOGLE_API_KEY", environmentLookup("GOOGLE_API_KEY")),
+        ]
+            .compactMap { name, value -> (name: String, value: String)? in
+                let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+                return trimmed.isEmpty ? nil : (name, trimmed)
+            }
+            .first
         let configuredKey = (primaryConfig?.apiKey ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
         let requestKey = request.apiKey?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
 
         let credential: GeminiAuthCredential
         let usedEnvironmentKey: Bool
         let authSource: String
-        if let oauthCredentials = geminiOAuthCredentialsProvider() {
-            credential = .oauth(oauthCredentials)
-            usedEnvironmentKey = false
-            authSource = "OAuth credentials"
-        } else if !requestKey.isEmpty {
+        if !requestKey.isEmpty {
             credential = .apiKey(requestKey)
             usedEnvironmentKey = false
             authSource = "API key"
@@ -428,16 +463,49 @@ struct ProviderProbeService {
             credential = .apiKey(configuredKey)
             usedEnvironmentKey = false
             authSource = "API key"
-        } else if !envKey.isEmpty {
-            credential = .apiKey(envKey)
+        } else if let envKey {
+            credential = .apiKey(envKey.value)
             usedEnvironmentKey = true
-            authSource = "GEMINI_API_KEY"
+            authSource = envKey.name
+        } else if let oauthCredentials = geminiOAuthCredentialsProvider() {
+            guard oauthCredentials.isUsableForGenerativeLanguageAPI else {
+                return ProviderProbeResponse(
+                    providerId: .gemini,
+                    ok: false,
+                    usedEnvironmentKey: false,
+                    message: "Gemini CLI OAuth credentials are missing the required scope \(GeminiOAuthCredentials.requiredGenerativeLanguageScope). Current scopes: \(oauthCredentials.generativeLanguageScopeDescription). Provide a Gemini API key or re-authenticate OAuth with the Gemini API scope.",
+                    models: []
+                )
+            }
+            do {
+                let refreshed = try await oauthCredentials.refreshedIfNeeded()
+                guard refreshed.isUsableForGenerativeLanguageAPI else {
+                    return ProviderProbeResponse(
+                        providerId: .gemini,
+                        ok: false,
+                        usedEnvironmentKey: false,
+                        message: "Gemini CLI OAuth credentials are missing the required scope \(GeminiOAuthCredentials.requiredGenerativeLanguageScope). Current scopes: \(refreshed.generativeLanguageScopeDescription). Provide a Gemini API key or re-authenticate OAuth with the Gemini API scope.",
+                        models: []
+                    )
+                }
+                credential = .oauth(refreshed)
+            } catch {
+                return ProviderProbeResponse(
+                    providerId: .gemini,
+                    ok: false,
+                    usedEnvironmentKey: false,
+                    message: "Gemini CLI OAuth credentials could not be refreshed: \(error.localizedDescription)",
+                    models: []
+                )
+            }
+            usedEnvironmentKey = false
+            authSource = "OAuth credentials"
         } else {
             return ProviderProbeResponse(
                 providerId: .gemini,
                 ok: false,
                 usedEnvironmentKey: false,
-                message: "Gemini credentials are missing. Sign in with Gemini CLI or provide a key or set GEMINI_API_KEY.",
+                message: "Gemini credentials are missing. Provide a key, set GEMINI_API_KEY or GOOGLE_API_KEY, or use OAuth credentials that include \(GeminiOAuthCredentials.requiredGenerativeLanguageScope).",
                 models: []
             )
         }
@@ -457,7 +525,15 @@ struct ProviderProbeService {
         }
 
         do {
-            let models = try await fetchGeminiModels(credential: credential, baseURL: baseURL)
+            let userProject = environmentLookup("GOOGLE_CLOUD_PROJECT")?
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+                ?? environmentLookup("GOOGLE_CLOUD_PROJECT_ID")?
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+            let models = try await fetchGeminiModels(
+                credential: credential,
+                baseURL: baseURL,
+                userProject: userProject
+            )
             guard !models.isEmpty else {
                 return ProviderProbeResponse(
                     providerId: .gemini,
@@ -476,6 +552,17 @@ struct ProviderProbeService {
                 models: models
             )
         } catch {
+            if case .oauth = credential,
+               let providerError = error as? ProviderProbeError,
+               providerError.isAccessTokenScopeInsufficient {
+                return ProviderProbeResponse(
+                    providerId: .gemini,
+                    ok: false,
+                    usedEnvironmentKey: usedEnvironmentKey,
+                    message: "Gemini OAuth token was rejected for insufficient scopes. Provide a Gemini API key or re-authenticate OAuth with \(GeminiOAuthCredentials.requiredGenerativeLanguageScope).",
+                    models: []
+                )
+            }
             return ProviderProbeResponse(
                 providerId: .gemini,
                 ok: false,
@@ -486,7 +573,11 @@ struct ProviderProbeService {
         }
     }
 
-    private func fetchGeminiModels(credential: GeminiAuthCredential, baseURL: URL) async throws -> [ProviderModelOption] {
+    private func fetchGeminiModels(
+        credential: GeminiAuthCredential,
+        baseURL: URL,
+        userProject: String?
+    ) async throws -> [ProviderModelOption] {
         let endpoint = baseURL
             .appendingPathComponent("v1beta")
             .appendingPathComponent("models")
@@ -500,11 +591,14 @@ struct ProviderProbeService {
         urlRequest.setValue("application/json", forHTTPHeaderField: "Accept")
         if case .oauth(let credentials) = credential {
             urlRequest.setValue(credentials.authorizationHeaderValue, forHTTPHeaderField: "Authorization")
+            if let userProject, !userProject.isEmpty {
+                urlRequest.setValue(userProject, forHTTPHeaderField: "x-goog-user-project")
+            }
         }
 
         let (data, response) = try await transport(urlRequest)
         guard (200..<300).contains(response.statusCode) else {
-            throw URLError(.userAuthenticationRequired)
+            throw ProviderProbeError.httpFailure(statusCode: response.statusCode, body: Self.sanitizedPayloadSnippet(data))
         }
 
         let decoded = try JSONDecoder().decode(GeminiModelsResponse.self, from: data)

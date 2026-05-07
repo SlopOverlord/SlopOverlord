@@ -13,6 +13,7 @@ struct ModelProviderBuildConfig: @unchecked Sendable {
     var oauthTokenProvider: (@Sendable () -> String?)?
     var oauthAccountId: String?
     var oauthTokenRefresh: (@Sendable () async throws -> Void)?
+    var oauthTokenForceRefresh: (@Sendable () async throws -> Void)?
     var anthropicOAuthTokenProvider: (@Sendable () -> String?)?
     var anthropicOAuthTokenRefresh: (@Sendable () async throws -> Void)?
     var anthropicSettingsProvider: (@Sendable () -> ClaudeSettingsEnvironment)?
@@ -42,6 +43,7 @@ enum CoreModelProviderFactory {
         oauthTokenProvider: (@Sendable () -> String?)? = nil,
         oauthAccountId: String? = nil,
         oauthTokenRefresh: (@Sendable () async throws -> Void)? = nil,
+        oauthTokenForceRefresh: (@Sendable () async throws -> Void)? = nil,
         anthropicOAuthTokenProvider: (@Sendable () -> String?)? = nil,
         anthropicOAuthTokenRefresh: (@Sendable () async throws -> Void)? = nil,
         anthropicSettingsProvider: (@Sendable () -> ClaudeSettingsEnvironment)? = nil,
@@ -56,6 +58,7 @@ enum CoreModelProviderFactory {
             oauthTokenProvider: oauthTokenProvider,
             oauthAccountId: oauthAccountId,
             oauthTokenRefresh: oauthTokenRefresh,
+            oauthTokenForceRefresh: oauthTokenForceRefresh,
             anthropicOAuthTokenProvider: anthropicOAuthTokenProvider,
             anthropicOAuthTokenRefresh: anthropicOAuthTokenRefresh,
             anthropicSettingsProvider: anthropicSettingsProvider,

@@ -421,7 +421,7 @@ public final class ProcessTerminal: Terminal {
         let body = sequence.dropFirst(2)
         guard let final = body.last else { return (.unknown(sequence: sequence), []) }
         let paramString = body.dropLast()
-        let params = paramString.isEmpty ? [] : paramString.split(separator: ";").compactMap { Int($0) }
+        let params = self.parseCSIParameterInts(paramString)
         let modifiers = params.count >= 2 ? self.mapModifiers(from: params.last ?? 1) : []
         let primary = params.first ?? 0
 
@@ -466,6 +466,14 @@ public final class ProcessTerminal: Terminal {
     }
 
     // swiftlint:enable cyclomatic_complexity
+
+    private func parseCSIParameterInts(_ paramString: Substring) -> [Int] {
+        guard !paramString.isEmpty else { return [] }
+        return paramString.split(separator: ";", omittingEmptySubsequences: false).compactMap { field in
+            let firstSubfield = field.split(separator: ":", omittingEmptySubsequences: false).first ?? ""
+            return Int(firstSubfield)
+        }
+    }
 
     private func mapSS3Sequence(_ sequence: String) -> (TerminalKey, KeyModifiers) {
         switch sequence {
@@ -525,6 +533,8 @@ public final class ProcessTerminal: Terminal {
         case 13: return .enter
         case 27: return .escape
         case 8, 127: return .backspace
+        case 57441...57454:
+            return .unknown(sequence: fallbackSequence)
         default:
             guard codepoint >= 0, let scalar = UnicodeScalar(UInt32(codepoint)) else {
                 return .unknown(sequence: fallbackSequence)

@@ -28,7 +28,8 @@ struct TUIRenderingTests {
         let component = DummyComponent(lines: ["Hello"])
         tui.addChild(component)
         try tui.start()
-        #expect(terminal.outputLog.contains(where: { $0.contains("\u{001B}[?2026hHello") }))
+        #expect(terminal.outputLog.contains(where: { $0.contains("\u{001B}[?2026h") && $0.contains("Hello") }))
+        #expect(terminal.outputLog.last?.contains("\u{001B}[3J\u{001B}[2J\u{001B}[H") == true)
     }
 
     @MainActor @Test
@@ -62,6 +63,48 @@ struct TUIRenderingTests {
         #expect(last.contains("swift"))
         #expect(!last.contains("\u{001B}[3J"))
         #expect(last.contains("\u{001B}[?2026h"))
+    }
+
+    @MainActor @Test
+    func rowResizeForcesFullRenderAndClear() throws {
+        let terminal = VirtualTerminal(columns: 10, rows: 3)
+        let tui = TUI(terminal: terminal, renderScheduler: { $0() })
+        let component = DummyComponent(lines: ["hello", "world"])
+        tui.addChild(component)
+        try tui.start()
+
+        terminal.resize(columns: 10, rows: 5)
+
+        let last = terminal.outputLog.last ?? ""
+        #expect(last.contains("\u{001B}[?2026h"))
+        #expect(last.contains("\u{001B}[3J\u{001B}[2J\u{001B}[H"))
+        #expect(last.contains("hello\r\nworld"))
+    }
+
+    @MainActor @Test
+    func partialDiffResetsStyleBeforeClearingLines() throws {
+        let terminal = VirtualTerminal(columns: 20, rows: 5)
+        let tui = TUI(terminal: terminal, renderScheduler: { $0() })
+        let component = DummyComponent(lines: ["\u{001B}[48;2;251;178;123mone\u{001B}[49m", "two"])
+        tui.addChild(component)
+        try tui.start()
+
+        component.lines = ["plain", "two"]
+        tui.requestRender()
+
+        let last = terminal.outputLog.last ?? ""
+        #expect(last.contains("\u{001B}[0m\u{001B}[2Kplain"))
+    }
+
+    @Test
+    func backgroundStylingEndsWithBackgroundReset() {
+        let background = AnsiStyling.Background.rgb(1, 2, 3)
+
+        let styled = background.apply("a\u{001B}[0mb")
+
+        #expect(styled.hasSuffix("\u{001B}[49m"))
+        #expect(!styled.hasSuffix("\u{001B}[49m\u{001B}[48;2;1;2;3m"))
+        #expect(styled.contains("\u{001B}[0m\u{001B}[48;2;1;2;3m"))
     }
 
     @MainActor @Test
@@ -204,6 +247,30 @@ struct TUIRenderingTests {
             }))
         #expect(events
             .contains(where: { if case let .key(.backspace, m) = $0 { return m.contains(.option) }; return false }))
+    }
+
+    @Test
+    func keyEventNormalization_kittyCSIUEventTypeKeepsModifiers() throws {
+        let parser = ProcessTerminal()
+        let events = parser.parseForTests("\u{001B}[119;5:1u\u{001B}[127;3:3u")
+
+        #expect(events
+            .contains(where: { if case let .key(.character("w"), m) = $0 { return m.contains(.control) }; return false
+            }))
+        #expect(events
+            .contains(where: { if case let .key(.backspace, m) = $0 { return m.contains(.option) }; return false }))
+    }
+
+    @Test
+    func keyEventNormalization_kittyModifierOnlyKeysAreNotCharacters() throws {
+        let parser = ProcessTerminal()
+        let events = parser.parseForTests("\u{001B}[57443;3:1u\u{001B}[57449;1:3u")
+
+        #expect(events.count == 2)
+        #expect(events.allSatisfy {
+            if case .key(.unknown, _) = $0 { return true }
+            return false
+        })
     }
 
     @Test

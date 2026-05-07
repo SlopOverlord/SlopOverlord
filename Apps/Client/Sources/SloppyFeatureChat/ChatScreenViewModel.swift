@@ -6,11 +6,6 @@ import SloppyClientCore
 @Observable
 @MainActor
 public final class ChatTranscriptState {
-    private static let initialVisibleMessageCount = 64
-    private static let visibleMessagePageSize = 64
-
-    @ObservationIgnored private var allMessages: [ChatMessage] = []
-    @ObservationIgnored private var visibleMessageCount = initialVisibleMessageCount
     public private(set) var messages: [ChatMessage] = []
 
     var isEmpty: Bool {
@@ -22,61 +17,40 @@ public final class ChatTranscriptState {
     }
 
     var hasEarlierMessages: Bool {
-        allMessages.count > messages.count
+        false
     }
 
     var hiddenMessageCount: Int {
-        max(0, allMessages.count - messages.count)
+        0
     }
 
     func replaceAll(_ newMessages: [ChatMessage]) {
-        allMessages = newMessages
-        visibleMessageCount = min(Self.initialVisibleMessageCount, max(visibleMessageCount, newMessages.count))
-        rebuildVisibleMessages()
+        messages = newMessages
     }
 
     func clear() {
-        allMessages = []
-        visibleMessageCount = Self.initialVisibleMessageCount
         messages = []
     }
 
     func append(_ message: ChatMessage) {
-        allMessages.append(message)
-        rebuildVisibleMessages()
+        messages.append(message)
     }
 
     func removeAll(where shouldBeRemoved: (ChatMessage) -> Bool) {
-        allMessages.removeAll(where: shouldBeRemoved)
-        rebuildVisibleMessages()
+        messages.removeAll(where: shouldBeRemoved)
     }
 
     func upsert(_ message: ChatMessage) {
-        if let idx = allMessages.firstIndex(where: { $0.id == message.id }) {
-            allMessages[idx] = message
+        if let idx = messages.firstIndex(where: { $0.id == message.id }) {
+            messages[idx] = message
         } else {
-            allMessages.append(message)
+            messages.append(message)
         }
-        rebuildVisibleMessages()
     }
 
     func revealEarlierMessages() {
-        guard hasEarlierMessages else { return }
-        visibleMessageCount = min(
-            allMessages.count,
-            visibleMessageCount + Self.visibleMessagePageSize
-        )
-        rebuildVisibleMessages()
-    }
-
-    private func rebuildVisibleMessages() {
-        guard !allMessages.isEmpty else {
-            messages = []
-            return
-        }
-
-        let count = min(visibleMessageCount, allMessages.count)
-        messages = Array(allMessages.suffix(count))
+        // Kept as a no-op for compatibility with older views/tests: all
+        // loaded session messages are now visible and scrollable at once.
     }
 }
 

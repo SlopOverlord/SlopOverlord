@@ -18,6 +18,27 @@ function ProviderBrandMark({ brandProviderKey, size }) {
   return <ProviderIcon provider={brandProviderKey} size={size} type="color" />;
 }
 
+const CLI_AUTH_TOOLS = [
+  {
+    providerId: "openai-oauth",
+    title: "OpenAI Codex",
+    command: "codex login",
+    source: "Local Codex credentials or device-code OAuth"
+  },
+  {
+    providerId: "anthropic-oauth",
+    title: "Claude Code",
+    command: "claude",
+    source: "Claude Code credentials or Anthropic OAuth"
+  },
+  {
+    providerId: "gemini",
+    title: "Gemini CLI",
+    command: "gemini auth login",
+    source: "~/.gemini/oauth_creds.json"
+  }
+];
+
 export function ProviderEditor({
   providerCatalog,
   configuredProviderRows,
@@ -82,6 +103,7 @@ export function ProviderEditor({
     ? Boolean(providerProbeTesting?.[providerModalMeta.id])
     : false;
   const isAnthropicModal = providerModalMeta?.id === "anthropic" || providerModalMeta?.id === "anthropic-oauth";
+  const isGeminiModal = providerModalMeta?.id === "gemini";
   const anthropicAuthMode = providerModalMeta?.id === "anthropic" ? "api-token" : "oauth";
   const canTestActiveProvider = Boolean(
     providerModalMeta &&
@@ -89,6 +111,20 @@ export function ProviderEditor({
       providerModalMeta.supportsModelCatalog &&
       onTestProviderConnection
   );
+  const providerRowByCatalog = new Map(
+    configuredProviderRows
+      .filter((row) => row.catalogId)
+      .map((row) => [row.catalogId, row])
+  );
+
+  function openOrAppendProvider(providerId) {
+    const row = providerRowByCatalog.get(providerId);
+    if (row) {
+      onOpenProviderAtIndex(row.index);
+      return;
+    }
+    onAppendProvider(providerId);
+  }
 
   return (
     <div className="providers-shell">
@@ -106,6 +142,51 @@ export function ProviderEditor({
             Config has {customModelsCount} custom model entries. They are preserved and available in raw mode.
           </p>
         ) : null}
+      </section>
+
+      <section className="providers-cli-auth-block">
+        <div className="providers-cli-auth-head">
+          <span className="material-symbols-rounded providers-presets-icon" aria-hidden>
+            terminal
+          </span>
+          <h4>CLI auth sources</h4>
+        </div>
+        <div className="providers-cli-grid">
+          {CLI_AUTH_TOOLS.map((tool) => {
+            const row = providerRowByCatalog.get(tool.providerId);
+            const isConnected =
+              tool.providerId === "openai-oauth"
+                ? openAIProviderStatus.hasOAuthCredentials
+                : tool.providerId === "anthropic-oauth"
+                  ? anthropicProviderStatus.hasOAuthCredentials
+                  : false;
+            const status = isConnected
+              ? "connected"
+              : row
+                ? "configured"
+                : "available";
+            return (
+              <button
+                key={tool.providerId}
+                type="button"
+                className="providers-cli-card"
+                onClick={() => openOrAppendProvider(tool.providerId)}
+              >
+                <span className="providers-cli-card-icon material-symbols-rounded" aria-hidden>
+                  terminal
+                </span>
+                <span className="providers-cli-card-main">
+                  <span className="providers-cli-card-title">
+                    {tool.title}
+                    <span className={`provider-state ${isConnected || row ? "on" : "off"}`}>{status}</span>
+                  </span>
+                  <code>{tool.command}</code>
+                  <span>{tool.source}</span>
+                </span>
+              </button>
+            );
+          })}
+        </div>
       </section>
 
       <div className="providers-section-toolbar">
@@ -338,9 +419,11 @@ export function ProviderEditor({
                   </div>
                 </div>
               ) : null}
-              {providerModalMeta.requiresApiKey ? (
+              {providerModalMeta.requiresApiKey || isGeminiModal ? (
                 <label>
-                  {isAnthropicModal
+                  {isGeminiModal
+                    ? "API Key (optional)"
+                    : isAnthropicModal
                     ? anthropicAuthMode === "oauth"
                       ? "OAuth token"
                       : "API token"
@@ -350,7 +433,9 @@ export function ProviderEditor({
                     value={providerForm.apiKey}
                     onChange={(event) => onUpdateProviderForm("apiKey", event.target.value)}
                     placeholder={
-                      providerModalMeta.id === "anthropic-oauth"
+                      isGeminiModal
+                        ? "Leave empty for scoped OAuth or GEMINI_API_KEY"
+                        : providerModalMeta.id === "anthropic-oauth"
                         ? "Paste token or leave empty for ANTHROPIC_AUTH_TOKEN"
                         : providerModalMeta.id === "anthropic"
                           ? "Console API key (sk-ant-api...)"
@@ -363,6 +448,11 @@ export function ProviderEditor({
                   {providerModalMeta.id === "anthropic-oauth" ? (
                     <span className="placeholder-text">
                       Sloppy also checks ANTHROPIC_AUTH_TOKEN in the environment and .claude/settings.json.
+                    </span>
+                  ) : null}
+                  {isGeminiModal ? (
+                    <span className="placeholder-text">
+                      Sloppy checks this key first, then GEMINI_API_KEY or GOOGLE_API_KEY, then scoped OAuth.
                     </span>
                   ) : null}
                 </label>
@@ -520,6 +610,21 @@ export function ProviderEditor({
                         : "Connect Anthropic OAuth or import Claude Code credentials. You can still paste a setup token manually if needed."}
                     </p>
                   </>
+                ) : null}
+                {isGeminiModal ? (
+                  <div className="provider-cli-auth-panel">
+                    <div className="provider-cli-auth-panel-head">
+                      <span className="material-symbols-rounded" aria-hidden>
+                        terminal
+                      </span>
+                      <strong>Gemini CLI OAuth</strong>
+                    </div>
+                    <p className="placeholder-text">
+                      Sign in with Gemini CLI and Sloppy will read <code>~/.gemini/oauth_creds.json</code> automatically.
+                      OAuth tokens must include the Gemini API scope; otherwise use an API key.
+                    </p>
+                    <code className="provider-cli-command">gemini auth login</code>
+                  </div>
                 ) : null}
               </div>
             ) : null}

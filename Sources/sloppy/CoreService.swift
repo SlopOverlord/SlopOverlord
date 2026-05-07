@@ -307,6 +307,7 @@ public actor CoreService {
             oauthTokenProvider: { oauthService.currentAccessToken() },
             oauthAccountId: oauthService.currentAccountId(),
             oauthTokenRefresh: { try await oauthService.ensureValidToken() },
+            oauthTokenForceRefresh: { try await oauthService.ensureValidToken(forceRefresh: true) },
             anthropicOAuthTokenProvider: { anthropicOAuthService.currentAccessToken() },
             anthropicOAuthTokenRefresh: { try await anthropicOAuthService.ensureValidToken() },
             anthropicSettingsProvider: anthropicSettingsProvider,

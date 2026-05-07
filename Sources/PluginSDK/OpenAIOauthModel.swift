@@ -12,7 +12,9 @@ public struct OpenAIOAuthModel: LanguageModel {
     public static let defaultBaseURL = URL(string: "https://chatgpt.com/backend-api/codex")!
 
     private let baseURL: URL
-    private let bearerToken: String
+    private let bearerTokenProvider: @Sendable () -> String
+    private let bearerTokenRefresh: (@Sendable () async throws -> Void)?
+    private let bearerTokenForceRefresh: (@Sendable () async throws -> Void)?
     private let modelName: String
     private let accountId: String?
     private let instructions: String
@@ -20,7 +22,7 @@ public struct OpenAIOAuthModel: LanguageModel {
     let tokenUsageCapture: TokenUsageCapture?
 
     public var availability: Availability<String> {
-        guard !bearerToken.isEmpty else {
+        guard !bearerTokenProvider().isEmpty else {
             return .unavailable("Bearer token is required")
         }
         return .available
@@ -36,7 +38,31 @@ public struct OpenAIOAuthModel: LanguageModel {
         tokenUsageCapture: TokenUsageCapture? = nil
     ) {
         self.baseURL = baseURL
-        self.bearerToken = bearerToken
+        self.bearerTokenProvider = { bearerToken }
+        self.bearerTokenRefresh = nil
+        self.bearerTokenForceRefresh = nil
+        self.modelName = model
+        self.accountId = accountId
+        self.instructions = instructions
+        self.reasoningCapture = reasoningCapture
+        self.tokenUsageCapture = tokenUsageCapture
+    }
+
+    public init(
+        baseURL: URL = OpenAIOAuthModel.defaultBaseURL,
+        bearerTokenProvider: @escaping @Sendable () -> String,
+        bearerTokenRefresh: (@Sendable () async throws -> Void)? = nil,
+        bearerTokenForceRefresh: (@Sendable () async throws -> Void)? = nil,
+        model: String,
+        accountId: String? = nil,
+        instructions: String = "You are a helpful assistant.",
+        reasoningCapture: ReasoningContentCapture? = nil,
+        tokenUsageCapture: TokenUsageCapture? = nil
+    ) {
+        self.baseURL = baseURL
+        self.bearerTokenProvider = bearerTokenProvider
+        self.bearerTokenRefresh = bearerTokenRefresh
+        self.bearerTokenForceRefresh = bearerTokenForceRefresh
         self.modelName = model
         self.accountId = accountId
         self.instructions = instructions
@@ -212,7 +238,9 @@ private extension OpenAIOAuthModel {
         baseURL.appendingPathComponent("responses")
     }
 
-    func buildHTTPRequest(body: Data) -> URLRequest {
+    func buildHTTPRequest(body: Data) async throws -> URLRequest {
+        try await bearerTokenRefresh?()
+        let bearerToken = bearerTokenProvider()
         var request = URLRequest(url: responsesEndpoint)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
@@ -225,8 +253,8 @@ private extension OpenAIOAuthModel {
         return request
     }
 
-    func collectStreamingResponseWithTools(body: Data) async throws -> StreamResult {
-        let request = buildHTTPRequest(body: body)
+    func collectStreamingResponseWithTools(body: Data, retryAfterInvalidToken: Bool = true) async throws -> StreamResult {
+        let request = try await buildHTTPRequest(body: body)
 
         #if canImport(FoundationNetworking)
         let (asyncBytes, response) = try await URLSession.shared.linuxBytes(for: request)
@@ -243,7 +271,12 @@ private extension OpenAIOAuthModel {
             for try await line in asyncBytes.lines {
                 errorText += line
             }
-            throw classifyHTTPError(statusCode: httpResponse.statusCode, body: errorText)
+            let error = classifyHTTPError(statusCode: httpResponse.statusCode, body: errorText)
+            if retryAfterInvalidToken, case .invalidToken = error, let bearerTokenForceRefresh {
+                try await bearerTokenForceRefresh()
+                return try await collectStreamingResponseWithTools(body: body, retryAfterInvalidToken: false)
+            }
+            throw error
         }
 
         var accumulated = ""
@@ -282,9 +315,10 @@ private extension OpenAIOAuthModel {
     func performStreamingRequestWithTools<Content>(
         body: Data,
         continuation: AsyncThrowingStream<LanguageModelSession.ResponseStream<Content>.Snapshot, Error>.Continuation,
-        contentType: Content.Type
+        contentType: Content.Type,
+        retryAfterInvalidToken: Bool = true
     ) async throws -> StreamResult where Content: Generable {
-        let request = buildHTTPRequest(body: body)
+        let request = try await buildHTTPRequest(body: body)
 
         #if canImport(FoundationNetworking)
         let (asyncBytes, response) = try await URLSession.shared.linuxBytes(for: request)
@@ -301,7 +335,17 @@ private extension OpenAIOAuthModel {
             for try await line in asyncBytes.lines {
                 errorText += line
             }
-            throw classifyHTTPError(statusCode: httpResponse.statusCode, body: errorText)
+            let error = classifyHTTPError(statusCode: httpResponse.statusCode, body: errorText)
+            if retryAfterInvalidToken, case .invalidToken = error, let bearerTokenForceRefresh {
+                try await bearerTokenForceRefresh()
+                return try await performStreamingRequestWithTools(
+                    body: body,
+                    continuation: continuation,
+                    contentType: contentType,
+                    retryAfterInvalidToken: false
+                )
+            }
+            throw error
         }
 
         var accumulated = ""
@@ -359,6 +403,12 @@ private extension OpenAIOAuthModel {
             return .invalidToken("OAuth token does not have required permissions")
         }
         return .httpError(statusCode, body.isEmpty ? "Request failed" : body)
+    }
+}
+
+extension OpenAIOAuthModel {
+    func buildHTTPRequestForTesting(body: Data) async throws -> URLRequest {
+        try await buildHTTPRequest(body: body)
     }
 }
 

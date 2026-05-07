@@ -16,6 +16,7 @@ public struct OpenAIModelProvider: ModelProvider {
         public var apiVariant: OpenAILanguageModel.APIVariant
         public var accountId: String?
         public var refreshTokenIfNeeded: (@Sendable () async throws -> Void)?
+        public var refreshTokenAfterInvalidToken: (@Sendable () async throws -> Void)?
         public var session: URLSession?
         /// Strips this prefix from configured model ids (e.g. `openai:` or `openrouter:`).
         public var modelIdentifierPrefix: String
@@ -32,6 +33,7 @@ public struct OpenAIModelProvider: ModelProvider {
             apiVariant: OpenAILanguageModel.APIVariant = .chatCompletions,
             accountId: String? = nil,
             refreshTokenIfNeeded: (@Sendable () async throws -> Void)? = nil,
+            refreshTokenAfterInvalidToken: (@Sendable () async throws -> Void)? = nil,
             session: URLSession? = nil,
             modelIdentifierPrefix: String = "openai:",
             useOpenAICodexOAuthPath: Bool = true,
@@ -43,6 +45,7 @@ public struct OpenAIModelProvider: ModelProvider {
             self.apiVariant = apiVariant
             self.accountId = accountId
             self.refreshTokenIfNeeded = refreshTokenIfNeeded
+            self.refreshTokenAfterInvalidToken = refreshTokenAfterInvalidToken
             self.session = session
             self.modelIdentifierPrefix = modelIdentifierPrefix
             self.useOpenAICodexOAuthPath = useOpenAICodexOAuthPath
@@ -95,9 +98,10 @@ public struct OpenAIModelProvider: ModelProvider {
         let resolved = normalizeModelName(modelName)
         let token = settings.apiKey()
         if settings.useOpenAICodexOAuthPath, isOAuthToken(token) {
-            try? await settings.refreshTokenIfNeeded?()
             return OpenAIOAuthModel(
-                bearerToken: token,
+                bearerTokenProvider: settings.apiKey,
+                bearerTokenRefresh: settings.refreshTokenIfNeeded,
+                bearerTokenForceRefresh: settings.refreshTokenAfterInvalidToken,
                 model: resolved,
                 accountId: settings.accountId,
                 instructions: systemInstructions ?? "You are an execution-focused assistant.",

@@ -17,6 +17,12 @@ private enum SloppyTUIStreamTyping {
     static let maxCatchupSeconds = 0.85
 }
 
+private enum SloppyTUILocalCardBehavior {
+    static let autoDismissSeconds: TimeInterval = 10
+    static let autoDismissLineLimit = 3
+    static let autoDismissCharacterLimit = 320
+}
+
 private extension Array where Element == String {
     func trimmingEmptyEdges() -> [String] {
         var startIndex = self.startIndex
@@ -63,7 +69,6 @@ final class SloppyTUIScreen: @preconcurrency Component, @unchecked Sendable {
         SloppyTUISlashCommand("agents", "Switch agent"),
         SloppyTUISlashCommand("sessions", "Switch session"),
         SloppyTUISlashCommand("subagents", "Open a child subagent session"),
-        SloppyTUISlashCommand("resume", "Resume a previous conversation"),
         SloppyTUISlashCommand("new", "Create a new session"),
         SloppyTUISlashCommand("clear", "Clear local cards"),
         SloppyTUISlashCommand("stop", "Interrupt the current run"),
@@ -98,7 +103,6 @@ final class SloppyTUIScreen: @preconcurrency Component, @unchecked Sendable {
         "children",
         "sessions",
         "session",
-        "resume",
         "new",
         "clear",
         "stop",
@@ -195,6 +199,8 @@ final class SloppyTUIScreen: @preconcurrency Component, @unchecked Sendable {
     private var petMood: AgentPetAnimationState = .idle
     private var welcomeDismissed = false
     private var isPosting = false
+    private var queuedMessages = SloppyTUIMessageQueue()
+    private var isDrainingQueuedMessages = false
     private var isInterruptingRun = false
     private var doubleEscapeDetector = SloppyTUIDoubleEscapeDetector()
     private var exitAfterModelSelection = false
@@ -289,6 +295,9 @@ final class SloppyTUIScreen: @preconcurrency Component, @unchecked Sendable {
     }
 
     func handle(input: TerminalInput) {
+        if handleQueuedMessageCancel(input) {
+            return
+        }
         if handleDoubleEscapeInterrupt(input) {
             return
         }
@@ -314,6 +323,23 @@ final class SloppyTUIScreen: @preconcurrency Component, @unchecked Sendable {
             return
         }
         editor.handle(input: input)
+    }
+
+    private func handleQueuedMessageCancel(_ input: TerminalInput) -> Bool {
+        guard case .key(.character("b"), let modifiers) = input,
+              modifiers.contains(.control)
+        else {
+            return false
+        }
+
+        guard let canceled = queuedMessages.cancelNext() else {
+            showSystemNotice("No queued message to cancel.")
+            return true
+        }
+
+        showSystemNotice("Canceled queued message: \(canceled.displayText)")
+        renderTimeline()
+        return true
     }
 
     private func handleDoubleEscapeInterrupt(_ input: TerminalInput) -> Bool {
@@ -598,9 +624,9 @@ final class SloppyTUIScreen: @preconcurrency Component, @unchecked Sendable {
             scrollTimeline(by: page)
         case .function(6):
             scrollTimeline(by: -page)
-        case .arrowUp where modifiers.contains(.option) || modifiers.contains(.control):
+        case .arrowUp where modifiers.isEmpty || modifiers.contains(.option) || modifiers.contains(.control):
             scrollTimeline(by: 3)
-        case .arrowDown where modifiers.contains(.option) || modifiers.contains(.control):
+        case .arrowDown where modifiers.isEmpty || modifiers.contains(.option) || modifiers.contains(.control):
             scrollTimeline(by: -3)
         case .home where modifiers.contains(.option) || modifiers.contains(.control):
             scrollTimelineToTop()
@@ -862,15 +888,36 @@ final class SloppyTUIScreen: @preconcurrency Component, @unchecked Sendable {
 
         welcomeDismissed = true
         dismissFirstStartBootstrapCard()
+        if isPosting {
+            queueMessage(value, context: pendingContext, uploads: pendingUploads, clearsPendingInputs: true)
+            return
+        }
         await sendMessage(value)
     }
 
     private func sendMessage(_ value: String, spawnSubSession: Bool = false) async {
+        await sendMessage(
+            value,
+            context: pendingContext,
+            uploads: pendingUploads,
+            spawnSubSession: spawnSubSession,
+            clearsPendingInputsOnSuccess: true
+        )
+    }
+
+    private func sendMessage(
+        _ value: String,
+        context: String?,
+        uploads: [AgentAttachmentUpload],
+        spawnSubSession: Bool = false,
+        clearsPendingInputsOnSuccess: Bool
+    ) async {
         guard !isPosting else {
-            appendLocalCard("A message is already in flight. Use `/stop` if you need to interrupt it.")
+            queueMessage(value, context: context, uploads: uploads, spawnSubSession: spawnSubSession)
             return
         }
 
+        dismissLocalCardsForUserMessage()
         isPosting = true
         taskStartedAt = Date()
         lastTaskElapsed = nil
@@ -879,8 +926,7 @@ final class SloppyTUIScreen: @preconcurrency Component, @unchecked Sendable {
         startThinkingAnimation()
         renderTimeline()
         refreshStaticChrome()
-        let uploads = pendingUploads
-        let content = await messageContentWithInlineAttachments(value, uploads: uploads)
+        let content = await messageContentWithInlineAttachments(value, context: context, uploads: uploads)
         let undoBaseline = await makeUndoBaseline()
         do {
             if !runtime.config.onboarding.completed {
@@ -901,8 +947,10 @@ final class SloppyTUIScreen: @preconcurrency Component, @unchecked Sendable {
                     mode: chatMode
                 )
             )
-            pendingContext = nil
-            pendingUploads.removeAll()
+            if clearsPendingInputsOnSuccess {
+                pendingContext = nil
+                pendingUploads.removeAll()
+            }
             recordUndoPointIfNeeded(undoBaseline)
             await reloadSession()
             petMood = .happy
@@ -921,6 +969,48 @@ final class SloppyTUIScreen: @preconcurrency Component, @unchecked Sendable {
         liveRunStatusLine = nil
         refreshStaticChrome()
         renderTimeline()
+        await sendNextQueuedMessageIfIdle()
+    }
+
+    private func queueMessage(
+        _ value: String,
+        context: String? = nil,
+        uploads: [AgentAttachmentUpload] = [],
+        spawnSubSession: Bool = false,
+        clearsPendingInputs: Bool = false
+    ) {
+        _ = queuedMessages.enqueue(
+            text: value,
+            context: context,
+            uploads: uploads,
+            spawnSubSession: spawnSubSession
+        )
+        if clearsPendingInputs {
+            pendingContext = nil
+            pendingUploads.removeAll()
+        }
+        showSystemNotice("Queued message. Press ctrl+b to cancel next queued message.")
+        renderTimeline()
+    }
+
+    private func sendNextQueuedMessageIfIdle() async {
+        guard !isPosting, !isDrainingQueuedMessages else { return }
+        guard let message = queuedMessages.dequeue() else {
+            renderTimeline()
+            return
+        }
+
+        isDrainingQueuedMessages = true
+        renderTimeline()
+        await sendMessage(
+            message.text,
+            context: message.context,
+            uploads: message.uploads,
+            spawnSubSession: message.spawnSubSession,
+            clearsPendingInputsOnSuccess: false
+        )
+        isDrainingQueuedMessages = false
+        await sendNextQueuedMessageIfIdle()
     }
 
     private func handleCommand(_ raw: String) async {
@@ -939,7 +1029,7 @@ final class SloppyTUIScreen: @preconcurrency Component, @unchecked Sendable {
             await showAgentPicker()
         case "subagents", "children":
             showSubSessionPicker()
-        case "sessions", "session", "resume":
+        case "sessions", "session":
             await showSessionPicker()
         case "new":
             await createNewSession()
@@ -1033,7 +1123,8 @@ final class SloppyTUIScreen: @preconcurrency Component, @unchecked Sendable {
 
         ## History scroll
         - PageUp / PageDown scroll by pages.
-        - Option+Up/Down or Ctrl+Up/Down scroll by a few lines.
+        - Up/Down scroll by a few lines.
+        - Option+Up/Down or Ctrl+Up/Down also scroll by a few lines.
         - Option+Home / Ctrl+Home jumps to the start of history.
         - Option+End / Ctrl+End jumps back to the bottom.
 
@@ -1821,10 +1912,6 @@ final class SloppyTUIScreen: @preconcurrency Component, @unchecked Sendable {
     }
 
     private func resolveSessionForCurrentProject(agentID: String) async throws -> AgentSessionSummary {
-        let sessions = (try? await runtime.service.listAgentSessions(agentID: agentID, projectID: project.id)) ?? []
-        if let latest = sessions.sorted(by: { $0.updatedAt > $1.updatedAt }).first {
-            return latest
-        }
         return try await runtime.service.createAgentSession(
             agentID: agentID,
             request: AgentSessionCreateRequest(
@@ -2389,7 +2476,7 @@ final class SloppyTUIScreen: @preconcurrency Component, @unchecked Sendable {
     }
 
     private func renderTimeline() {
-        let blocks = sessionCards + liveAssistantBlocks() + localCards.map(\.block)
+        let blocks = sessionCards + liveAssistantBlocks() + queuedMessageBlocks() + localCards.map(\.block)
         timeline.text = blocks.map(\.plainText).joined(separator: "\n\n")
         refreshStaticChrome()
         requestRender()
@@ -2408,8 +2495,12 @@ final class SloppyTUIScreen: @preconcurrency Component, @unchecked Sendable {
         return [.message(role: .assistant, text: body + "\n\n" + spinner)]
     }
 
+    private func queuedMessageBlocks() -> [SloppyTUITimelineBlock] {
+        queuedMessages.messages.map { .queuedMessage($0) }
+    }
+
     private func renderTimelineBlocks(width: Int) -> [String] {
-        let blocks = sessionCards + liveAssistantBlocks() + localCards.map(\.block)
+        let blocks = sessionCards + liveAssistantBlocks() + queuedMessageBlocks() + localCards.map(\.block)
         guard !blocks.isEmpty else {
             return timeline.render(width: width)
         }
@@ -2438,6 +2529,8 @@ final class SloppyTUIScreen: @preconcurrency Component, @unchecked Sendable {
                 }
             case .local(let text):
                 lines.append(contentsOf: renderMarkdown(text, width: width))
+            case .queuedMessage(let message):
+                lines.append(contentsOf: SloppyTUITheme.queuedMessageLines(message, width: width))
             case .error(let text):
                 lines.append(contentsOf: renderMarkdown(SloppyTUITheme.errorBlock(text), width: width))
             case .thinking(let text):
@@ -2580,6 +2673,7 @@ final class SloppyTUIScreen: @preconcurrency Component, @unchecked Sendable {
 
     private func appendCompactToolGroup(_ blocks: [SloppyTUITimelineBlock], to lines: inout [String], width: Int) {
         let visibleLimit = 4
+        lines.append(SloppyTUITheme.toolPaddingLine(width: width))
         for block in blocks.prefix(visibleLimit) {
             switch block {
             case .toolCall(let tool, let reason, let summary, _):
@@ -2594,6 +2688,7 @@ final class SloppyTUIScreen: @preconcurrency Component, @unchecked Sendable {
         if hiddenCount > 0 {
             lines.append(SloppyTUITheme.toolOverflowLine(hiddenCount: hiddenCount, width: width))
         }
+        lines.append(SloppyTUITheme.toolPaddingLine(width: width))
     }
 
     private func visibleTimelineLines(_ lines: [String], height: Int) -> [String] {
@@ -2781,8 +2876,9 @@ final class SloppyTUIScreen: @preconcurrency Component, @unchecked Sendable {
             }
             localCards.removeFirst(localCards.count - 24)
         }
-        if let seconds {
-            scheduleLocalCardDismissal(id: id, after: seconds)
+        let dismissAfter = seconds ?? inferredLocalCardDismissDelay(for: text)
+        if let dismissAfter {
+            scheduleLocalCardDismissal(id: id, after: dismissAfter)
         }
         renderTimeline()
     }
@@ -2808,6 +2904,13 @@ final class SloppyTUIScreen: @preconcurrency Component, @unchecked Sendable {
     private func clearLocalCards() {
         cancelLocalCardDismissTasks()
         localCards.removeAll()
+    }
+
+    private func dismissLocalCardsForUserMessage() {
+        transientNoticeTask?.cancel()
+        transientNoticeTask = nil
+        transientNoticeLine = nil
+        clearLocalCards()
     }
 
     private func dismissLocalCards(where shouldDismiss: (SloppyTUILocalCard) -> Bool) {
@@ -2841,6 +2944,19 @@ final class SloppyTUIScreen: @preconcurrency Component, @unchecked Sendable {
         localCardDismissTasks.removeAll()
     }
 
+    private func inferredLocalCardDismissDelay(for text: String) -> TimeInterval? {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return SloppyTUILocalCardBehavior.autoDismissSeconds }
+        let lines = trimmed.split(separator: "\n", omittingEmptySubsequences: false)
+        guard lines.count <= SloppyTUILocalCardBehavior.autoDismissLineLimit,
+              trimmed.count <= SloppyTUILocalCardBehavior.autoDismissCharacterLimit,
+              !trimmed.hasPrefix("## ")
+        else {
+            return nil
+        }
+        return SloppyTUILocalCardBehavior.autoDismissSeconds
+    }
+
     private func showSystemNotice(_ text: String, autoDismissAfter seconds: TimeInterval = 6) {
         let value = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !value.isEmpty else { return }
@@ -2868,13 +2984,14 @@ final class SloppyTUIScreen: @preconcurrency Component, @unchecked Sendable {
         )
         let context = pendingContext == nil ? "" : "  context: queued"
         let attachments = pendingUploads.isEmpty ? "" : "  attachments: \(pendingUploads.count)"
+        let queue = queuedMessages.isEmpty ? "" : "  queue: \(queuedMessages.count) ctrl+b cancel"
         let pet = state.petEnabled ? "  pet: \(terminalPetFace())" : ""
         let transcript = transcriptExpanded ? "  transcript: full" : ""
         let elapsed = elapsedStatusContext()
         let defaultStatus = SloppyTUITheme.sessionStatusLine(
             mode: chatMode,
             model: selectedModel,
-            context: context + pet + transcript + elapsed.idleSuffix,
+            context: context + queue + pet + transcript + elapsed.idleSuffix,
             attachments: attachments,
             sessionID: session.id
         )
@@ -2937,7 +3054,14 @@ final class SloppyTUIScreen: @preconcurrency Component, @unchecked Sendable {
     }
 
     private var shouldRenderWelcome: Bool {
-        !welcomeDismissed && localCards.isEmpty && transientNoticeLine == nil
+        SloppyTUIWelcomeVisibility.shouldRender(
+            welcomeDismissed: welcomeDismissed,
+            hasSessionCards: !sessionCards.isEmpty,
+            hasLiveAssistantDraft: liveAssistantDraft != nil,
+            hasQueuedMessages: !queuedMessages.isEmpty,
+            hasLocalCards: !localCards.isEmpty,
+            hasTransientNotice: transientNoticeLine != nil
+        )
     }
 
     private func stopTUI() {
@@ -3188,9 +3312,13 @@ final class SloppyTUIScreen: @preconcurrency Component, @unchecked Sendable {
         return formatter.string(from: Date())
     }
 
-    private func messageContentWithInlineAttachments(_ raw: String, uploads: [AgentAttachmentUpload]) async -> String {
+    private func messageContentWithInlineAttachments(
+        _ raw: String,
+        context: String?,
+        uploads: [AgentAttachmentUpload]
+    ) async -> String {
         var parts = [raw]
-        if let pendingContext {
+        if let pendingContext = context {
             parts.append("\n[Attached context]\n\(pendingContext)")
         }
         if !uploads.isEmpty {

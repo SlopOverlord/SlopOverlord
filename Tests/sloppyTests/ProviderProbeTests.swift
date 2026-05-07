@@ -154,14 +154,14 @@ func providerProbeOpenAIListsModelsWithoutKeyOnPrivateLAN() async throws {
 }
 
 @Test
-func providerProbeGeminiPrefersOAuthCredentialsFileOverAPIKey() async throws {
+func providerProbeGeminiPrefersRequestAPIKeyOverOAuthCredentialsFile() async throws {
     let service = ProviderProbeService(
         environmentLookup: { key in
             key == "GEMINI_API_KEY" ? "env-api-key" : nil
         },
         transport: { request in
-            #expect(request.value(forHTTPHeaderField: "Authorization") == "Bearer oauth-access-token")
-            #expect(request.url?.query?.contains("key=") != true)
+            #expect(request.value(forHTTPHeaderField: "Authorization") == nil)
+            #expect(request.url?.query?.contains("key=request-api-key") == true)
             let payload =
                 """
                 {
@@ -177,7 +177,8 @@ func providerProbeGeminiPrefersOAuthCredentialsFileOverAPIKey() async throws {
                 accessToken: "oauth-access-token",
                 refreshToken: nil,
                 tokenType: "Bearer",
-                expiryDate: nil
+                expiryDate: nil,
+                scope: "https://www.googleapis.com/auth/cloud-platform"
             )
         }
     )
@@ -193,6 +194,37 @@ func providerProbeGeminiPrefersOAuthCredentialsFileOverAPIKey() async throws {
 
     #expect(response.ok == true)
     #expect(response.usedEnvironmentKey == false)
-    #expect(response.message == "Connected to Gemini with OAuth credentials. Loaded 1 models.")
+    #expect(response.message == "Connected to Gemini with API key. Loaded 1 models.")
     #expect(response.models.map(\.id) == ["gemini-2.5-flash"])
+}
+
+@Test
+func providerProbeGeminiRejectsOAuthCredentialsWithoutGeminiScope() async throws {
+    let service = ProviderProbeService(
+        transport: { request in
+            Issue.record("Unexpected Gemini probe request: \(request)")
+            return (Data(), makeProbeHTTPResponse(url: request.url!, statusCode: 500))
+        },
+        geminiOAuthCredentialsProvider: {
+            GeminiOAuthCredentials(
+                accessToken: "oauth-access-token",
+                refreshToken: nil,
+                tokenType: "Bearer",
+                expiryDate: nil,
+                scope: "https://www.googleapis.com/auth/cloud-platform"
+            )
+        }
+    )
+
+    let response = await service.probe(
+        config: .test,
+        request: ProviderProbeRequest(
+            providerId: .gemini,
+            apiUrl: "https://generativelanguage.googleapis.com"
+        )
+    )
+
+    #expect(response.ok == false)
+    #expect(response.message.contains(GeminiOAuthCredentials.requiredGenerativeLanguageScope))
+    #expect(response.models.isEmpty)
 }

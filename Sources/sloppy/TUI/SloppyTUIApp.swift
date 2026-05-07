@@ -46,11 +46,10 @@ struct SloppyTUIApp {
                 preferredID: selection?.agentId,
                 agents: agents
             )
-            let session = try await resolveSession(
+            let session = try await createFreshSession(
                 service: runtime.service,
                 projectID: project.id,
-                agentID: agent.id,
-                preferredID: selection?.sessionId
+                agentID: agent.id
             )
             resolved = (agent, session)
         }
@@ -148,20 +147,11 @@ struct SloppyTUIApp {
         )
     }
 
-    private func resolveSession(
+    private func createFreshSession(
         service: CoreService,
         projectID: String,
-        agentID: String,
-        preferredID: String?
+        agentID: String
     ) async throws -> AgentSessionSummary {
-        let sessions = (try? await service.listAgentSessions(agentID: agentID, projectID: projectID)) ?? []
-        if let preferredID,
-           let session = sessions.first(where: { $0.id == preferredID }) {
-            return session
-        }
-        if let latest = sessions.sorted(by: { $0.updatedAt > $1.updatedAt }).first {
-            return latest
-        }
         return try await service.createAgentSession(
             agentID: agentID,
             request: AgentSessionCreateRequest(

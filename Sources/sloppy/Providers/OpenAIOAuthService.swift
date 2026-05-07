@@ -19,7 +19,8 @@ struct OpenAIOAuthService: @unchecked Sendable {
     private static let clientID = "app_EMoamEEZ73f0CkXaXp7hrann"
     private static let authorizationEndpoint = URL(string: "https://auth.openai.com/oauth/authorize")!
     private static let tokenEndpoint = URL(string: "https://auth.openai.com/oauth/token")!
-    private static let modelsEndpoint = URL(string: "https://chatgpt.com/backend-api/codex/models?client_version=0.113.0")!
+    private static let modelsEndpoint = URL(string: "https://chatgpt.com/backend-api/codex/models")!
+    private static let fallbackCodexClientVersion = "0.128.0"
     private static let deviceUserCodeEndpoint = URL(string: "https://auth.openai.com/api/accounts/deviceauth/usercode")!
     private static let deviceTokenEndpoint = URL(string: "https://auth.openai.com/api/accounts/deviceauth/token")!
     private static let deviceRedirectURI = "https://auth.openai.com/deviceauth/callback"
@@ -222,13 +223,17 @@ struct OpenAIOAuthService: @unchecked Sendable {
     private let transport: Transport
     private let now: @Sendable () -> Date
     private let codexCredentialsURL: URL
+    private let codexModelsCacheURL: URL
+    private let codexVersionURL: URL
 
     init(
         workspaceRootURL: URL,
         fileManager: FileManager = .default,
         transport: Transport? = nil,
         now: @escaping @Sendable () -> Date = Date.init,
-        codexCredentialsURL: URL? = nil
+        codexCredentialsURL: URL? = nil,
+        codexModelsCacheURL: URL? = nil,
+        codexVersionURL: URL? = nil
     ) {
         self.workspaceRootURL = workspaceRootURL
         self.fileManager = fileManager
@@ -240,8 +245,14 @@ struct OpenAIOAuthService: @unchecked Sendable {
             return (data, http)
         }
         self.now = now
-        self.codexCredentialsURL = codexCredentialsURL
+        let resolvedCodexCredentialsURL = codexCredentialsURL
             ?? FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".codex/auth.json")
+        self.codexCredentialsURL = resolvedCodexCredentialsURL
+        let codexDirectoryURL = resolvedCodexCredentialsURL.deletingLastPathComponent()
+        self.codexModelsCacheURL = codexModelsCacheURL
+            ?? codexDirectoryURL.appendingPathComponent("models_cache.json")
+        self.codexVersionURL = codexVersionURL
+            ?? codexDirectoryURL.appendingPathComponent("version.json")
     }
 
     func startLogin(redirectURI: String) throws -> OpenAIOAuthStartResponse {
@@ -395,8 +406,8 @@ struct OpenAIOAuthService: @unchecked Sendable {
         Self.logger.info("openai_oauth.disconnected")
     }
 
-    func ensureValidToken() async throws {
-        _ = try await validCredentials()
+    func ensureValidToken(forceRefresh: Bool = false) async throws {
+        _ = try await validCredentials(forceRefresh: forceRefresh)
     }
 
     func importCodexCredentials() async throws -> OpenAIOAuthImportCodexResponse {
@@ -579,9 +590,9 @@ struct OpenAIOAuthService: @unchecked Sendable {
         )
     }
 
-    private func validCredentials() async throws -> StoredAuth {
+    private func validCredentials(forceRefresh: Bool = false) async throws -> StoredAuth {
         let stored = try loadStoredAuth()
-        if Self.tokenNeedsRefresh(stored.tokens.accessToken, now: now()) {
+        if forceRefresh || Self.tokenNeedsRefresh(stored.tokens.accessToken, now: now()) {
             let refreshed = try await refresh(stored: stored)
             try saveStoredAuth(refreshed)
             return refreshed
@@ -590,7 +601,7 @@ struct OpenAIOAuthService: @unchecked Sendable {
     }
 
     private func fetchModels(using stored: StoredAuth) async throws -> [ProviderModelOption] {
-        var request = URLRequest(url: Self.modelsEndpoint)
+        var request = URLRequest(url: modelsEndpoint())
         request.httpMethod = "GET"
         request.setValue("Bearer \(stored.tokens.accessToken)", forHTTPHeaderField: "Authorization")
         request.setValue("codex-cli", forHTTPHeaderField: "User-Agent")
@@ -623,6 +634,31 @@ struct OpenAIOAuthService: @unchecked Sendable {
                 capabilities: capabilities
             )
         }.sorted { $0.id < $1.id }
+    }
+
+    private func modelsEndpoint() -> URL {
+        var components = URLComponents(url: Self.modelsEndpoint, resolvingAgainstBaseURL: false)
+        components?.queryItems = [
+            URLQueryItem(name: "client_version", value: codexClientVersion())
+        ]
+        return components?.url ?? Self.modelsEndpoint
+    }
+
+    private func codexClientVersion() -> String {
+        readStringValue(from: codexModelsCacheURL, key: "client_version")
+            ?? readStringValue(from: codexVersionURL, key: "latest_version")
+            ?? Self.fallbackCodexClientVersion
+    }
+
+    private func readStringValue(from url: URL, key: String) -> String? {
+        guard let data = try? Data(contentsOf: url),
+              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let value = object[key] as? String
+        else {
+            return nil
+        }
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
     }
 
     private func decodeRemoteModels(from data: Data) throws -> [RemoteModelsResponse.Model] {

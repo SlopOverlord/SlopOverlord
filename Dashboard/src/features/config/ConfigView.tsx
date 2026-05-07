@@ -167,11 +167,11 @@ const PROVIDER_CATALOG = [
     id: "gemini",
     brandProviderKey: "gemini",
     title: "Google Gemini",
-    description: "Google Gemini models via API key.",
+    description: "Google Gemini via API key or scoped OAuth.",
     modelHint: "gemini-2.5-flash",
-    authMethod: "api_key",
-    requiresApiKey: true,
-    supportsModelCatalog: false,
+    authMethod: "cli_or_api_key",
+    requiresApiKey: false,
+    supportsModelCatalog: true,
     defaultEntry: {
       title: "gemini",
       apiKey: "",
@@ -545,6 +545,9 @@ function providerIsConfigured(provider, entry) {
   }
   const hasModel = Boolean(String(entry.model || "").trim());
   const hasURL = Boolean(String(entry.apiUrl || "").trim());
+  if (provider.id === "gemini") {
+    return hasModel && hasURL;
+  }
   if (provider.id === "anthropic") {
     return hasModel && Boolean(String(entry.apiKey || "").trim());
   }
@@ -1684,9 +1687,10 @@ export function ConfigView({
 
   function providerEntryFromForm(provider, form) {
     const isAnthropic = provider.id === "anthropic" || provider.id === "anthropic-oauth";
+    const allowsApiKey = provider.requiresApiKey || provider.id === "gemini";
     return {
       title: String(form.title || "").trim() || provider.defaultEntry.title,
-      apiKey: provider.requiresApiKey ? String(form.apiKey || "").trim() : "",
+      apiKey: allowsApiKey ? String(form.apiKey || "").trim() : "",
       apiUrl: isAnthropic
         ? String(form.apiUrl || "").trim()
         : String(form.apiUrl || "").trim() || provider.defaultEntry.apiUrl,
@@ -1780,7 +1784,13 @@ export function ConfigView({
     setProviderStatus(provider.id, "Loading provider models...");
 
     let payload;
-    if (provider.id === "openrouter" || provider.id === "ollama" || provider.id === "anthropic" || provider.id === "anthropic-oauth") {
+    if (
+      provider.id === "openrouter" ||
+      provider.id === "ollama" ||
+      provider.id === "gemini" ||
+      provider.id === "anthropic" ||
+      provider.id === "anthropic-oauth"
+    ) {
       const probe = await probeProvider({
         providerId: provider.id,
         apiKey: String(entry.apiKey || "").trim() || undefined,
@@ -1826,9 +1836,11 @@ export function ConfigView({
           ? "OpenRouter"
           : provider.id === "ollama"
             ? "Ollama"
-            : provider.id === "anthropic-oauth" || provider.id === "anthropic"
-              ? "Anthropic"
-            : "OpenAI";
+            : provider.id === "gemini"
+              ? "Gemini"
+              : provider.id === "anthropic-oauth" || provider.id === "anthropic"
+                ? "Anthropic"
+                : "OpenAI";
       setProviderStatus(provider.id, `Loaded ${models.length} models from ${label}`);
     } else {
       setProviderStatus(provider.id, `Loaded fallback catalog (${models.length} models)`);

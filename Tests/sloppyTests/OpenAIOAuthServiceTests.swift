@@ -102,6 +102,13 @@ func openAIOAuthCompleteLoginStoresTokensAndStatus() async throws {
 func openAIOAuthFetchModelsAcceptsModelsArrayPayload() async throws {
     let workspaceRootURL = FileManager.default.temporaryDirectory
         .appendingPathComponent("openai-oauth-models-\(UUID().uuidString)", isDirectory: true)
+    let codexRootURL = FileManager.default.temporaryDirectory
+        .appendingPathComponent("openai-oauth-models-codex-\(UUID().uuidString)", isDirectory: true)
+    let codexAuthURL = codexRootURL.appendingPathComponent("auth.json")
+    let codexModelsCacheURL = codexRootURL.appendingPathComponent("models_cache.json")
+    try FileManager.default.createDirectory(at: codexRootURL, withIntermediateDirectories: true)
+    try Data(#"{"client_version":"0.128.0"}"#.utf8).write(to: codexModelsCacheURL)
+    let requestedModelsURL = SendableStringBox()
     let accessToken = try makeJWT(
         claims: [
             "exp": NSNumber(value: 2_000_000_000),
@@ -128,6 +135,7 @@ func openAIOAuthFetchModelsAcceptsModelsArrayPayload() async throws {
                 return (Data(body.utf8), makeOAuthHTTPResponse(url: request.url ?? URL(string: "https://auth.openai.com/oauth/token")!))
             }
 
+            requestedModelsURL.value = url
             let modelsBody =
                 """
                 {
@@ -140,9 +148,11 @@ func openAIOAuthFetchModelsAcceptsModelsArrayPayload() async throws {
                     }
                   ]
                 }
-                """
+            """
             return (Data(modelsBody.utf8), makeOAuthHTTPResponse(url: request.url ?? URL(string: "https://chatgpt.com/backend-api/codex/models")!))
-        }
+        },
+        codexCredentialsURL: codexAuthURL,
+        codexModelsCacheURL: codexModelsCacheURL
     )
 
     let start = try service.startLogin(redirectURI: "http://127.0.0.1:4173/config")
@@ -157,6 +167,7 @@ func openAIOAuthFetchModelsAcceptsModelsArrayPayload() async throws {
     #expect(codexModel != nil)
     #expect(codexModel?.contextWindow == "1.0M")
     #expect(codexModel?.capabilities.contains("reasoning") == true)
+    #expect(requestedModelsURL.value.contains("client_version=0.128.0"))
 }
 
 @Test
@@ -244,6 +255,76 @@ func openAIOAuthEnsureValidTokenRefreshesExpiredToken() async throws {
 
     let tokenAfter = service.currentAccessToken()
     #expect(tokenAfter == freshToken)
+}
+
+@Test
+func openAIOAuthEnsureValidTokenCanForceRefreshUnexpiredToken() async throws {
+    let workspaceRootURL = FileManager.default.temporaryDirectory
+        .appendingPathComponent("openai-oauth-force-refresh-\(UUID().uuidString)", isDirectory: true)
+
+    let initialToken = try makeJWT(
+        claims: [
+            "exp": NSNumber(value: 4_000_000_000),
+            "https://api.openai.com/auth": [
+                "chatgpt_account_id": "acct_test_123",
+                "chatgpt_plan_type": "plus"
+            ]
+        ]
+    )
+    let freshToken = try makeJWT(
+        claims: [
+            "exp": NSNumber(value: 4_000_000_001),
+            "https://api.openai.com/auth": [
+                "chatgpt_account_id": "acct_test_123",
+                "chatgpt_plan_type": "plus"
+            ]
+        ]
+    )
+
+    let tracker = SendableFlag()
+    let service = OpenAIOAuthService(
+        workspaceRootURL: workspaceRootURL,
+        transport: { request in
+            let bodyString = request.httpBody.flatMap { String(data: $0, encoding: .utf8) } ?? ""
+            if bodyString.contains("grant_type=refresh_token") {
+                tracker.set()
+                let body =
+                    """
+                    {
+                      "access_token": "\(freshToken)",
+                      "refresh_token": "refresh_new",
+                      "id_token": "id_test"
+                    }
+                    """
+                return (Data(body.utf8), makeOAuthHTTPResponse(url: request.url ?? URL(string: "https://auth.openai.com/oauth/token")!))
+            }
+            let body =
+                """
+                {
+                  "access_token": "\(initialToken)",
+                  "refresh_token": "refresh_initial",
+                  "id_token": "id_test"
+                }
+                """
+            return (Data(body.utf8), makeOAuthHTTPResponse(url: request.url ?? URL(string: "https://auth.openai.com/oauth/token")!))
+        }
+    )
+
+    let start = try service.startLogin(redirectURI: "http://127.0.0.1:4173/config")
+    _ = try await service.completeLogin(
+        request: OpenAIOAuthCompleteRequest(
+            callbackURL: "http://127.0.0.1:4173/config?code=test-code&state=\(start.state)"
+        )
+    )
+
+    tracker.reset()
+    try await service.ensureValidToken()
+    #expect(!tracker.value)
+    #expect(service.currentAccessToken() == initialToken)
+
+    try await service.ensureValidToken(forceRefresh: true)
+    #expect(tracker.value)
+    #expect(service.currentAccessToken() == freshToken)
 }
 
 @Test
@@ -496,4 +577,8 @@ private final class SendableFlag: @unchecked Sendable {
     var value: Bool { _value }
     func set() { _value = true }
     func reset() { _value = false }
+}
+
+private final class SendableStringBox: @unchecked Sendable {
+    var value = ""
 }

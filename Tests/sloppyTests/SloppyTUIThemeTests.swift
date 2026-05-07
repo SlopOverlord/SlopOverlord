@@ -89,6 +89,56 @@ func chromeRowsFitNarrowTerminalWidth() {
 }
 
 @Test
+func backgroundBlocksIncludeBreathingRoom() {
+    let width = 40
+    let lines = SloppyTUITheme.userMessageLines("hello", width: width)
+
+    #expect(lines.count == 3)
+    #expect(stripANSI(lines[0]).trimmingCharacters(in: .whitespaces).isEmpty)
+    #expect(stripANSI(lines[1]).hasPrefix("  › hello"))
+    #expect(stripANSI(lines[2]).trimmingCharacters(in: .whitespaces).isEmpty)
+
+    for line in lines {
+        #expect(VisibleWidth.measure(line) <= width)
+    }
+}
+
+@Test
+func welcomeScreenShowsSingleTip() {
+    let lines = SloppyTUITheme.welcomeScreen(
+        width: 120,
+        cwd: "/Users/vlad-prusakov/Developer/Sloppy",
+        project: "Sloppy",
+        agent: "sloppy",
+        model: "openai:gpt-5-codex-mini",
+        mode: .build,
+        includeFooter: false
+    )
+
+    let tipLines = lines.filter { stripANSI($0).contains("Tip  ") }
+
+    #expect(tipLines.count == 1)
+}
+
+@Test
+func welcomeIntroBlockIsCenteredUnderLogo() throws {
+    let width = 120
+    let lines = SloppyTUITheme.welcomeScreen(
+        width: width,
+        cwd: "/Users/vlad-prusakov/Developer/Sloppy",
+        project: "Sloppy",
+        agent: "sloppy",
+        model: "openai:gpt-5-codex-mini",
+        mode: .build,
+        includeFooter: false
+    )
+
+    let promptLine = try #require(lines.first { stripANSI($0).contains("Ask anything") })
+
+    #expect(leadingSpaceCount(stripANSI(promptLine)) == 28)
+}
+
+@Test
 func elapsedFormatsShortAndLongRuns() {
     #expect(SloppyTUITheme.elapsed(0) == "00:00")
     #expect(SloppyTUITheme.elapsed(65) == "01:05")
@@ -133,6 +183,10 @@ func sessionDisplayTitleKeepsSpecificTitles() {
     )
 
     #expect(SloppyTUITheme.sessionDisplayTitle(session) == "Fork: improve project overlay")
+}
+
+private func leadingSpaceCount(_ line: String) -> Int {
+    line.prefix { $0 == " " }.count
 }
 
 private func stripANSI(_ line: String) -> String {

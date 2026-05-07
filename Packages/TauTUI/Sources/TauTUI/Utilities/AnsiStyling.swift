@@ -39,10 +39,10 @@ public enum AnsiStyling {
 
         public func apply(_ text: String) -> String {
             // Apply background, reapplying after any full reset (0m) or background reset (49m).
-            var withBg = self.start + text + self.end
+            var withBg = text
             withBg = withBg.replacingOccurrences(of: "\u{001B}[0m", with: "\u{001B}[0m" + self.start)
             withBg = withBg.replacingOccurrences(of: "\u{001B}[49m", with: "\u{001B}[49m" + self.start)
-            return withBg
+            return self.start + withBg + self.end
         }
     }
 }
