@@ -138,6 +138,62 @@ func backgroundBlocksIncludeBreathingRoom() {
 }
 
 @Test
+func buildProgressRendersStructuredWrappedLines() {
+    let width = 56
+    let progress = AgentBuildProgressEvent(
+        title: "Project picker UI changes",
+        items: [
+            AgentBuildProgressItem(
+                id: "inspect",
+                title: "Inspect project structure and current project picker UI",
+                status: .done,
+                definitionOfDone: "Locate relevant window/view code, tests, and build commands.",
+                details: "Found ProjectOpeningView and layout tests."
+            ),
+            AgentBuildProgressItem(
+                id: "verify",
+                title: "Verify",
+                status: .inProgress,
+                definitionOfDone: "Run smallest relevant tests and final project build successfully."
+            ),
+        ]
+    )
+
+    let lines = SloppyTUITheme.buildProgressLines(progress, width: width)
+    let plain = lines.map(stripANSI)
+
+    #expect(plain[0].trimmingCharacters(in: .whitespaces) == "Project picker UI changes")
+    #expect(plain.contains { $0.hasPrefix("  [x] Inspect project structure") })
+    #expect(plain.contains { $0.hasPrefix("      ") && $0.contains("UI") })
+    #expect(plain.contains { $0.hasPrefix("      DoD: Locate relevant") })
+    #expect(plain.contains { $0.hasPrefix("      Notes: Found ProjectOpeningView") })
+    #expect(plain.contains { $0.hasPrefix("  [~] Verify") })
+    #expect(!plain.joined(separator: "\n").contains("UI - DoD:"))
+
+    for line in lines {
+        #expect(VisibleWidth.measure(line) <= width)
+    }
+}
+
+@Test
+func buildProgressColorsItemsByStatus() {
+    let progress = AgentBuildProgressEvent(
+        title: "Build progress",
+        items: [
+            AgentBuildProgressItem(id: "done", title: "Done item", status: .done, definitionOfDone: "Complete."),
+            AgentBuildProgressItem(id: "active", title: "Active item", status: .inProgress, definitionOfDone: "Working."),
+            AgentBuildProgressItem(id: "pending", title: "Pending item", status: .pending, definitionOfDone: "Queued."),
+        ]
+    )
+
+    let rendered = SloppyTUITheme.buildProgressLines(progress, width: 80).joined(separator: "\n")
+
+    #expect(rendered.contains("\u{001B}[38;2;74;222;128m"))
+    #expect(rendered.contains("\u{001B}[38;2;251;178;123m"))
+    #expect(rendered.contains("\u{001B}[38;2;148;163;184m"))
+}
+
+@Test
 func welcomeScreenShowsSingleTip() {
     let lines = SloppyTUITheme.welcomeScreen(
         width: 120,

@@ -3281,7 +3281,7 @@ final class SloppyTUIScreen: @preconcurrency Component, @unchecked Sendable {
                     width: width
                 ))
             case .buildProgress(let progress):
-                lines.append(contentsOf: renderMarkdown(buildProgressText(progress), width: width))
+                lines.append(contentsOf: SloppyTUITheme.buildProgressLines(progress, width: width))
             case .inputRequest(let request):
                 lines.append(contentsOf: renderMarkdown(SloppyTUIPlanInputPicker.requestText(request), width: width))
             case .toolCall(let tool, let reason, let summary, let details):
@@ -3308,32 +3308,6 @@ final class SloppyTUIScreen: @preconcurrency Component, @unchecked Sendable {
         default:
             return false
         }
-    }
-
-    private func buildProgressText(_ progress: AgentBuildProgressEvent) -> String {
-        var lines: [String] = ["**\(progress.title)**"]
-        for item in progress.items {
-            let marker: String
-            switch item.status {
-            case .done:
-                marker = "[x]"
-            case .inProgress:
-                marker = "[~]"
-            case .blocked:
-                marker = "[!]"
-            case .skipped:
-                marker = "[-]"
-            case .pending:
-                marker = "[ ]"
-            }
-
-            var line = "\(marker) \(item.title) - DoD: \(item.definitionOfDone)"
-            if let details = item.details?.trimmingCharacters(in: .whitespacesAndNewlines), !details.isEmpty {
-                line += " - \(details)"
-            }
-            lines.append(line)
-        }
-        return lines.joined(separator: "\n")
     }
 
     private func isAnimatedTimelineBlock(_ block: SloppyTUITimelineBlock) -> Bool {

@@ -70,7 +70,8 @@ enum ToolCatalog {
             "type": .string("object"),
             "properties": .object([
                 "path": .object(["type": .string("string")]),
-                "maxBytes": .object(["type": .string("number")])
+                "maxBytes": .object(["type": .string("number")]),
+                "offset": .object(["type": .string("number")])
             ]),
             "required": .array([.string("path")])
         ]),

@@ -386,6 +386,44 @@ enum SloppyTUITheme {
         return paddedBackgroundBlock(contentLines, width: width, background: thinkingBackground)
     }
 
+    static func buildProgressLines(_ progress: AgentBuildProgressEvent, width: Int) -> [String] {
+        let title = " " + accentBright(AnsiStyling.bold(progress.title.trimmingCharacters(in: .whitespacesAndNewlines)))
+        var lines = [fittedLine(title, width: width)]
+
+        for item in progress.items {
+            let marker = buildProgressMarker(for: item.status)
+            let itemPrefix = "  \(marker.text) "
+            let detailPrefix = "      "
+            let itemStyle = buildProgressStyle(for: item.status)
+            lines.append(contentsOf: wrappedBuildProgressLines(
+                item.title,
+                firstPrefix: itemPrefix,
+                continuationPrefix: detailPrefix,
+                width: width,
+                style: { itemStyle(AnsiStyling.bold($0)) },
+                prefixStyle: marker.style
+            ))
+            lines.append(contentsOf: wrappedBuildProgressLines(
+                "DoD: \(item.definitionOfDone)",
+                firstPrefix: detailPrefix,
+                continuationPrefix: detailPrefix,
+                width: width,
+                style: styledBuildProgressDetail
+            ))
+            if let details = item.details?.trimmingCharacters(in: .whitespacesAndNewlines), !details.isEmpty {
+                lines.append(contentsOf: wrappedBuildProgressLines(
+                    "Notes: \(details)",
+                    firstPrefix: detailPrefix,
+                    continuationPrefix: detailPrefix,
+                    width: width,
+                    style: styledBuildProgressDetail
+                ))
+            }
+        }
+
+        return lines
+    }
+
     static func toolCallLine(tool: String, reason: String?, summary: String?, width: Int) -> String {
         let summaryText = summary?.trimmingCharacters(in: .whitespacesAndNewlines)
         let args = summaryText?.isEmpty == false ? muted(" · \(summaryText!)") : ""
@@ -858,6 +896,90 @@ enum SloppyTUITheme {
 
     private static func backgroundPaddingLine(width: Int, background: AnsiStyling.Background) -> String {
         applyBackground(padded("", width: width), width: width, background: background)
+    }
+
+    private static func wrappedBuildProgressLines(
+        _ text: String,
+        firstPrefix: String,
+        continuationPrefix: String,
+        width: Int,
+        style: (String) -> String,
+        prefixStyle: ((String) -> String)? = nil
+    ) -> [String] {
+        let normalized = text
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
+        let content = normalized.isEmpty ? " " : normalized
+        let firstWidth = max(1, width - VisibleWidth.measure(firstPrefix))
+        let firstWrapped = AnsiWrapping.wrapText(content, width: firstWidth)
+        guard let first = firstWrapped.first else {
+            return [fittedLine(firstPrefix, width: width)]
+        }
+
+        var lines = [styledBuildProgressLine(prefix: firstPrefix, text: first, style: style, prefixStyle: prefixStyle, width: width)]
+        let remaining = firstWrapped.dropFirst()
+        let continuationWidth = max(1, width - VisibleWidth.measure(continuationPrefix))
+        for fragment in remaining {
+            for wrapped in AnsiWrapping.wrapText(fragment, width: continuationWidth) {
+                lines.append(styledBuildProgressLine(
+                    prefix: continuationPrefix,
+                    text: wrapped,
+                    style: style,
+                    prefixStyle: nil,
+                    width: width
+                ))
+            }
+        }
+        return lines
+    }
+
+    private static func styledBuildProgressLine(
+        prefix: String,
+        text: String,
+        style: (String) -> String,
+        prefixStyle: ((String) -> String)?,
+        width: Int
+    ) -> String {
+        let styledPrefix = prefixStyle?(prefix) ?? muted(prefix)
+        return fittedLine(styledPrefix + style(text), width: width)
+    }
+
+    private static func styledBuildProgressDetail(_ text: String) -> String {
+        if text.hasPrefix("DoD: ") {
+            return muted("DoD: ") + foreground(String(text.dropFirst(5)))
+        }
+        if text.hasPrefix("Notes: ") {
+            return muted("Notes: ") + foreground(String(text.dropFirst(7)))
+        }
+        return foreground(text)
+    }
+
+    private static func buildProgressMarker(for status: AgentBuildProgressStatus) -> (text: String, style: (String) -> String) {
+        switch status {
+        case .done:
+            return ("[x]", green)
+        case .inProgress:
+            return ("[~]", orange)
+        case .blocked:
+            return ("[!]", red)
+        case .skipped:
+            return ("[-]", muted)
+        case .pending:
+            return ("[ ]", muted)
+        }
+    }
+
+    private static func buildProgressStyle(for status: AgentBuildProgressStatus) -> (String) -> String {
+        switch status {
+        case .done:
+            return green
+        case .inProgress:
+            return orange
+        case .blocked:
+            return red
+        case .skipped, .pending:
+            return muted
+        }
     }
 
     private static func selectedLine(_ line: String) -> String {
