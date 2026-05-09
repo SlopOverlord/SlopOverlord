@@ -332,7 +332,7 @@ enum SloppyTUITheme {
         let contentLines = lines.enumerated().map { index, line in
             let prefix = index == 0 ? "› " : "  "
             return applyBackground(
-                blockLeftPadding + muted(prefix) + highlightedFileReferences(in: line),
+                blockLeftPadding + muted(prefix) + highlightedMessageReferences(in: line),
                 width: width,
                 background: userMessageBackground
             )
@@ -355,7 +355,7 @@ enum SloppyTUITheme {
         let lines = [header] + bodyLines
         let contentLines = lines.enumerated().map { index, line in
             let prefix = index == 0 ? "⏳ " : "  "
-            let styled = index == 0 ? muted(line) : highlightedFileReferences(in: line)
+            let styled = index == 0 ? muted(line) : highlightedMessageReferences(in: line)
             return applyBackground(
                 blockLeftPadding + muted(prefix) + styled,
                 width: width,
@@ -944,31 +944,31 @@ enum SloppyTUITheme {
         return ellipsis + result
     }
 
-    private static func highlightedFileReferences(in line: String) -> String {
-        let pattern = #"@[A-Za-z0-9._/\-~]+"#
-        guard let regex = try? NSRegularExpression(pattern: pattern) else {
-            return foreground(line)
-        }
-        let nsRange = NSRange(line.startIndex..<line.endIndex, in: line)
-        let matches = regex.matches(in: line, range: nsRange)
-        guard !matches.isEmpty else {
+    private static func highlightedMessageReferences(in line: String) -> String {
+        let spans = messageHighlightSpans(in: line)
+        guard !spans.isEmpty else {
             return foreground(line)
         }
 
         var result = ""
         var cursor = line.startIndex
-        for match in matches {
-            guard let range = Range(match.range, in: line) else { continue }
+        for span in spans {
+            let range = span.range
             if range.lowerBound > cursor {
                 result += foreground(String(line[cursor..<range.lowerBound]))
             }
-            result += yellow(String(line[range]))
+            result += span.style(String(line[range]))
             cursor = range.upperBound
         }
         if cursor < line.endIndex {
             result += foreground(String(line[cursor..<line.endIndex]))
         }
         return result
+    }
+
+    private struct MessageHighlightSpan {
+        var range: Range<String.Index>
+        var style: (String) -> String
     }
 
     private struct ComposerHighlightSpan {
@@ -1033,6 +1033,13 @@ enum SloppyTUITheme {
     private static func composerHighlightSpans(in line: String) -> [ComposerHighlightSpan] {
         var spans: [ComposerHighlightSpan] = []
         appendComposerSpans(
+            pattern: #"(\[paste #[0-9]+(?: [^\]]+)?\])"#,
+            captureGroup: 1,
+            style: { orange(AnsiStyling.bold($0)) },
+            line: line,
+            spans: &spans
+        )
+        appendComposerSpans(
             pattern: #"(^|\s)(@[A-Za-z0-9._/\-~]+)"#,
             captureGroup: 2,
             style: { yellow($0) },
@@ -1043,6 +1050,39 @@ enum SloppyTUITheme {
             pattern: #"(^|\s)(/[A-Za-z0-9_][A-Za-z0-9_-]*)"#,
             captureGroup: 2,
             style: { accentBright(AnsiStyling.bold($0)) },
+            line: line,
+            spans: &spans
+        )
+        appendComposerSpans(
+            pattern: #"(^|\s)(#[A-Za-z0-9][A-Za-z0-9._:-]*)"#,
+            captureGroup: 2,
+            style: { green(AnsiStyling.bold($0)) },
+            line: line,
+            spans: &spans
+        )
+        return spans.sorted { $0.range.lowerBound < $1.range.lowerBound }
+    }
+
+    private static func messageHighlightSpans(in line: String) -> [MessageHighlightSpan] {
+        var spans: [MessageHighlightSpan] = []
+        appendMessageSpans(
+            pattern: #"(\[paste #[0-9]+(?: [^\]]+)?\])"#,
+            captureGroup: 1,
+            style: { orange(AnsiStyling.bold($0)) },
+            line: line,
+            spans: &spans
+        )
+        appendMessageSpans(
+            pattern: #"(^|\s)(@[A-Za-z0-9._/\-~]+)"#,
+            captureGroup: 2,
+            style: { yellow($0) },
+            line: line,
+            spans: &spans
+        )
+        appendMessageSpans(
+            pattern: #"(^|\s)(#[A-Za-z0-9][A-Za-z0-9._:-]*)"#,
+            captureGroup: 2,
+            style: { green(AnsiStyling.bold($0)) },
             line: line,
             spans: &spans
         )
@@ -1079,7 +1119,38 @@ enum SloppyTUITheme {
         }
     }
 
+    private static func appendMessageSpans(
+        pattern: String,
+        captureGroup: Int,
+        style: @escaping (String) -> String,
+        line: String,
+        spans: inout [MessageHighlightSpan]
+    ) {
+        guard let regex = try? NSRegularExpression(pattern: pattern) else {
+            return
+        }
+
+        let nsRange = NSRange(line.startIndex..<line.endIndex, in: line)
+        for match in regex.matches(in: line, range: nsRange) {
+            let capturedRange = match.range(at: captureGroup)
+            guard capturedRange.location != NSNotFound,
+                  let range = Range(capturedRange, in: line)
+            else {
+                continue
+            }
+
+            guard !spans.contains(where: { overlaps($0.range, range) }) else {
+                continue
+            }
+            spans.append(MessageHighlightSpan(range: range, style: style))
+        }
+    }
+
     private static func overlaps(_ lhs: Range<Int>, _ rhs: Range<Int>) -> Bool {
+        lhs.lowerBound < rhs.upperBound && rhs.lowerBound < lhs.upperBound
+    }
+
+    private static func overlaps(_ lhs: Range<String.Index>, _ rhs: Range<String.Index>) -> Bool {
         lhs.lowerBound < rhs.upperBound && rhs.lowerBound < lhs.upperBound
     }
 

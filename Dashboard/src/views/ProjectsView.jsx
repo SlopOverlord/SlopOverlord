@@ -1805,6 +1805,7 @@ export function ProjectsView({
           replaceProjectInState(updated, true);
           return updated;
         }}
+        onReplaceProject={(updated) => replaceProjectInState(updated, true)}
         deleteProject={deleteProject}
         onArchiveProject={archiveProject}
         openAddChannelModal={openAddChannelModal}

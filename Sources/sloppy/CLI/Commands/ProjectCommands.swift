@@ -11,6 +11,7 @@ struct ProjectCommand: SloppyGroupCommand {
             ProjectCreateCommand.self,
             ProjectUpdateCommand.self,
             ProjectDeleteCommand.self,
+            ProjectTaskSyncCommand.self,
             ProjectTaskCommand.self,
             ProjectChannelCommand.self,
             ProjectMemoryCommand.self,
@@ -130,6 +131,167 @@ struct ProjectDeleteCommand: AsyncParsableCommand {
         do {
             _ = try await client.delete("/v1/projects/\(projectId)")
             CLIStyle.success("Project \(CLIStyle.whiteBold(projectId)) deleted.")
+        } catch {
+            CLIStyle.error(error.localizedDescription); throw ExitCode.failure
+        }
+    }
+}
+
+// MARK: - Task Sync
+
+struct ProjectTaskSyncCommand: SloppyGroupCommand {
+    static let configuration = CommandConfiguration(
+        commandName: "task-sync",
+        abstract: "Manage project task sync.",
+        subcommands: [
+            ProjectTaskSyncStatusCommand.self,
+            ProjectTaskSyncLinkCommand.self,
+            ProjectTaskSyncSyncCommand.self,
+            ProjectTaskSyncUnlinkCommand.self,
+            ProjectTaskSyncTokenCommand.self,
+        ]
+    )
+}
+
+struct ProjectTaskSyncStatusCommand: AsyncParsableCommand {
+    static let configuration = CommandConfiguration(commandName: "status", abstract: "Show task sync status.")
+
+    @Argument(help: "Project ID") var projectId: String
+    @Option(name: .long) var url: String?
+    @Option(name: .long) var token: String?
+    @Option(name: .long) var format: String = "json"
+    @Flag(name: .long) var verbose: Bool = false
+
+    mutating func run() async throws {
+        let client = SloppyCLIClient.resolve(url: url, token: token, verbose: verbose)
+        do {
+            let data = try await client.get("/v1/projects/\(projectId)/task-sync")
+            CLIFormatters.output(data, format: CLIFormatters.resolveFormat(format))
+        } catch {
+            CLIStyle.error(error.localizedDescription); throw ExitCode.failure
+        }
+    }
+}
+
+struct ProjectTaskSyncLinkCommand: AsyncParsableCommand {
+    static let configuration = CommandConfiguration(commandName: "link", abstract: "Link GitHub Projects task sync.")
+
+    @Argument(help: "Project ID") var projectId: String
+    @Option(name: .long, help: "GitHub Project URL") var projectUrl: String
+    @Option(name: .long, help: "Default issue repository owner/repo") var defaultRepo: String?
+    @Option(name: .long, help: "Token mode: inherit or override") var tokenMode: String = "inherit"
+    @Option(name: .long) var url: String?
+    @Option(name: .long) var token: String?
+    @Option(name: .long) var format: String = "json"
+    @Flag(name: .long) var verbose: Bool = false
+
+    mutating func run() async throws {
+        let client = SloppyCLIClient.resolve(url: url, token: token, verbose: verbose)
+        var payload: [String: Any] = [
+            "providerId": "github",
+            "projectURL": projectUrl,
+            "tokenMode": tokenMode
+        ]
+        if let defaultRepo { payload["defaultRepo"] = defaultRepo }
+        do {
+            let body = try JSONSerialization.data(withJSONObject: payload)
+            let data = try await client.post("/v1/projects/\(projectId)/task-sync/link", body: body)
+            CLIStyle.success("Task sync linked.")
+            CLIFormatters.output(data, format: CLIFormatters.resolveFormat(format))
+        } catch {
+            CLIStyle.error(error.localizedDescription); throw ExitCode.failure
+        }
+    }
+}
+
+struct ProjectTaskSyncSyncCommand: AsyncParsableCommand {
+    static let configuration = CommandConfiguration(commandName: "sync", abstract: "Run manual task sync.")
+
+    @Argument(help: "Project ID") var projectId: String
+    @Option(name: .long) var url: String?
+    @Option(name: .long) var token: String?
+    @Option(name: .long) var format: String = "json"
+    @Flag(name: .long) var verbose: Bool = false
+
+    mutating func run() async throws {
+        let client = SloppyCLIClient.resolve(url: url, token: token, verbose: verbose)
+        do {
+            let data = try await client.post("/v1/projects/\(projectId)/task-sync/sync-now")
+            CLIFormatters.output(data, format: CLIFormatters.resolveFormat(format))
+        } catch {
+            CLIStyle.error(error.localizedDescription); throw ExitCode.failure
+        }
+    }
+}
+
+struct ProjectTaskSyncUnlinkCommand: AsyncParsableCommand {
+    static let configuration = CommandConfiguration(commandName: "unlink", abstract: "Disable task sync.")
+
+    @Argument(help: "Project ID") var projectId: String
+    @Option(name: .long) var url: String?
+    @Option(name: .long) var token: String?
+    @Option(name: .long) var format: String = "json"
+    @Flag(name: .long) var verbose: Bool = false
+
+    mutating func run() async throws {
+        let client = SloppyCLIClient.resolve(url: url, token: token, verbose: verbose)
+        do {
+            let data = try await client.post("/v1/projects/\(projectId)/task-sync/unlink")
+            CLIFormatters.output(data, format: CLIFormatters.resolveFormat(format))
+        } catch {
+            CLIStyle.error(error.localizedDescription); throw ExitCode.failure
+        }
+    }
+}
+
+struct ProjectTaskSyncTokenCommand: SloppyGroupCommand {
+    static let configuration = CommandConfiguration(
+        commandName: "token",
+        abstract: "Manage project task sync token override.",
+        subcommands: [
+            ProjectTaskSyncTokenSetCommand.self,
+            ProjectTaskSyncTokenClearCommand.self,
+        ]
+    )
+}
+
+struct ProjectTaskSyncTokenSetCommand: AsyncParsableCommand {
+    static let configuration = CommandConfiguration(commandName: "set", abstract: "Set project task sync token override.")
+
+    @Argument(help: "Project ID") var projectId: String
+    @Option(name: .long, help: "GitHub token") var githubToken: String
+    @Option(name: .long) var url: String?
+    @Option(name: .long) var token: String?
+    @Option(name: .long) var format: String = "json"
+    @Flag(name: .long) var verbose: Bool = false
+
+    mutating func run() async throws {
+        let client = SloppyCLIClient.resolve(url: url, token: token, verbose: verbose)
+        do {
+            let body = try JSONSerialization.data(withJSONObject: ["token": githubToken])
+            let data = try await client.post("/v1/projects/\(projectId)/task-sync/token?providerId=github", body: body)
+            CLIStyle.success("Task sync token saved.")
+            CLIFormatters.output(data, format: CLIFormatters.resolveFormat(format))
+        } catch {
+            CLIStyle.error(error.localizedDescription); throw ExitCode.failure
+        }
+    }
+}
+
+struct ProjectTaskSyncTokenClearCommand: AsyncParsableCommand {
+    static let configuration = CommandConfiguration(commandName: "clear", abstract: "Clear project task sync token override.")
+
+    @Argument(help: "Project ID") var projectId: String
+    @Option(name: .long) var url: String?
+    @Option(name: .long) var token: String?
+    @Option(name: .long) var format: String = "json"
+    @Flag(name: .long) var verbose: Bool = false
+
+    mutating func run() async throws {
+        let client = SloppyCLIClient.resolve(url: url, token: token, verbose: verbose)
+        do {
+            let data = try await client.delete("/v1/projects/\(projectId)/task-sync/token?providerId=github")
+            CLIFormatters.output(data, format: CLIFormatters.resolveFormat(format))
         } catch {
             CLIStyle.error(error.localizedDescription); throw ExitCode.failure
         }

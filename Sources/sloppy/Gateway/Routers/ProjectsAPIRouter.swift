@@ -218,6 +218,104 @@ struct ProjectsAPIRouter: APIRouter {
             }
         }
 
+        router.get("/v1/projects/:projectId/task-sync", metadata: RouteMetadata(summary: "Get project task sync settings", description: "Returns task sync settings for a project", tags: ["Projects"])) { request in
+            let projectId = request.pathParam("projectId") ?? ""
+            do {
+                let settings = try await service.getTaskSyncSettings(projectID: projectId)
+                return CoreRouter.encodable(status: HTTPStatus.ok, payload: settings)
+            } catch {
+                return CoreRouter.json(status: HTTPStatus.notFound, payload: ["error": "task_sync_not_found"])
+            }
+        }
+
+        router.patch("/v1/projects/:projectId/task-sync", metadata: RouteMetadata(summary: "Update project task sync settings", description: "Updates task sync settings for a project", tags: ["Projects"])) { request in
+            let projectId = request.pathParam("projectId") ?? ""
+            guard let body = request.body,
+                  let payload = CoreRouter.decode(body, as: ProjectTaskSyncSettingsUpdateRequest.self)
+            else {
+                return CoreRouter.json(status: HTTPStatus.badRequest, payload: ["error": ErrorCode.invalidBody])
+            }
+            do {
+                let response = try await service.updateTaskSyncSettings(projectID: projectId, request: payload)
+                return CoreRouter.encodable(status: HTTPStatus.ok, payload: response)
+            } catch {
+                return CoreRouter.json(status: HTTPStatus.badRequest, payload: ["error": "task_sync_update_failed"])
+            }
+        }
+
+        router.post("/v1/projects/:projectId/task-sync/link", metadata: RouteMetadata(summary: "Link project task sync", description: "Links a project to an external task provider", tags: ["Projects"])) { request in
+            let projectId = request.pathParam("projectId") ?? ""
+            guard let body = request.body,
+                  let payload = CoreRouter.decode(body, as: ProjectTaskSyncLinkRequest.self)
+            else {
+                return CoreRouter.json(status: HTTPStatus.badRequest, payload: ["error": ErrorCode.invalidBody])
+            }
+            do {
+                let response = try await service.linkTaskSync(projectID: projectId, request: payload)
+                return CoreRouter.encodable(status: HTTPStatus.ok, payload: response)
+            } catch {
+                return CoreRouter.json(status: HTTPStatus.badRequest, payload: ["error": "task_sync_link_failed", "message": error.localizedDescription])
+            }
+        }
+
+        router.post("/v1/projects/:projectId/task-sync/unlink", metadata: RouteMetadata(summary: "Unlink project task sync", description: "Disables task sync for a project", tags: ["Projects"])) { request in
+            let projectId = request.pathParam("projectId") ?? ""
+            do {
+                let response = try await service.unlinkTaskSync(projectID: projectId)
+                return CoreRouter.encodable(status: HTTPStatus.ok, payload: response)
+            } catch {
+                return CoreRouter.json(status: HTTPStatus.badRequest, payload: ["error": "task_sync_unlink_failed"])
+            }
+        }
+
+        router.post("/v1/projects/:projectId/task-sync/sync-now", metadata: RouteMetadata(summary: "Run project task sync", description: "Runs manual sync for linked project tasks", tags: ["Projects"])) { request in
+            let projectId = request.pathParam("projectId") ?? ""
+            do {
+                let response = try await service.syncTaskSyncNow(projectID: projectId)
+                return CoreRouter.encodable(status: HTTPStatus.ok, payload: response)
+            } catch {
+                return CoreRouter.json(status: HTTPStatus.badRequest, payload: ["error": "task_sync_failed", "message": error.localizedDescription])
+            }
+        }
+
+        router.get("/v1/projects/:projectId/task-sync/token", metadata: RouteMetadata(summary: "Get project task sync token status", description: "Returns masked project task sync token status", tags: ["Projects"])) { request in
+            let projectId = request.pathParam("projectId") ?? ""
+            let providerId = request.queryParam("providerId") ?? "github"
+            do {
+                let response = try await service.taskSyncTokenStatus(projectID: projectId, providerId: providerId)
+                return CoreRouter.encodable(status: HTTPStatus.ok, payload: response)
+            } catch {
+                return CoreRouter.json(status: HTTPStatus.badRequest, payload: ["error": "task_sync_token_status_failed"])
+            }
+        }
+
+        router.post("/v1/projects/:projectId/task-sync/token", metadata: RouteMetadata(summary: "Set project task sync token", description: "Stores a project-local task sync token override", tags: ["Projects"])) { request in
+            let projectId = request.pathParam("projectId") ?? ""
+            let providerId = request.queryParam("providerId") ?? "github"
+            guard let body = request.body,
+                  let payload = CoreRouter.decode(body, as: ProjectTaskSyncTokenRequest.self)
+            else {
+                return CoreRouter.json(status: HTTPStatus.badRequest, payload: ["error": ErrorCode.invalidBody])
+            }
+            do {
+                let response = try await service.setTaskSyncToken(projectID: projectId, providerId: providerId, token: payload.token)
+                return CoreRouter.encodable(status: HTTPStatus.ok, payload: response)
+            } catch {
+                return CoreRouter.json(status: HTTPStatus.badRequest, payload: ["error": "task_sync_token_set_failed"])
+            }
+        }
+
+        router.delete("/v1/projects/:projectId/task-sync/token", metadata: RouteMetadata(summary: "Clear project task sync token", description: "Clears a project-local task sync token override", tags: ["Projects"])) { request in
+            let projectId = request.pathParam("projectId") ?? ""
+            let providerId = request.queryParam("providerId") ?? "github"
+            do {
+                let response = try await service.clearTaskSyncToken(projectID: projectId, providerId: providerId)
+                return CoreRouter.encodable(status: HTTPStatus.ok, payload: response)
+            } catch {
+                return CoreRouter.json(status: HTTPStatus.badRequest, payload: ["error": "task_sync_token_clear_failed"])
+            }
+        }
+
         router.patch("/v1/projects/:projectId", metadata: RouteMetadata(summary: "Update project", description: "Updates the details of an existing project", tags: ["Projects"])) { request in
             let projectId = request.pathParam("projectId") ?? ""
             guard let body = request.body,

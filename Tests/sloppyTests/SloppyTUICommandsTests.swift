@@ -1,4 +1,5 @@
 import Foundation
+import Protocols
 import TauTUI
 import Testing
 @testable import sloppy
@@ -112,6 +113,35 @@ func doubleEscapeDetectorResetsOnOtherInput() {
 }
 
 @Test
+func controlCExitDetectorRequiresSecondNearbyPress() {
+    var detector = SloppyTUIControlCExitDetector(interval: 2)
+    let first = Date(timeIntervalSince1970: 100)
+    let second = first.addingTimeInterval(1.5)
+    let firstResult = detector.shouldExit(now: first)
+    let secondResult = detector.shouldExit(now: second)
+
+    #expect(!firstResult)
+    #expect(secondResult)
+}
+
+@Test
+func controlCExitDetectorIgnoresSlowOrResetPresses() {
+    var detector = SloppyTUIControlCExitDetector(interval: 2)
+    let first = Date(timeIntervalSince1970: 100)
+    let slowSecond = first.addingTimeInterval(3)
+    let afterReset = slowSecond.addingTimeInterval(1)
+    let firstResult = detector.shouldExit(now: first)
+    let slowResult = detector.shouldExit(now: slowSecond)
+
+    #expect(!firstResult)
+    #expect(!slowResult)
+
+    detector.reset()
+    let resetResult = detector.shouldExit(now: afterReset)
+    #expect(!resetResult)
+}
+
+@Test
 func pickerSearchFiltersAcrossLabelDescriptionAndGroup() {
     let items = [
         SloppyTUIPickerItem(
@@ -162,4 +192,16 @@ func pickerSearchRestoresItemsAfterClearingQuery() {
 
     picker.clearSearchQuery()
     #expect(picker.items.map(\.value) == ["openai:gpt-5.4-mini", "openai:o4-mini"])
+}
+
+@Test
+func launchDraftSessionIsNotPersistedSessionID() {
+    let agent = AgentSummary(id: "sloppy", displayName: "SLOPPY", role: "SLOPPY")
+    let session = SloppyTUIApp.makeDraftSession(agent: agent, projectID: "project-1")
+
+    #expect(session.id == "new")
+    #expect(session.agentId == "sloppy")
+    #expect(session.title == "New session")
+    #expect(session.projectId == "project-1")
+    #expect(!session.id.hasPrefix("session-"))
 }

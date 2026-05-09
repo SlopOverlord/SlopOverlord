@@ -19,6 +19,21 @@ func composerHighlightsSlashCommandsAndAtPaths() {
 }
 
 @Test
+func composerHighlightsPasteMarkersAndTaskReferences() {
+    let lines = [
+        "\u{001B}[38;2;82;211;194m────────\u{001B}[39m",
+        "Please inspect [paste #1 +12 lines] for #task-123",
+        "\u{001B}[38;2;82;211;194m────────\u{001B}[39m",
+    ]
+
+    let highlighted = SloppyTUITheme.highlightedComposerLines(lines)
+
+    #expect(highlighted[1].contains("\u{001B}[38;2;251;178;123m"))
+    #expect(highlighted[1].contains("\u{001B}[38;2;74;222;128m"))
+    #expect(stripANSI(highlighted[1]) == lines[1])
+}
+
+@Test
 func composerDoesNotHighlightAutocompleteAfterEditorBorder() {
     let lines = [
         "\u{001B}[38;2;82;211;194m────────\u{001B}[39m",
@@ -31,6 +46,15 @@ func composerDoesNotHighlightAutocompleteAfterEditorBorder() {
 
     #expect(highlighted[1].contains("\u{001B}[38;2;103;232;249m"))
     #expect(highlighted[3] == lines[3])
+}
+
+@Test
+func userMessageHighlightsTaskReferences() {
+    let lines = SloppyTUITheme.userMessageLines("Handle #task-123 with @Sources/sloppy/TUI", width: 80)
+    let rendered = lines.joined(separator: "\n")
+
+    #expect(rendered.contains("\u{001B}[38;2;74;222;128m"))
+    #expect(rendered.contains("\u{001B}[38;2;250;204;21m"))
 }
 
 @Test

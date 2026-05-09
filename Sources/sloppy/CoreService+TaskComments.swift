@@ -25,6 +25,7 @@ extension CoreService {
         )
         comments.append(comment)
         saveTaskComments(comments, projectID: projectID, taskID: taskID)
+        await mirrorOutboundCommentIfNeeded(projectID: projectID, taskID: taskID, commentID: comment.id)
 
         if let mentionedActorId = request.mentionedActorId {
             let agents = (try? listAgents()) ?? []

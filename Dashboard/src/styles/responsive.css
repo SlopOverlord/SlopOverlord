@@ -163,6 +163,7 @@
   .project-details-grid,
   .providers-list,
   .providers-opencode-grid,
+  .config-capability-grid,
   .provider-modal-form,
   .updates-status-grid {
     grid-template-columns: 1fr;

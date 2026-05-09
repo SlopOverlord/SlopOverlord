@@ -1,10 +1,20 @@
 import React, { useState, useMemo, useEffect, useRef } from "react";
+import {
+    fetchProjectTaskSync,
+    linkProjectTaskSync,
+    unlinkProjectTaskSync,
+    syncProjectTasksNow,
+    fetchProjectTaskSyncToken,
+    setProjectTaskSyncToken,
+    clearProjectTaskSyncToken
+} from "../../api";
 
 const SETTINGS_TABS = [
     { id: "general", title: "General", icon: "settings" },
     { id: "actors", title: "Actors", icon: "group" },
     { id: "loop", title: "Task Loop Mode", icon: "sync" },
-    { id: "review", title: "Git Worktree & Review", icon: "rate_review" }
+    { id: "review", title: "Git Worktree & Review", icon: "rate_review" },
+    { id: "task_sync", title: "Task Sync", icon: "sync_alt" }
 ];
 
 const APPROVAL_MODES = [
@@ -96,11 +106,29 @@ function cloneDraft(project) {
     };
 }
 
+function cloneTaskSyncDraft(project) {
+    const settings = project?.taskSyncSettings || {};
+    return {
+        enabled: Boolean(settings.enabled),
+        providerId: settings.providerId || "github",
+        projectURL: settings.projectURL || "",
+        projectNodeId: settings.projectNodeId || "",
+        defaultRepo: settings.defaultRepo || "",
+        tokenMode: settings.tokenMode || "inherit",
+        statusMappingsText: Object.entries(settings.statusMappings || {})
+            .map(([key, value]) => `${key}=${value}`)
+            .join("\n"),
+        health: settings.health || {},
+        webhook: settings.webhook || {}
+    };
+}
+
 export function ProjectSettingsTab({
     project,
     onUpdateProject,
     deleteProject,
     onArchiveProject,
+    onReplaceProject,
     openAddChannelModal,
     removeProjectChannel,
     availableActors = [],
@@ -117,10 +145,30 @@ export function ProjectSettingsTab({
     const [teamSearch, setTeamSearch] = useState("");
     const [teamDropdownOpen, setTeamDropdownOpen] = useState(false);
     const teamSearchRef = useRef(null);
+    const [taskSyncDraft, setTaskSyncDraft] = useState(() => cloneTaskSyncDraft(project));
+    const [taskSyncToken, setTaskSyncToken] = useState("");
+    const [taskSyncTokenStatus, setTaskSyncTokenStatus] = useState(null);
+    const [taskSyncBusy, setTaskSyncBusy] = useState(false);
 
     useEffect(() => {
         setDraft(cloneDraft(project));
+        setTaskSyncDraft(cloneTaskSyncDraft(project));
     }, [project?.id, project?.updatedAt]);
+
+    useEffect(() => {
+        let cancelled = false;
+        async function loadTaskSync() {
+            const [settings, tokenStatus] = await Promise.all([
+                fetchProjectTaskSync(project.id),
+                fetchProjectTaskSyncToken(project.id, "github")
+            ]);
+            if (cancelled) return;
+            if (settings) setTaskSyncDraft((prev) => ({ ...prev, ...cloneTaskSyncDraft({ taskSyncSettings: settings }) }));
+            if (tokenStatus) setTaskSyncTokenStatus(tokenStatus);
+        }
+        loadTaskSync();
+        return () => { cancelled = true; };
+    }, [project.id, project.updatedAt]);
 
     const hasChanges = useMemo(() => {
         const saved = cloneDraft(project);
@@ -133,6 +181,29 @@ export function ProjectSettingsTab({
             mutator(next);
             return next;
         });
+    }
+
+    function mutateTaskSync(mutator) {
+        setTaskSyncDraft((prev) => {
+            const next = JSON.parse(JSON.stringify(prev));
+            mutator(next);
+            return next;
+        });
+    }
+
+    function parseStatusMappings(text) {
+        return String(text || "")
+            .split("\n")
+            .map((line) => line.trim())
+            .filter(Boolean)
+            .reduce((acc, line) => {
+                const idx = line.indexOf("=");
+                if (idx <= 0) return acc;
+                const key = line.slice(0, idx).trim();
+                const value = line.slice(idx + 1).trim();
+                if (key && value) acc[key] = value;
+                return acc;
+            }, {});
     }
 
     async function saveSettings() {
@@ -893,6 +964,183 @@ export function ProjectSettingsTab({
         );
     }
 
+    async function runTaskSyncAction(action) {
+        setTaskSyncBusy(true);
+        setStatusText("");
+        const result = await action();
+        if (result?.project && onReplaceProject) {
+            onReplaceProject(result.project);
+        }
+        setTaskSyncBusy(false);
+        return result;
+    }
+
+    function renderTaskSync() {
+        const health = taskSyncDraft.health || {};
+        const webhook = taskSyncDraft.webhook || {};
+        return (
+            <section className="entry-editor-card">
+                <h3>GitHub Projects</h3>
+                <div className="review-toggle-row">
+                    <div className="review-toggle-label">
+                        <span className="material-symbols-rounded review-toggle-icon">sync_alt</span>
+                        <div>
+                            <strong>Issue-backed task sync</strong>
+                            <p className="review-toggle-desc">
+                                Sloppy tasks link to GitHub issues and Project items. GitHub-origin comments stay read-only for agents.
+                            </p>
+                        </div>
+                    </div>
+                    <label className="agent-tools-switch">
+                        <input
+                            type="checkbox"
+                            checked={taskSyncDraft.enabled}
+                            onChange={(e) => mutateTaskSync((d) => { d.enabled = e.target.checked; })}
+                        />
+                        <span className="agent-tools-switch-track" />
+                    </label>
+                </div>
+
+                <div className="entry-form-grid" style={{ marginTop: 16 }}>
+                    <label style={{ gridColumn: "1 / -1" }}>
+                        GitHub Project URL
+                        <input
+                            type="text"
+                            placeholder="https://github.com/orgs/AdaEngine/projects/2"
+                            value={taskSyncDraft.projectURL}
+                            onChange={(e) => mutateTaskSync((d) => { d.projectURL = e.target.value; })}
+                        />
+                    </label>
+                    <label>
+                        Default repo
+                        <input
+                            type="text"
+                            placeholder="owner/repo"
+                            value={taskSyncDraft.defaultRepo}
+                            onChange={(e) => mutateTaskSync((d) => { d.defaultRepo = e.target.value; })}
+                        />
+                    </label>
+                    <label>
+                        Token mode
+                        <div className="review-approval-options" style={{ gridTemplateColumns: "repeat(2, minmax(0, 1fr))" }}>
+                            {["inherit", "override"].map((mode) => (
+                                <button
+                                    key={mode}
+                                    type="button"
+                                    className={`review-approval-option ${taskSyncDraft.tokenMode === mode ? "active" : ""}`}
+                                    onClick={() => mutateTaskSync((d) => { d.tokenMode = mode; })}
+                                >
+                                    <span className="material-symbols-rounded review-approval-icon">{mode === "inherit" ? "key" : "vpn_key"}</span>
+                                    <strong className="review-approval-name">{mode === "inherit" ? "Inherit" : "Override"}</strong>
+                                </button>
+                            ))}
+                        </div>
+                    </label>
+                    <label style={{ gridColumn: "1 / -1" }}>
+                        Status mappings
+                        <textarea
+                            rows={5}
+                            placeholder={"ready=Todo\nin_progress=In Progress\ndone=Done"}
+                            value={taskSyncDraft.statusMappingsText}
+                            onChange={(e) => mutateTaskSync((d) => { d.statusMappingsText = e.target.value; })}
+                        />
+                    </label>
+                </div>
+
+                <div className="settings-danger-confirm-actions" style={{ marginTop: 16 }}>
+                    <button
+                        type="button"
+                        className="hover-levitate"
+                        disabled={taskSyncBusy || !taskSyncDraft.projectURL.trim()}
+                        onClick={async () => {
+                            const result = await runTaskSyncAction(() => linkProjectTaskSync(project.id, {
+                                providerId: "github",
+                                projectURL: taskSyncDraft.projectURL.trim(),
+                                defaultRepo: taskSyncDraft.defaultRepo.trim() || null,
+                                tokenMode: taskSyncDraft.tokenMode,
+                                statusMappings: parseStatusMappings(taskSyncDraft.statusMappingsText)
+                            }));
+                            setStatusText(result ? "Task sync linked" : "Task sync link failed");
+                        }}
+                    >
+                        Link
+                    </button>
+                    <button
+                        type="button"
+                        className="hover-levitate"
+                        disabled={taskSyncBusy}
+                        onClick={async () => {
+                            const result = await runTaskSyncAction(() => syncProjectTasksNow(project.id));
+                            setStatusText(result ? "Manual sync finished" : "Manual sync failed");
+                        }}
+                    >
+                        Sync Now
+                    </button>
+                    <button
+                        type="button"
+                        className="danger hover-levitate"
+                        disabled={taskSyncBusy}
+                        onClick={async () => {
+                            const result = await runTaskSyncAction(() => unlinkProjectTaskSync(project.id));
+                            setStatusText(result ? "Task sync unlinked" : "Task sync unlink failed");
+                        }}
+                    >
+                        Unlink
+                    </button>
+                </div>
+
+                <div className="review-section-divider" />
+                <div className="entry-form-grid">
+                    <label style={{ gridColumn: "1 / -1" }}>
+                        Override token
+                        <input
+                            type="password"
+                            placeholder={taskSyncTokenStatus?.maskedToken || "GitHub token"}
+                            value={taskSyncToken}
+                            onChange={(e) => setTaskSyncToken(e.target.value)}
+                        />
+                    </label>
+                </div>
+                <div className="settings-danger-confirm-actions" style={{ marginTop: 12 }}>
+                    <button
+                        type="button"
+                        className="hover-levitate"
+                        disabled={taskSyncBusy || !taskSyncToken.trim()}
+                        onClick={async () => {
+                            const result = await setProjectTaskSyncToken(project.id, { token: taskSyncToken.trim() }, "github");
+                            setTaskSyncToken("");
+                            setTaskSyncTokenStatus(result || null);
+                            setStatusText(result ? "Override token saved" : "Token save failed");
+                        }}
+                    >
+                        Save Token
+                    </button>
+                    <button
+                        type="button"
+                        className="danger hover-levitate"
+                        disabled={taskSyncBusy || !taskSyncTokenStatus?.hasOverrideToken}
+                        onClick={async () => {
+                            const result = await clearProjectTaskSyncToken(project.id, "github");
+                            setTaskSyncTokenStatus(result || null);
+                            setStatusText(result ? "Override token cleared" : "Token clear failed");
+                        }}
+                    >
+                        Clear Token
+                    </button>
+                </div>
+
+                <div className="review-agent-hint" style={{ marginTop: 16 }}>
+                    <span className="material-symbols-rounded" style={{ fontSize: "1rem", color: "var(--accent)" }}>info</span>
+                    <span>
+                        Health: <strong>{health.status || "unknown"}</strong>
+                        {health.message ? ` - ${health.message}` : ""}
+                        {webhook.webhookURL ? ` Webhook: ${webhook.webhookURL}` : ""}
+                    </span>
+                </div>
+            </section>
+        );
+    }
+
     function renderSettingsContent() {
         switch (selectedSettings) {
             case "general":
@@ -911,6 +1159,8 @@ export function ProjectSettingsTab({
                 return renderLoop();
             case "review":
                 return renderReview();
+            case "task_sync":
+                return renderTaskSync();
             default:
                 return null;
         }

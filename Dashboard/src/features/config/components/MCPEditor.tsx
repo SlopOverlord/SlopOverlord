@@ -39,6 +39,36 @@ function ensureMCPServer(draft, index, emptyMCPServer) {
   return draft.mcp.servers[index];
 }
 
+function serverStatus(server) {
+  if (!server?.enabled) {
+    return { label: "disabled", tone: "off" };
+  }
+  if (server.transport === "http") {
+    return Boolean(String(server.endpoint || "").trim())
+      ? { label: "enabled", tone: "on" }
+      : { label: "missing endpoint", tone: "off" };
+  }
+  return Boolean(String(server.command || "").trim())
+    ? { label: "enabled", tone: "on" }
+    : { label: "missing command", tone: "off" };
+}
+
+function CapabilitySwitch({ label, checked, onChange }) {
+  return (
+    <label className="config-capability-toggle">
+      <span>{label}</span>
+      <span className="agent-tools-switch">
+        <input
+          type="checkbox"
+          checked={checked}
+          onChange={(event) => onChange(event.target.checked)}
+        />
+        <span className="agent-tools-switch-track" />
+      </span>
+    </label>
+  );
+}
+
 export function MCPEditor({
   draftConfig,
   selectedMCPServerIndex,
@@ -50,14 +80,16 @@ export function MCPEditor({
   const servers = Array.isArray(draftConfig.mcp?.servers) ? draftConfig.mcp.servers : [];
   const current = servers[selectedMCPServerIndex] || emptyMCPServer();
   const isHTTP = current.transport === "http";
+  const currentStatus = serverStatus(current);
 
   return (
-    <div className="entry-editor-layout">
-      <div className="entry-list">
+    <div className="entry-editor-layout config-integration-layout">
+      <div className="entry-list config-integration-list">
         <div className="entry-list-head">
           <h4>MCP servers</h4>
           <button
             type="button"
+            className="config-integration-add-button"
             onClick={() => {
               mutateDraft((draft) => {
                 if (!draft.mcp) {
@@ -71,29 +103,55 @@ export function MCPEditor({
               onSelectMCPServerIndex(servers.length);
             }}
           >
-            + Add Server
+            <span className="material-symbols-rounded" aria-hidden>
+              add
+            </span>
+            <span>Add</span>
           </button>
         </div>
         <div className="entry-list-scroll">
           {servers.length === 0 ? (
-            <p className="entry-editor-empty">No MCP servers configured.</p>
+            <p className="entry-editor-empty config-integration-empty">No MCP servers configured.</p>
           ) : null}
-          {servers.map((item, index) => (
-            <button
-              key={`${item.id || "mcp-server"}-${index}`}
-              type="button"
-              className={`entry-list-item ${index === selectedMCPServerIndex ? "active" : ""}`}
-              onClick={() => onSelectMCPServerIndex(index)}
-            >
-              {item.id || `mcp-server-${index + 1}`}
-            </button>
-          ))}
+          {servers.map((item, index) => {
+            const status = serverStatus(item);
+            return (
+              <button
+                key={`${item.id || "mcp-server"}-${index}`}
+                type="button"
+                className={`entry-list-item config-integration-list-item ${index === selectedMCPServerIndex ? "active" : ""}`}
+                onClick={() => onSelectMCPServerIndex(index)}
+              >
+                <span className="providers-cli-card-icon material-symbols-rounded" aria-hidden>
+                  account_tree
+                </span>
+                <span className="config-integration-list-main">
+                  <span className="config-integration-list-title">{item.id || `mcp-server-${index + 1}`}</span>
+                  <span className="config-integration-list-subtitle">
+                    {item.transport === "http" ? item.endpoint || "HTTP endpoint" : item.command || "stdio command"}
+                  </span>
+                  <span className={`provider-state ${status.tone}`}>{status.label}</span>
+                </span>
+              </button>
+            );
+          })}
         </div>
       </div>
 
-      <section className="entry-editor-card">
-        <div className="entry-editor-head">
-          <h3>{current.id || "MCP server"}</h3>
+      <section className="entry-editor-card config-integration-card">
+        <div className="entry-editor-head config-integration-head">
+          <div className="config-integration-title-row">
+            <span className="provider-list-icon" aria-hidden="true">
+              <span className="material-symbols-rounded">account_tree</span>
+            </span>
+            <div className="config-integration-heading">
+              <h3>{current.id || "MCP server"}</h3>
+              <span className="provider-model-line">
+                {isHTTP ? current.endpoint || "HTTP endpoint" : current.command || "stdio command"}
+              </span>
+            </div>
+            <span className={`provider-state ${currentStatus.tone}`}>{currentStatus.label}</span>
+          </div>
           <button
             type="button"
             className="danger"
@@ -111,7 +169,7 @@ export function MCPEditor({
           </button>
         </div>
 
-        <section className="entry-editor-block" style={{ marginTop: 0, marginBottom: 10 }}>
+        <section className="entry-editor-block config-integration-note">
           <p className="entry-editor-empty">
             MCP servers add external tools, resources, and prompts for agents. Use stdio for local commands like
             npx packages, or HTTP for hosted MCP endpoints.
@@ -133,18 +191,34 @@ export function MCPEditor({
           </label>
           <label>
             Transport
-            <select
-              value={current.transport}
-              onChange={(event) =>
-                mutateDraft((draft) => {
-                  const server = ensureMCPServer(draft, selectedMCPServerIndex, emptyMCPServer);
-                  server.transport = event.target.value === "http" ? "http" : "stdio";
-                })
-              }
-            >
-              <option value="stdio">stdio</option>
-              <option value="http">http</option>
-            </select>
+            <div className="provider-auth-mode-segmented config-segmented" role="tablist" aria-label="MCP transport">
+              <button
+                type="button"
+                role="tab"
+                aria-selected={!isHTTP}
+                className={!isHTTP ? "active" : ""}
+                onClick={() =>
+                  mutateDraft((draft) => {
+                    ensureMCPServer(draft, selectedMCPServerIndex, emptyMCPServer).transport = "stdio";
+                  })
+                }
+              >
+                stdio
+              </button>
+              <button
+                type="button"
+                role="tab"
+                aria-selected={isHTTP}
+                className={isHTTP ? "active" : ""}
+                onClick={() =>
+                  mutateDraft((draft) => {
+                    ensureMCPServer(draft, selectedMCPServerIndex, emptyMCPServer).transport = "http";
+                  })
+                }
+              >
+                http
+              </button>
+            </div>
           </label>
           {isHTTP ? (
             <>
@@ -246,61 +320,52 @@ export function MCPEditor({
             />
           </label>
           <label>
-            Enabled
-            <select
-              value={current.enabled ? "enabled" : "disabled"}
-              onChange={(event) =>
+            Runtime
+            <div className="config-field-toggle">
+              <span>{current.enabled ? "Enabled" : "Disabled"}</span>
+              <span className="agent-tools-switch">
+                <input
+                  type="checkbox"
+                  checked={Boolean(current.enabled)}
+                  onChange={(event) =>
+                    mutateDraft((draft) => {
+                      ensureMCPServer(draft, selectedMCPServerIndex, emptyMCPServer).enabled = event.target.checked;
+                    })
+                  }
+                />
+                <span className="agent-tools-switch-track" />
+              </span>
+            </div>
+          </label>
+          <div className="config-capability-grid">
+            <CapabilitySwitch
+              label="Expose tools"
+              checked={Boolean(current.exposeTools)}
+              onChange={(checked) =>
                 mutateDraft((draft) => {
-                  ensureMCPServer(draft, selectedMCPServerIndex, emptyMCPServer).enabled = event.target.value === "enabled";
+                  ensureMCPServer(draft, selectedMCPServerIndex, emptyMCPServer).exposeTools = checked;
                 })
               }
-            >
-              <option value="enabled">Enabled</option>
-              <option value="disabled">Disabled</option>
-            </select>
-          </label>
-          <label>
-            Expose Tools
-            <select
-              value={current.exposeTools ? "yes" : "no"}
-              onChange={(event) =>
+            />
+            <CapabilitySwitch
+              label="Expose resources"
+              checked={Boolean(current.exposeResources)}
+              onChange={(checked) =>
                 mutateDraft((draft) => {
-                  ensureMCPServer(draft, selectedMCPServerIndex, emptyMCPServer).exposeTools = event.target.value === "yes";
+                  ensureMCPServer(draft, selectedMCPServerIndex, emptyMCPServer).exposeResources = checked;
                 })
               }
-            >
-              <option value="yes">Yes</option>
-              <option value="no">No</option>
-            </select>
-          </label>
-          <label>
-            Expose Resources
-            <select
-              value={current.exposeResources ? "yes" : "no"}
-              onChange={(event) =>
+            />
+            <CapabilitySwitch
+              label="Expose prompts"
+              checked={Boolean(current.exposePrompts)}
+              onChange={(checked) =>
                 mutateDraft((draft) => {
-                  ensureMCPServer(draft, selectedMCPServerIndex, emptyMCPServer).exposeResources = event.target.value === "yes";
+                  ensureMCPServer(draft, selectedMCPServerIndex, emptyMCPServer).exposePrompts = checked;
                 })
               }
-            >
-              <option value="yes">Yes</option>
-              <option value="no">No</option>
-            </select>
-          </label>
-          <label>
-            Expose Prompts
-            <select
-              value={current.exposePrompts ? "yes" : "no"}
-              onChange={(event) =>
-                mutateDraft((draft) => {
-                  ensureMCPServer(draft, selectedMCPServerIndex, emptyMCPServer).exposePrompts = event.target.value === "yes";
-                })
-              }
-            >
-              <option value="yes">Yes</option>
-              <option value="no">No</option>
-            </select>
-          </label>
+            />
+          </div>
         </div>
       </section>
     </div>

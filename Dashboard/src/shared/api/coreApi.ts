@@ -112,6 +112,14 @@ export interface CoreApi {
   fetchTaskByReference: (taskReference: string) => Promise<AnyRecord | null>;
   createProject: (payload: AnyRecord) => Promise<{ project: AnyRecord; repoCloneSucceeded: boolean | null } | null>;
   updateProject: (projectId: string, payload: AnyRecord) => Promise<AnyRecord | null>;
+  fetchProjectTaskSync: (projectId: string) => Promise<AnyRecord | null>;
+  updateProjectTaskSync: (projectId: string, payload: AnyRecord) => Promise<AnyRecord | null>;
+  linkProjectTaskSync: (projectId: string, payload: AnyRecord) => Promise<AnyRecord | null>;
+  unlinkProjectTaskSync: (projectId: string) => Promise<AnyRecord | null>;
+  syncProjectTasksNow: (projectId: string) => Promise<AnyRecord | null>;
+  fetchProjectTaskSyncToken: (projectId: string, providerId?: string) => Promise<AnyRecord | null>;
+  setProjectTaskSyncToken: (projectId: string, payload: AnyRecord, providerId?: string) => Promise<AnyRecord | null>;
+  clearProjectTaskSyncToken: (projectId: string, providerId?: string) => Promise<AnyRecord | null>;
   refreshProjectContext: (projectId: string) => Promise<AnyRecord | null>;
   deleteProject: (projectId: string) => Promise<boolean>;
   createProjectChannel: (projectId: string, payload: AnyRecord) => Promise<AnyRecord | null>;
@@ -778,6 +786,79 @@ export function createCoreApi(): CoreApi {
       if (!response.ok) {
         return null;
       }
+      return response.data;
+    },
+
+    fetchProjectTaskSync: async (projectId) => {
+      const response = await requestJson<AnyRecord>({
+        path: `/v1/projects/${encodeURIComponent(projectId)}/task-sync`
+      });
+      if (!response.ok) return null;
+      return response.data;
+    },
+
+    updateProjectTaskSync: async (projectId, payload) => {
+      const response = await requestJson<AnyRecord, AnyRecord>({
+        path: `/v1/projects/${encodeURIComponent(projectId)}/task-sync`,
+        method: "PATCH",
+        body: payload
+      });
+      if (!response.ok) return null;
+      return response.data;
+    },
+
+    linkProjectTaskSync: async (projectId, payload) => {
+      const response = await requestJson<AnyRecord, AnyRecord>({
+        path: `/v1/projects/${encodeURIComponent(projectId)}/task-sync/link`,
+        method: "POST",
+        body: payload
+      });
+      if (!response.ok) return null;
+      return response.data;
+    },
+
+    unlinkProjectTaskSync: async (projectId) => {
+      const response = await requestJson<AnyRecord>({
+        path: `/v1/projects/${encodeURIComponent(projectId)}/task-sync/unlink`,
+        method: "POST"
+      });
+      if (!response.ok) return null;
+      return response.data;
+    },
+
+    syncProjectTasksNow: async (projectId) => {
+      const response = await requestJson<AnyRecord>({
+        path: `/v1/projects/${encodeURIComponent(projectId)}/task-sync/sync-now`,
+        method: "POST"
+      });
+      if (!response.ok) return null;
+      return response.data;
+    },
+
+    fetchProjectTaskSyncToken: async (projectId, providerId = "github") => {
+      const response = await requestJson<AnyRecord>({
+        path: `/v1/projects/${encodeURIComponent(projectId)}/task-sync/token?providerId=${encodeURIComponent(providerId)}`
+      });
+      if (!response.ok) return null;
+      return response.data;
+    },
+
+    setProjectTaskSyncToken: async (projectId, payload, providerId = "github") => {
+      const response = await requestJson<AnyRecord, AnyRecord>({
+        path: `/v1/projects/${encodeURIComponent(projectId)}/task-sync/token?providerId=${encodeURIComponent(providerId)}`,
+        method: "POST",
+        body: payload
+      });
+      if (!response.ok) return null;
+      return response.data;
+    },
+
+    clearProjectTaskSyncToken: async (projectId, providerId = "github") => {
+      const response = await requestJson<AnyRecord>({
+        path: `/v1/projects/${encodeURIComponent(projectId)}/task-sync/token?providerId=${encodeURIComponent(providerId)}`,
+        method: "DELETE"
+      });
+      if (!response.ok) return null;
       return response.data;
     },
 

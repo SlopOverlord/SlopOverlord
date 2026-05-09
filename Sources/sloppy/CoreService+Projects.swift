@@ -758,11 +758,15 @@ extension CoreService {
         project.updatedAt = now
         await store.saveProject(project)
         await kanbanEventService.push(KanbanEvent(type: .taskCreated, projectId: normalizedID, task: task))
+        await syncOutboundTaskIfNeeded(projectID: normalizedID, taskID: task.id)
         if normalizedStatus == ProjectTaskStatus.ready.rawValue {
             await handleTaskBecameReady(projectID: normalizedID, taskID: task.id)
             if let updated = await store.project(id: normalizedID) {
                 return updated
             }
+        }
+        if let updated = await store.project(id: normalizedID) {
+            return updated
         }
         return project
     }
@@ -849,6 +853,9 @@ extension CoreService {
         project.updatedAt = Date()
         await store.saveProject(project)
         await kanbanEventService.push(KanbanEvent(type: .taskUpdated, projectId: normalizedProject, task: task))
+        if changedBy != "github" {
+            await syncOutboundTaskIfNeeded(projectID: normalizedProject, taskID: task.id)
+        }
 
         await recordTaskFieldChanges(
             projectID: normalizedProject,

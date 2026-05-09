@@ -91,7 +91,7 @@ final class AgentSessionFileStore {
         if let trimmedTitle, !trimmedTitle.isEmpty {
             title = trimmedTitle
         } else {
-            title = "Session \(sessionID.prefix(8))"
+            title = "Session \(Self.shortSessionID(sessionID))"
         }
 
         let projectIdMeta: String? = {
@@ -473,6 +473,14 @@ final class AgentSessionFileStore {
             return nil
         }
         return try normalizedSessionID(trimmed)
+    }
+
+    private static func shortSessionID(_ sessionID: String) -> String {
+        let prefix = "session-"
+        if sessionID.hasPrefix(prefix) {
+            return String(sessionID.dropFirst(prefix.count).prefix(8))
+        }
+        return String(sessionID.prefix(8))
     }
 
     private func sanitizeFilename(_ raw: String) -> String {

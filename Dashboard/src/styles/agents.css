@@ -1183,6 +1183,9 @@ body.agent-chat-no-page-scroll .page {
 .agent-chat-session-directory-label {
   flex: 1;
   min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .agent-chat-session-directory-count {

@@ -31,14 +31,19 @@ struct SloppyTUIApp {
         let selection = state.selections[selectionKey]
 
         let agents = (try? await runtime.service.listAgents(includeSystem: false)) ?? []
-        let resolved: (agent: AgentSummary, session: AgentSessionSummary)
+        let resolved: SloppyTUILaunchSelection
         if let requestedSessionID = requestedSessionID?.trimmingCharacters(in: .whitespacesAndNewlines),
            !requestedSessionID.isEmpty {
-            resolved = try await resolveExplicitSession(
+            let explicit = try await resolveExplicitSession(
                 service: runtime.service,
                 projectID: project.id,
                 sessionID: requestedSessionID,
                 agents: agents
+            )
+            resolved = SloppyTUILaunchSelection(
+                agent: explicit.agent,
+                session: explicit.session,
+                hasPersistedSession: true
             )
         } else {
             let agent = try await resolveAgent(
@@ -46,18 +51,20 @@ struct SloppyTUIApp {
                 preferredID: selection?.agentId,
                 agents: agents
             )
-            let session = try await createFreshSession(
-                service: runtime.service,
-                projectID: project.id,
-                agentID: agent.id
+            resolved = SloppyTUILaunchSelection(
+                agent: agent,
+                session: Self.makeDraftSession(agent: agent, projectID: project.id),
+                hasPersistedSession: false
             )
-            resolved = (agent, session)
         }
         let agent = resolved.agent
         let session = resolved.session
 
         var nextState = state
-        nextState.selections[selectionKey] = .init(agentId: agent.id, sessionId: session.id)
+        nextState.selections[selectionKey] = .init(
+            agentId: agent.id,
+            sessionId: resolved.hasPersistedSession ? session.id : nil
+        )
         nextState.welcomeTipCursor = state.welcomeTipCursor + 1
         stateStore.save(nextState)
 
@@ -68,6 +75,7 @@ struct SloppyTUIApp {
                     project: project,
                     agent: agent,
                     session: session,
+                    hasPersistedSession: resolved.hasPersistedSession,
                     stateStore: stateStore,
                     state: nextState,
                     welcomeTipCursor: state.welcomeTipCursor,
@@ -86,6 +94,7 @@ struct SloppyTUIApp {
         project: ProjectRecord,
         agent: AgentSummary,
         session: AgentSessionSummary,
+        hasPersistedSession: Bool,
         stateStore: SloppyTUIStateStore,
         state: SloppyTUIState,
         welcomeTipCursor: Int,
@@ -101,6 +110,7 @@ struct SloppyTUIApp {
                 project: project,
                 agent: agent,
                 session: session,
+                hasPersistedSession: hasPersistedSession,
                 stateStore: stateStore,
                 state: state,
                 welcomeTipCursor: welcomeTipCursor,
@@ -116,7 +126,9 @@ struct SloppyTUIApp {
             tui.setFocus(screen)
 
             tui.onControlC = {
-                runHandle.finish()
+                Task { @MainActor in
+                    screen.handleControlC()
+                }
             }
 
             try tui.start()
@@ -147,19 +159,6 @@ struct SloppyTUIApp {
         )
     }
 
-    private func createFreshSession(
-        service: CoreService,
-        projectID: String,
-        agentID: String
-    ) async throws -> AgentSessionSummary {
-        return try await service.createAgentSession(
-            agentID: agentID,
-            request: AgentSessionCreateRequest(
-                projectId: projectID
-            )
-        )
-    }
-
     private func resolveExplicitSession(
         service: CoreService,
         projectID: String,
@@ -174,6 +173,21 @@ struct SloppyTUIApp {
         }
         throw SloppyTUIError.sessionNotFound(sessionID)
     }
+
+    static func makeDraftSession(agent: AgentSummary, projectID: String) -> AgentSessionSummary {
+        AgentSessionSummary(
+            id: "new",
+            agentId: agent.id,
+            title: "New session",
+            projectId: projectID
+        )
+    }
+}
+
+private struct SloppyTUILaunchSelection {
+    var agent: AgentSummary
+    var session: AgentSessionSummary
+    var hasPersistedSession: Bool
 }
 
 private enum SloppyTUIError: LocalizedError {

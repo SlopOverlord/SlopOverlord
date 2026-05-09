@@ -307,6 +307,8 @@ public struct ProjectTask: Codable, Sendable, Equatable {
     public var worktreeBranch: String?
     /// When set and present in the agent's available models, overrides the agent default model for this task's worker run.
     public var selectedModel: String?
+    public var externalMetadata: TaskExternalMetadata?
+    public var tags: [String]
     public var routeHistory: [ProjectTaskRouteStep]
     public var isArchived: Bool
     public var createdAt: Date
@@ -335,6 +337,8 @@ public struct ProjectTask: Codable, Sendable, Equatable {
         case swarmActorPath
         case worktreeBranch
         case selectedModel
+        case externalMetadata
+        case tags
         case routeHistory
         case isArchived
         case createdAt
@@ -364,6 +368,8 @@ public struct ProjectTask: Codable, Sendable, Equatable {
         swarmActorPath: [String]? = nil,
         worktreeBranch: String? = nil,
         selectedModel: String? = nil,
+        externalMetadata: TaskExternalMetadata? = nil,
+        tags: [String] = [],
         routeHistory: [ProjectTaskRouteStep] = [],
         isArchived: Bool = false,
         createdAt: Date = Date(),
@@ -391,6 +397,8 @@ public struct ProjectTask: Codable, Sendable, Equatable {
         self.swarmActorPath = swarmActorPath
         self.worktreeBranch = worktreeBranch
         self.selectedModel = selectedModel
+        self.externalMetadata = externalMetadata
+        self.tags = tags
         self.routeHistory = routeHistory
         self.isArchived = isArchived
         self.createdAt = createdAt
@@ -421,6 +429,8 @@ public struct ProjectTask: Codable, Sendable, Equatable {
         swarmActorPath = try container.decodeIfPresent([String].self, forKey: .swarmActorPath)
         worktreeBranch = try container.decodeIfPresent(String.self, forKey: .worktreeBranch)
         selectedModel = try container.decodeIfPresent(String.self, forKey: .selectedModel)
+        externalMetadata = try container.decodeIfPresent(TaskExternalMetadata.self, forKey: .externalMetadata)
+        tags = try container.decodeIfPresent([String].self, forKey: .tags) ?? []
         routeHistory = try container.decodeIfPresent([ProjectTaskRouteStep].self, forKey: .routeHistory) ?? []
         isArchived = try container.decodeIfPresent(Bool.self, forKey: .isArchived) ?? false
         createdAt = try container.decodeIfPresent(Date.self, forKey: .createdAt) ?? Date()
@@ -480,13 +490,14 @@ public struct ProjectRecord: Codable, Sendable, Equatable {
     public var repoPath: String?
     public var reviewSettings: ProjectReviewSettings
     public var taskLoopMode: ProjectLoopMode
+    public var taskSyncSettings: ProjectTaskSyncSettings
     public var isArchived: Bool
     public var createdAt: Date
     public var updatedAt: Date
 
     private enum CodingKeys: String, CodingKey {
         case id, name, description, icon, channels, tasks, actors, teams, models
-        case agentFiles, heartbeat, repoPath, reviewSettings, taskLoopMode, isArchived, createdAt, updatedAt
+        case agentFiles, heartbeat, repoPath, reviewSettings, taskLoopMode, taskSyncSettings, isArchived, createdAt, updatedAt
     }
 
     public init(
@@ -504,6 +515,7 @@ public struct ProjectRecord: Codable, Sendable, Equatable {
         repoPath: String? = nil,
         reviewSettings: ProjectReviewSettings = ProjectReviewSettings(),
         taskLoopMode: ProjectLoopMode = .human,
+        taskSyncSettings: ProjectTaskSyncSettings = ProjectTaskSyncSettings(),
         isArchived: Bool = false,
         createdAt: Date = Date(),
         updatedAt: Date = Date()
@@ -522,6 +534,7 @@ public struct ProjectRecord: Codable, Sendable, Equatable {
         self.repoPath = repoPath
         self.reviewSettings = reviewSettings
         self.taskLoopMode = taskLoopMode
+        self.taskSyncSettings = taskSyncSettings
         self.isArchived = isArchived
         self.createdAt = createdAt
         self.updatedAt = updatedAt
@@ -543,6 +556,7 @@ public struct ProjectRecord: Codable, Sendable, Equatable {
         repoPath = try container.decodeIfPresent(String.self, forKey: .repoPath)
         reviewSettings = try container.decodeIfPresent(ProjectReviewSettings.self, forKey: .reviewSettings) ?? ProjectReviewSettings()
         taskLoopMode = try container.decodeIfPresent(ProjectLoopMode.self, forKey: .taskLoopMode) ?? .human
+        taskSyncSettings = try container.decodeIfPresent(ProjectTaskSyncSettings.self, forKey: .taskSyncSettings) ?? ProjectTaskSyncSettings()
         isArchived = try container.decodeIfPresent(Bool.self, forKey: .isArchived) ?? false
         createdAt = try container.decode(Date.self, forKey: .createdAt)
         updatedAt = try container.decodeIfPresent(Date.self, forKey: .updatedAt) ?? createdAt
@@ -4445,6 +4459,8 @@ public struct TaskComment: Codable, Sendable, Identifiable {
     public var authorActorId: String
     public var mentionedActorId: String?
     public var isAgentReply: Bool
+    public var externalMetadata: TaskExternalMetadata?
+    public var sourceAuthor: String?
     public var createdAt: Date
 
     public init(
@@ -4454,6 +4470,8 @@ public struct TaskComment: Codable, Sendable, Identifiable {
         authorActorId: String,
         mentionedActorId: String? = nil,
         isAgentReply: Bool = false,
+        externalMetadata: TaskExternalMetadata? = nil,
+        sourceAuthor: String? = nil,
         createdAt: Date = Date()
     ) {
         self.id = id
@@ -4462,6 +4480,8 @@ public struct TaskComment: Codable, Sendable, Identifiable {
         self.authorActorId = authorActorId
         self.mentionedActorId = mentionedActorId
         self.isAgentReply = isAgentReply
+        self.externalMetadata = externalMetadata
+        self.sourceAuthor = sourceAuthor
         self.createdAt = createdAt
     }
 }

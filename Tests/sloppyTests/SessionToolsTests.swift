@@ -87,6 +87,26 @@ struct SessionToolsTests {
         )
     }
 
+    @Test("createSession default title includes UUID suffix")
+    func createSessionDefaultTitleIncludesUUIDSuffix() throws {
+        let rootURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("default-session-title-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: rootURL) }
+
+        let catalogStore = makeCatalogStore(rootURL: rootURL)
+        _ = try catalogStore.createAgent(
+            AgentCreateRequest(id: "test-agent", displayName: "Test Agent", role: "Testing"),
+            availableModels: []
+        )
+
+        let store = makeSessionStore(rootURL: rootURL)
+        let session = try store.createSession(agentID: "test-agent", request: AgentSessionCreateRequest())
+        let expectedSuffix = String(session.id.dropFirst("session-".count).prefix(8))
+
+        #expect(session.title == "Session \(expectedSuffix)")
+        #expect(session.title != "Session session-")
+    }
+
     @Test("sessions.history loads current session")
     func sessionsHistoryLoadsCurrent() async throws {
         let rootURL = FileManager.default.temporaryDirectory

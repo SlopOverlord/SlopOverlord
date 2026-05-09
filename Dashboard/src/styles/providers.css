@@ -424,6 +424,160 @@
   color: var(--text);
 }
 
+.config-integration-layout {
+  align-items: start;
+}
+
+.config-integration-list {
+  background: var(--surface-2);
+}
+
+.config-integration-add-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-width: auto;
+}
+
+.config-integration-add-button .material-symbols-rounded {
+  font-size: 1rem;
+  line-height: 1;
+}
+
+.config-integration-list-item {
+  display: grid;
+  grid-template-columns: 34px minmax(0, 1fr);
+  gap: 10px;
+  align-items: start;
+  min-height: 58px;
+  padding: 10px;
+  background: var(--surface-2);
+}
+
+.config-integration-list-item:hover {
+  background: var(--surface-3);
+}
+
+.config-integration-list-item.active {
+  color: var(--text);
+  background: var(--surface-3);
+}
+
+.config-integration-list-item.active .providers-cli-card-icon {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.config-integration-list-main {
+  min-width: 0;
+  display: grid;
+  gap: 4px;
+  justify-items: start;
+}
+
+.config-integration-list-title {
+  max-width: 100%;
+  color: var(--text);
+  font-weight: 700;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.config-integration-list-subtitle {
+  max-width: 100%;
+  color: var(--muted);
+  font-size: 0.78rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.config-integration-card {
+  border: 1px solid var(--line);
+  background: var(--surface-2);
+  padding: 14px;
+}
+
+.config-integration-head {
+  gap: 12px;
+  align-items: flex-start;
+  margin-bottom: 12px;
+}
+
+.config-integration-title-row {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.config-integration-heading {
+  min-width: 0;
+  display: grid;
+  gap: 4px;
+}
+
+.config-integration-heading h3 {
+  overflow-wrap: anywhere;
+}
+
+.config-integration-empty {
+  border: 1px solid var(--line);
+  background: var(--surface);
+  padding: 10px;
+}
+
+.config-integration-note {
+  margin-top: 0;
+  margin-bottom: 10px;
+  background: var(--surface-3);
+}
+
+.config-integration-layout .provider-state {
+  display: inline-flex;
+  align-items: center;
+  width: fit-content;
+  border: 1px solid;
+  font-size: 0.72rem;
+  padding: 2px 6px;
+}
+
+.config-segmented button {
+  min-height: 39px;
+}
+
+.config-field-toggle {
+  min-height: 41px;
+  border: 1px solid var(--line);
+  background: var(--surface);
+  color: var(--text);
+  padding: 8px 10px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.config-capability-grid {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.config-capability-toggle {
+  min-height: 44px;
+  border: 1px solid var(--line);
+  background: var(--surface);
+  color: var(--text);
+  padding: 8px 10px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
 .providers-list {
   display: grid;
   grid-template-columns: 1fr;

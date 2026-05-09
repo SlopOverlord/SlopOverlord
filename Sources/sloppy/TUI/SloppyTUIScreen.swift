@@ -145,6 +145,7 @@ final class SloppyTUIScreen: @preconcurrency Component, @unchecked Sendable {
     private var project: ProjectRecord
     private var agent: AgentSummary
     private var session: AgentSessionSummary
+    private var hasPersistedSession: Bool
     private let stateStore: SloppyTUIStateStore
     private var state: SloppyTUIState
     private let welcomeTipCursor: Int
@@ -211,6 +212,8 @@ final class SloppyTUIScreen: @preconcurrency Component, @unchecked Sendable {
     private var queuedMessages = SloppyTUIMessageQueue()
     private var isDrainingQueuedMessages = false
     private var isInterruptingRun = false
+    private var isExiting = false
+    private var controlCExitDetector = SloppyTUIControlCExitDetector()
     private var exitAfterModelSelection = false
     private var nextLocalCardID = 0
     private var localCardDismissTasks: [Int: Task<Void, Never>] = [:]
@@ -222,6 +225,7 @@ final class SloppyTUIScreen: @preconcurrency Component, @unchecked Sendable {
         project: ProjectRecord,
         agent: AgentSummary,
         session: AgentSessionSummary,
+        hasPersistedSession: Bool,
         stateStore: SloppyTUIStateStore,
         state: SloppyTUIState,
         welcomeTipCursor: Int = 0,
@@ -233,6 +237,7 @@ final class SloppyTUIScreen: @preconcurrency Component, @unchecked Sendable {
         self.project = project
         self.agent = agent
         self.session = session
+        self.hasPersistedSession = hasPersistedSession
         self.stateStore = stateStore
         self.state = state
         self.welcomeTipCursor = welcomeTipCursor
@@ -274,7 +279,9 @@ final class SloppyTUIScreen: @preconcurrency Component, @unchecked Sendable {
     }
 
     func start() {
-        Task { @MainActor in await reloadSession() }
+        if hasPersistedSession {
+            Task { @MainActor in await reloadSession() }
+        }
         Task { @MainActor in await reloadSkillSlashCommands() }
         Task { @MainActor in
             await refreshSelectedModel()
@@ -282,7 +289,9 @@ final class SloppyTUIScreen: @preconcurrency Component, @unchecked Sendable {
                 await showModelPicker(exitAfterSelection: exitAfterSelection)
             }
         }
-        streamSession()
+        if hasPersistedSession {
+            streamSession()
+        }
         streamChanges()
         loadProjectFileIndex()
         reloadProjectForTaskAutocompleteIfNeeded()
@@ -311,6 +320,7 @@ final class SloppyTUIScreen: @preconcurrency Component, @unchecked Sendable {
     }
 
     func handle(input: TerminalInput) {
+        controlCExitDetector.reset()
         if handleQueuedMessageCancel(input) {
             return
         }
@@ -342,6 +352,17 @@ final class SloppyTUIScreen: @preconcurrency Component, @unchecked Sendable {
             return
         }
         editor.handle(input: input)
+    }
+
+    func handleControlC() {
+        if controlCExitDetector.shouldExit() {
+            Task { @MainActor in
+                await self.stopTUI(reason: "TUI Ctrl+C")
+            }
+            return
+        }
+
+        showSystemNotice("Press Ctrl+C again to exit. Active agent run will be interrupted.", autoDismissAfter: 4)
     }
 
     private func handleQueuedMessageCancel(_ input: TerminalInput) -> Bool {
@@ -532,7 +553,9 @@ final class SloppyTUIScreen: @preconcurrency Component, @unchecked Sendable {
             }
             activePicker = nil
             if exitAfterModelSelection && picker.kind == .model {
-                onExit?()
+                Task { @MainActor in
+                    await self.stopTUI(reason: "TUI model picker")
+                }
                 return true
             }
             refreshStaticChrome()
@@ -1199,8 +1222,10 @@ final class SloppyTUIScreen: @preconcurrency Component, @unchecked Sendable {
         renderTimeline()
         refreshStaticChrome()
         let content = await messageContentWithInlineAttachments(value, context: context, uploads: uploads)
-        let undoBaseline = await makeUndoBaseline()
+        var createdSessionForThisMessage = false
         do {
+            createdSessionForThisMessage = try await ensurePersistedSessionForMessage()
+            let undoBaseline = await makeUndoBaseline()
             if !runtime.config.onboarding.completed {
                 var config = await runtime.service.getConfig()
                 config.onboarding.completed = true
@@ -1228,6 +1253,7 @@ final class SloppyTUIScreen: @preconcurrency Component, @unchecked Sendable {
             await refreshTokenUsage(includeCost: true)
             petMood = .happy
         } catch {
+            await deleteSessionIfStillEmptyAfterFailedFirstMessage(createdSessionForThisMessage)
             clearLiveAssistantDraft()
             petMood = .sad
             appendLocalCard("Message failed: \(String(describing: error))")
@@ -1243,6 +1269,36 @@ final class SloppyTUIScreen: @preconcurrency Component, @unchecked Sendable {
         refreshStaticChrome()
         renderTimeline()
         await sendNextQueuedMessageIfIdle()
+    }
+
+    private func ensurePersistedSessionForMessage() async throws -> Bool {
+        guard !hasPersistedSession else {
+            return false
+        }
+        session = try await runtime.service.createAgentSession(
+            agentID: agent.id,
+            request: AgentSessionCreateRequest(projectId: project.id)
+        )
+        hasPersistedSession = true
+        persistSelection()
+        streamSession()
+        refreshStaticChrome()
+        return true
+    }
+
+    private func deleteSessionIfStillEmptyAfterFailedFirstMessage(_ shouldDelete: Bool) async {
+        guard shouldDelete, hasPersistedSession else {
+            return
+        }
+        guard let detail = try? await runtime.service.getAgentSession(agentID: agent.id, sessionID: session.id),
+              detail.summary.messageCount == 0 else {
+            return
+        }
+        try? await runtime.service.deleteAgentSession(agentID: agent.id, sessionID: session.id)
+        session = SloppyTUIApp.makeDraftSession(agent: agent, projectID: project.id)
+        hasPersistedSession = false
+        persistSelection()
+        streamSession()
     }
 
     private func queueMessage(
@@ -1363,7 +1419,7 @@ final class SloppyTUIScreen: @preconcurrency Component, @unchecked Sendable {
         case "anthropic-callback":
             await completeAnthropicOAuth(args.joined(separator: " "))
         case "quit", "exit":
-            stopTUI()
+            await stopTUI(reason: "TUI /\(command)")
         default:
             if skillSlashCommandNames.contains(command) {
                 await sendMessage(raw)
@@ -1465,10 +1521,11 @@ final class SloppyTUIScreen: @preconcurrency Component, @unchecked Sendable {
             session = try await runtime.service.createAgentSession(
                 agentID: agent.id,
                 request: AgentSessionCreateRequest(
-                    checkpointSessionId: session.id,
+                    checkpointSessionId: hasPersistedSession ? session.id : nil,
                     projectId: project.id
                 )
             )
+            hasPersistedSession = true
             persistSelection()
             streamSession()
             await reloadSession()
@@ -1538,6 +1595,10 @@ final class SloppyTUIScreen: @preconcurrency Component, @unchecked Sendable {
             appendLocalCard("A message is in flight. Use `/stop` before changing files with `/undo` or `/redo`.")
             return
         }
+        guard hasPersistedSession else {
+            appendLocalCard("No session yet. Send a message first or open an existing session with `/sessions`.")
+            return
+        }
 
         do {
             let rootURL = try await runtime.service.resolveProjectWorkspaceRoot(projectID: project.id)
@@ -1581,6 +1642,14 @@ final class SloppyTUIScreen: @preconcurrency Component, @unchecked Sendable {
         failurePrefix: String,
         useNotice: Bool
     ) async {
+        guard hasPersistedSession else {
+            if useNotice {
+                showSystemNotice("No active session to interrupt.")
+            } else {
+                appendLocalCard("No active session to interrupt.")
+            }
+            return
+        }
         guard !isInterruptingRun else {
             return
         }
@@ -1612,6 +1681,10 @@ final class SloppyTUIScreen: @preconcurrency Component, @unchecked Sendable {
     }
 
     private func compactCurrentSession() async {
+        guard hasPersistedSession else {
+            appendLocalCard("No session yet. Send a message first or open an existing session with `/sessions`.")
+            return
+        }
         do {
             _ = try await runtime.service.requestAgentMemoryCheckpoint(
                 agentID: agent.id,
@@ -1625,6 +1698,10 @@ final class SloppyTUIScreen: @preconcurrency Component, @unchecked Sendable {
     }
 
     private func addDirectoryToCurrentSession(_ raw: String) async {
+        guard hasPersistedSession else {
+            appendLocalCard("No session yet. Send a message first or open an existing session with `/sessions`.")
+            return
+        }
         guard let path = ChannelAddDirCommandParsing.pathTailIfCommand(raw),
               !path.isEmpty
         else {
@@ -1645,6 +1722,10 @@ final class SloppyTUIScreen: @preconcurrency Component, @unchecked Sendable {
     }
 
     private func forkCurrentSession(task: String) async {
+        guard hasPersistedSession else {
+            appendLocalCard("No session yet. Send a message first or open an existing session with `/sessions`.")
+            return
+        }
         do {
             let titleTail = task.trimmingCharacters(in: .whitespacesAndNewlines)
             let child = try await runtime.service.createAgentSession(
@@ -1782,13 +1863,21 @@ final class SloppyTUIScreen: @preconcurrency Component, @unchecked Sendable {
         let config = try? await runtime.service.getAgentConfig(agentID: agent.id)
         let model = config?.selectedModel ?? selectedModel
         selectedModel = model
+        let sessionLines = hasPersistedSession
+            ? """
+            - session: `\(session.title)`
+            - session id: `\(session.id)`
+            - resume: `sloppy -s \(session.id)`
+            """
+            : """
+            - session: `not created yet`
+            - resume: unavailable until the first message
+            """
         appendLocalCard("""
         ## Status
         - project: `\(project.name)`
         - agent: `\(agent.displayName)`
-        - session: `\(session.title)`
-        - session id: `\(session.id)`
-        - resume: `sloppy -s \(session.id)`
+        \(sessionLines)
         - model: `\(model)`
         - provider: `\(providerLabel(from: model))`
         - pet: \(petStatusSummary())
@@ -1966,7 +2055,7 @@ final class SloppyTUIScreen: @preconcurrency Component, @unchecked Sendable {
         case .model:
             await applyModel(item.value)
             if exitAfterModelSelection {
-                onExit?()
+                await stopTUI(reason: "TUI model picker")
             }
         case .agent:
             await switchAgent(item.value)
@@ -2278,10 +2367,13 @@ final class SloppyTUIScreen: @preconcurrency Component, @unchecked Sendable {
                 return
             }
             agent = nextAgent
-            session = try await resolveSessionForCurrentProject(agentID: nextAgent.id)
+            session = SloppyTUIApp.makeDraftSession(agent: nextAgent, projectID: project.id)
+            hasPersistedSession = false
+            sessionCards = []
+            subSessionCards = []
+            lastRenderedSessionEventIDs = []
             persistSelection()
-            streamSession()
-            await reloadSession()
+            streamTask?.cancel()
             await reloadSkillSlashCommands()
             await refreshSelectedModel()
             appendLocalCard("Agent switched to `\(nextAgent.displayName)`.")
@@ -2300,19 +2392,11 @@ final class SloppyTUIScreen: @preconcurrency Component, @unchecked Sendable {
             return
         }
         session = nextSession
+        hasPersistedSession = true
         persistSelection()
         streamSession()
         await reloadSession()
         appendLocalCard("Session switched to `\(nextSession.title)`.\nResume shortcut: `sloppy -s \(nextSession.id)`")
-    }
-
-    private func resolveSessionForCurrentProject(agentID: String) async throws -> AgentSessionSummary {
-        return try await runtime.service.createAgentSession(
-            agentID: agentID,
-            request: AgentSessionCreateRequest(
-                projectId: project.id
-            )
-        )
     }
 
     private func attachContext(_ mode: String?) async {
@@ -2553,6 +2637,11 @@ final class SloppyTUIScreen: @preconcurrency Component, @unchecked Sendable {
     }
 
     private func streamSession() {
+        guard hasPersistedSession else {
+            streamTask?.cancel()
+            streamTask = nil
+            return
+        }
         streamTask?.cancel()
         streamTask = Task { [weak self] in
             guard let self else { return }
@@ -2709,6 +2798,14 @@ final class SloppyTUIScreen: @preconcurrency Component, @unchecked Sendable {
     }
 
     private func reloadSession() async {
+        guard hasPersistedSession else {
+            sessionCards = []
+            subSessionCards = []
+            lastRenderedSessionEventIDs = []
+            renderTimeline()
+            refreshStaticChrome()
+            return
+        }
         let detail = try? await runtime.service.getAgentSession(agentID: agent.id, sessionID: session.id)
         var blocks: [SloppyTUITimelineBlock] = []
         var children: [SloppyTUISubSessionCard] = []
@@ -3539,7 +3636,7 @@ final class SloppyTUIScreen: @preconcurrency Component, @unchecked Sendable {
             model: selectedModel,
             context: context + queue + usage + pet + transcript + elapsed.idleSuffix,
             attachments: attachments,
-            sessionID: session.id
+            sessionID: hasPersistedSession ? session.id : "not created"
         )
         let busyStatus = (statusLine ?? liveRunStatusLine).map { $0 + elapsed.busySuffix }
         let noticeStatus = transientNoticeLine.map { "notice: \($0)" + elapsed.idleSuffix }
@@ -3614,13 +3711,39 @@ final class SloppyTUIScreen: @preconcurrency Component, @unchecked Sendable {
         )
     }
 
-    private func stopTUI() {
+    private func stopTUI(reason: String) async {
+        guard !isExiting else {
+            return
+        }
+        isExiting = true
+        await interruptCurrentRunForExit(reason: reason)
         onExit?()
+    }
+
+    private func interruptCurrentRunForExit(reason: String) async {
+        guard hasPersistedSession else {
+            return
+        }
+        guard isPosting || liveRunStatusLine != nil || pendingPlanInputRequest != nil else {
+            return
+        }
+
+        isInterruptingRun = true
+        refreshStaticChrome(statusLine: "Interrupting active agent run before exit.")
+        do {
+            _ = try await runtime.service.controlAgentSession(
+                agentID: agent.id,
+                sessionID: session.id,
+                request: AgentSessionControlRequest(action: .interruptTree, requestedBy: "tui", reason: reason)
+            )
+        } catch {
+            // Exit should not be blocked by a failed cooperative interrupt request.
+        }
     }
 
     private func persistSelection() {
         let key = SloppyTUIStateStore.selectionKey(projectId: project.id)
-        state.selections[key] = .init(agentId: agent.id, sessionId: session.id)
+        state.selections[key] = .init(agentId: agent.id, sessionId: hasPersistedSession ? session.id : nil)
         stateStore.save(state)
     }
 

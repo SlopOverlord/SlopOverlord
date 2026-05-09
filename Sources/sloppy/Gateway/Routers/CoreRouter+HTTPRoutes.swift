@@ -11,6 +11,7 @@ extension CoreRouter {
             TasksAPIRouter(service: service),
             ProvidersAPIRouter(service: service),
             GitHubAPIRouter(service: service),
+            TaskSyncAPIRouter(service: service),
             ACPAPIRouter(service: service),
             AgentsAPIRouter(service: service),
             ActorsAPIRouter(service: service),

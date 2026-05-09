@@ -43,6 +43,7 @@ const TASK_TAG_PATTERN = /#([A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?)/g;
 const TASK_ID_LABEL_PATTERN = /\bID\s*:\s*([A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?)/gi;
 /** e.g. session title `task-ADAWEBSITE-5` */
 const TASK_TITLE_PREFIX_PATTERN = /\btask-([A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?)\b/gi;
+const TASK_SESSION_TITLE_PATTERN = /^task-([A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?)\b/i;
 const TASK_TAG_REMOVE_PATTERN = /(^|\s)#([A-Za-z0-9][A-Za-z0-9._-]*)(\s?)$/;
 const TASK_TAG_QUERY_VALUE_PATTERN = /^[A-Za-z0-9._-]*$/;
 const DEFAULT_REASONING_EFFORT = "medium";
@@ -317,6 +318,111 @@ function normalizeTaskRecordsFromProjects(projects) {
   }
 
   return items;
+}
+
+function normalizeProjectDirectoryRecord(project) {
+  const id = String(project?.id || "").trim();
+  if (!id) {
+    return null;
+  }
+  const name = String(project?.name || project?.displayName || id).trim() || id;
+  return {
+    id,
+    idLower: id.toLowerCase(),
+    name,
+    nameKey: normalizeProjectMatchKey(name),
+    idKey: normalizeProjectMatchKey(id)
+  };
+}
+
+function normalizeProjectMatchKey(value) {
+  return String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9а-яё]+/gi, "");
+}
+
+function humanizeTaskProjectPrefix(value) {
+  const raw = String(value || "").trim();
+  if (!raw) {
+    return "";
+  }
+  return raw
+    .split(/[-_.\s]+/)
+    .filter(Boolean)
+    .map((part) => {
+      if (part.length <= 2) {
+        return part.toUpperCase();
+      }
+      return `${part.slice(0, 1).toUpperCase()}${part.slice(1).toLowerCase()}`;
+    })
+    .join(" ");
+}
+
+function taskReferenceFromSession(session) {
+  const title = String(session?.title || "").trim();
+  const match = title.match(TASK_SESSION_TITLE_PATTERN);
+  return normalizeTaskReference(match?.[1] || "");
+}
+
+function projectPrefixFromTaskReference(reference) {
+  const raw = normalizeTaskReference(reference);
+  if (!raw) {
+    return "";
+  }
+  const withoutTrailingNumber = raw.replace(/[-_.][0-9]+$/i, "");
+  if (withoutTrailingNumber && withoutTrailingNumber !== raw) {
+    return withoutTrailingNumber;
+  }
+  const firstPart = raw.split(/[-_.]+/).find(Boolean) || "";
+  return firstPart.length >= 3 ? firstPart : "";
+}
+
+function projectRecordFromSessionProjectId(session, projectById) {
+  const raw = session?.projectId ?? session?.project_id;
+  const projectId = typeof raw === "string" ? raw.trim() : String(raw || "").trim();
+  if (!projectId) {
+    return null;
+  }
+  const known = projectById.get(projectId.toLowerCase());
+  return {
+    id: known?.id || projectId,
+    label: known?.name || projectId
+  };
+}
+
+function projectRecordFromTaskSession(session, taskByReference, projects) {
+  const reference = taskReferenceFromSession(session);
+  if (!reference) {
+    return null;
+  }
+
+  const taskRecord = taskByReference.get(reference.toLowerCase());
+  if (taskRecord?.projectId || taskRecord?.projectName) {
+    return {
+      id: taskRecord.projectId || taskRecord.projectName,
+      label: taskRecord.projectName || taskRecord.projectId || "Project"
+    };
+  }
+
+  const prefix = projectPrefixFromTaskReference(reference);
+  const prefixKey = normalizeProjectMatchKey(prefix);
+  if (!prefixKey) {
+    return null;
+  }
+
+  const matchedProject = projects.find(
+    (project) => project.idKey === prefixKey || project.nameKey === prefixKey
+  );
+  if (matchedProject) {
+    return {
+      id: matchedProject.id,
+      label: matchedProject.name
+    };
+  }
+
+  const label = humanizeTaskProjectPrefix(prefix);
+  return label ? { id: prefix.toLowerCase(), label } : null;
 }
 
 function parseDateValue(value) {
@@ -3128,6 +3234,7 @@ export function AgentChatTab({
   const [chatMode, setChatMode] = useState(() => readStoredChatMode(agentId, projectId, modeStorageScope));
   const [expandedRecordIds, setExpandedRecordIds] = useState({});
   const [knownTaskRecords, setKnownTaskRecords] = useState([]);
+  const [knownProjectRecords, setKnownProjectRecords] = useState([]);
   const [taskPreview, setTaskPreview] = useState(null);
   const [isShareMenuOpen, setIsShareMenuOpen] = useState(false);
   const [isDebugMenuOpen, setIsDebugMenuOpen] = useState(false);
@@ -3137,15 +3244,14 @@ export function AgentChatTab({
   const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
   const [isDesktopSessionsCollapsed, setIsDesktopSessionsCollapsed] = useState(false);
   const [sessionSidebarSearch, setSessionSidebarSearch] = useState("");
-  const [sessionPastTasksOpen, setSessionPastTasksOpen] = useState(false);
-  const [sessionPastRegularOpen, setSessionPastRegularOpen] = useState(false);
+  const [sessionDirectoryOpenById, setSessionDirectoryOpenById] = useState({});
+  const [sessionPastOpenByDirectory, setSessionPastOpenByDirectory] = useState({});
   const [isModelDropdownOpen, setIsModelDropdownOpen] = useState(false);
   const [modelSearch, setModelSearch] = useState("");
   const [isNarrowChatViewport, setIsNarrowChatViewport] = useState(() =>
     typeof window !== "undefined" ? window.matchMedia(AGENT_CHAT_SIDEBAR_NARROW_MQ).matches : false
   );
   const [isDebugSessionFlagOn, setIsDebugSessionFlagOn] = useState(false);
-  const [tasksDirectoryOpen, setTasksDirectoryOpen] = useState(false);
   const [subagentPanel, setSubagentPanel] = useState({
     isOpen: false,
     sessionId: "",
@@ -3318,31 +3424,122 @@ export function AgentChatTab({
     return capabilities.some((capability) => String(capability || "").toLowerCase() === "reasoning");
   }, [activeModelOption]);
 
-  const taskSessions = useMemo(() => sessions.filter(isTaskSession), [sessions]);
-  const regularSessions = useMemo(() => sessions.filter((s) => !isTaskSession(s)), [sessions]);
-
   const sessionSearchLower = useMemo(() => String(sessionSidebarSearch || "").trim().toLowerCase(), [sessionSidebarSearch]);
 
-  const filteredTaskSessions = useMemo(
-    () => taskSessions.filter((s) => sessionMatchesSidebarSearch(s, sessionSearchLower)),
-    [taskSessions, sessionSearchLower]
-  );
-  const filteredRegularSessions = useMemo(
-    () => regularSessions.filter((s) => sessionMatchesSidebarSearch(s, sessionSearchLower)),
-    [regularSessions, sessionSearchLower]
-  );
+  const taskRecordByReference = useMemo(() => {
+    const map = new Map();
+    for (const record of knownTaskRecords) {
+      if (record?.referenceLower) {
+        map.set(record.referenceLower, record);
+      }
+    }
+    return map;
+  }, [knownTaskRecords]);
 
-  const { recent: recentFilteredTaskSessions, past: pastFilteredTaskSessions } = useMemo(
-    () => splitSessionsRecentAndPast(filteredTaskSessions),
-    [filteredTaskSessions]
-  );
-  const { recent: recentFilteredRegularSessions, past: pastFilteredRegularSessions } = useMemo(
-    () => splitSessionsRecentAndPast(filteredRegularSessions),
-    [filteredRegularSessions]
-  );
+  const projectRecordById = useMemo(() => {
+    const map = new Map();
+    for (const record of knownProjectRecords) {
+      if (record?.idLower) {
+        map.set(record.idLower, record);
+      }
+    }
+    return map;
+  }, [knownProjectRecords]);
 
-  const hasSidebarPastSessions =
-    pastFilteredTaskSessions.length > 0 || pastFilteredRegularSessions.length > 0;
+  const sessionDirectoryGroups = useMemo(() => {
+    const projectGroups = new Map();
+    const otherTaskSessions = [];
+    const chatSessions = [];
+    const terminalSessions = [];
+
+    function addProjectSession(project, session) {
+      const label = String(project?.label || project?.id || "Project").trim() || "Project";
+      const id = String(project?.id || label).trim() || label;
+      const key = `project:${id.toLowerCase()}`;
+      const previous = projectGroups.get(key);
+      if (previous) {
+        previous.sessions.push(session);
+        return;
+      }
+      projectGroups.set(key, {
+        id: key,
+        label,
+        icon: "folder",
+        sessions: [session]
+      });
+    }
+
+    for (const session of sessions) {
+      const explicitProject = projectRecordFromSessionProjectId(session, projectRecordById);
+      if (explicitProject) {
+        addProjectSession(explicitProject, session);
+        continue;
+      }
+
+      if (isTaskSession(session)) {
+        const taskProject = projectRecordFromTaskSession(session, taskRecordByReference, knownProjectRecords);
+        if (taskProject) {
+          addProjectSession(taskProject, session);
+        } else {
+          otherTaskSessions.push(session);
+        }
+        continue;
+      }
+
+      const title = String(session?.title || "").trim().toLowerCase();
+      if (title === "tui chat" || title.includes("terminal")) {
+        terminalSessions.push(session);
+      } else {
+        chatSessions.push(session);
+      }
+    }
+
+    const groups = [...projectGroups.values()].sort((left, right) =>
+      left.label.localeCompare(right.label, undefined, { sensitivity: "base" })
+    );
+    if (otherTaskSessions.length > 0) {
+      groups.push({
+        id: "other-tasks",
+        label: "Other Tasks",
+        icon: "folder",
+        sessions: otherTaskSessions
+      });
+    }
+    if (chatSessions.length > 0) {
+      groups.push({
+        id: "chats",
+        label: "Chats",
+        icon: "chat_bubble",
+        sessions: chatSessions
+      });
+    }
+    if (terminalSessions.length > 0) {
+      groups.push({
+        id: "terminal",
+        label: "Terminal",
+        icon: "terminal",
+        sessions: terminalSessions
+      });
+    }
+
+    return groups.map((group) => {
+      const filtered = group.sessions.filter((session) =>
+        sessionMatchesSidebarSearch(session, sessionSearchLower)
+      );
+      const { recent, past } = splitSessionsRecentAndPast(filtered);
+      return {
+        ...group,
+        sessions: sortSessionsByUpdate(group.sessions),
+        filteredSessions: filtered,
+        recentFilteredSessions: recent,
+        pastFilteredSessions: past
+      };
+    });
+  }, [knownProjectRecords, projectRecordById, sessionSearchLower, sessions, taskRecordByReference]);
+
+  const hasSidebarPastSessions = sessionDirectoryGroups.some(
+    (group) => group.pastFilteredSessions.length > 0
+  );
 
   /** Boolean only — avoids re-running the URL-sync effect on every session list merge (stream/SSE). */
   const urlSessionPresentInList = useMemo(() => {
@@ -3408,13 +3605,6 @@ export function AgentChatTab({
       }
     });
   }, [scopedProjectId]);
-
-  useEffect(() => {
-    const active = sessions.find((s) => s.id === activeSessionId);
-    if (active && isTaskSession(active)) {
-      setTasksDirectoryOpen(true);
-    }
-  }, [activeSessionId, sessions]);
 
   useEffect(() => {
     document.body.classList.add("agent-chat-no-page-scroll");
@@ -3486,24 +3676,50 @@ export function AgentChatTab({
     setIsDesktopSessionsCollapsed(false);
     setIsMobileSidebarOpen(false);
     setSessionSidebarSearch("");
-    setSessionPastTasksOpen(false);
-    setSessionPastRegularOpen(false);
+    setSessionDirectoryOpenById({});
+    setSessionPastOpenByDirectory({});
   }, [agentId]);
 
   useEffect(() => {
-    if (sessionSearchLower && filteredTaskSessions.length > 0) {
-      setTasksDirectoryOpen(true);
+    if (!sessionSearchLower) {
+      return;
     }
-  }, [sessionSearchLower, filteredTaskSessions.length]);
+    const matchingDirectoryIds = sessionDirectoryGroups
+      .filter((group) => group.filteredSessions.length > 0)
+      .map((group) => group.id);
+    if (matchingDirectoryIds.length === 0) {
+      return;
+    }
+    setSessionDirectoryOpenById((previous) => {
+      const next = { ...previous };
+      for (const id of matchingDirectoryIds) {
+        next[id] = true;
+      }
+      return next;
+    });
+  }, [sessionDirectoryGroups, sessionSearchLower]);
 
   useEffect(() => {
-    if (pastFilteredTaskSessions.some((s) => s.id === activeSessionId)) {
-      setSessionPastTasksOpen(true);
+    if (!activeSessionId) {
+      return;
     }
-    if (pastFilteredRegularSessions.some((s) => s.id === activeSessionId)) {
-      setSessionPastRegularOpen(true);
+    const activeGroup = sessionDirectoryGroups.find((group) =>
+      group.sessions.some((session) => session.id === activeSessionId)
+    );
+    if (!activeGroup) {
+      return;
     }
-  }, [activeSessionId, pastFilteredTaskSessions, pastFilteredRegularSessions]);
+    setSessionDirectoryOpenById((previous) => ({
+      ...previous,
+      [activeGroup.id]: true
+    }));
+    if (activeGroup.pastFilteredSessions.some((session) => session.id === activeSessionId)) {
+      setSessionPastOpenByDirectory((previous) => ({
+        ...previous,
+        [activeGroup.id]: true
+      }));
+    }
+  }, [activeSessionId, sessionDirectoryGroups]);
 
   useEffect(() => {
     if (!agentId || !activeSessionId) {
@@ -3664,6 +3880,7 @@ export function AgentChatTab({
     taskRecordCacheRef.current = new Map();
     taskRecordInflightRef.current = new Map();
     setKnownTaskRecords([]);
+    setKnownProjectRecords([]);
     setTaskPreview(null);
 
     async function loadKnownTasks() {
@@ -3677,11 +3894,15 @@ export function AgentChatTab({
         : [];
       const normalizedFromProjects = normalizeTaskRecordsFromProjects(projectsResponse);
       const normalized = mergeTaskRecords(normalizedFromProjects, normalizedFromAgent);
+      const normalizedProjects = Array.isArray(projectsResponse)
+        ? projectsResponse.map((item) => normalizeProjectDirectoryRecord(item)).filter(Boolean)
+        : [];
 
       for (const record of normalized) {
         cacheTaskRecord(record);
       }
       setKnownTaskRecords(mergeTaskRecords([], normalized));
+      setKnownProjectRecords(normalizedProjects);
     }
 
     loadKnownTasks().catch(() => { });
@@ -5165,22 +5386,24 @@ export function AgentChatTab({
 
   const sessionSearchNoMatches =
     Boolean(sessionSearchLower) &&
-    filteredTaskSessions.length === 0 &&
-    filteredRegularSessions.length === 0 &&
+    sessionDirectoryGroups.every((group) => group.filteredSessions.length === 0) &&
     sessions.length > 0;
-  const sessionSearchTasksEmptyButOthersMatch =
-    Boolean(sessionSearchLower) &&
-    taskSessions.length > 0 &&
-    filteredTaskSessions.length === 0 &&
-    filteredRegularSessions.length > 0;
 
-  const anyPastSidebarSectionOpen = sessionPastTasksOpen || sessionPastRegularOpen;
+  const anyPastSidebarSectionOpen = sessionDirectoryGroups.some(
+    (group) => group.pastFilteredSessions.length > 0 && sessionPastOpenByDirectory[group.id]
+  );
 
   function togglePastSessionsShortcut() {
-    const anyOpen = sessionPastTasksOpen || sessionPastRegularOpen;
-    const expand = !anyOpen;
-    setSessionPastTasksOpen(expand && pastFilteredTaskSessions.length > 0);
-    setSessionPastRegularOpen(expand && pastFilteredRegularSessions.length > 0);
+    const expand = !anyPastSidebarSectionOpen;
+    setSessionPastOpenByDirectory((previous) => {
+      const next = { ...previous };
+      for (const group of sessionDirectoryGroups) {
+        if (group.pastFilteredSessions.length > 0) {
+          next[group.id] = expand;
+        }
+      }
+      return next;
+    });
   }
 
   function renderSessionSidebarRow(session) {
@@ -5208,6 +5431,85 @@ export function AgentChatTab({
             : "No date"}
         </div>
       </button>
+    );
+  }
+
+  function toggleSessionDirectory(directoryId) {
+    setSessionDirectoryOpenById((previous) => ({
+      ...previous,
+      [directoryId]: !previous[directoryId]
+    }));
+  }
+
+  function toggleSessionPastDirectory(directoryId) {
+    setSessionPastOpenByDirectory((previous) => ({
+      ...previous,
+      [directoryId]: !previous[directoryId]
+    }));
+  }
+
+  function renderSessionDirectory(group) {
+    const isOpen = Boolean(sessionDirectoryOpenById[group.id]);
+    const isPastOpen = Boolean(sessionPastOpenByDirectory[group.id]);
+    const countLabel = sessionSearchLower
+      ? `${group.filteredSessions.length}/${group.sessions.length}`
+      : group.sessions.length;
+    const icon = group.icon === "folder" && isOpen ? "folder_open" : group.icon;
+
+    return (
+      <div key={group.id} className="agent-chat-session-directory">
+        <button
+          type="button"
+          className={`agent-chat-session-directory-toggle ${isOpen ? "open" : ""}`}
+          onClick={() => toggleSessionDirectory(group.id)}
+        >
+          <span className="material-symbols-rounded agent-chat-session-directory-icon" aria-hidden="true">
+            {icon}
+          </span>
+          <span className="agent-chat-session-directory-label">{group.label}</span>
+          <span className="agent-chat-session-directory-count">
+            {countLabel}
+          </span>
+          <span className={`material-symbols-rounded agent-chat-session-directory-chevron ${isOpen ? "open" : ""}`} aria-hidden="true">
+            expand_more
+          </span>
+        </button>
+        {isOpen ? (
+          <div className="agent-chat-session-directory-children">
+            {group.filteredSessions.length === 0 && sessionSearchLower ? (
+              <p className="placeholder-text agent-chat-session-directory-empty">No matching sessions.</p>
+            ) : null}
+            {group.recentFilteredSessions.map((session) => renderSessionSidebarRow(session))}
+            {group.pastFilteredSessions.length > 0 ? (
+              <div className="agent-chat-session-past">
+                <button
+                  type="button"
+                  className={`agent-chat-session-past-toggle ${isPastOpen ? "open" : ""}`}
+                  onClick={() => toggleSessionPastDirectory(group.id)}
+                >
+                  <span className="material-symbols-rounded agent-chat-session-past-icon" aria-hidden="true">
+                    history
+                  </span>
+                  <span className="agent-chat-session-past-label">Past</span>
+                  <span className="agent-chat-session-past-hint">3d+</span>
+                  <span className="agent-chat-session-directory-count">{group.pastFilteredSessions.length}</span>
+                  <span
+                    className={`material-symbols-rounded agent-chat-session-directory-chevron ${isPastOpen ? "open" : ""}`}
+                    aria-hidden="true"
+                  >
+                    expand_more
+                  </span>
+                </button>
+                {isPastOpen ? (
+                  <div className="agent-chat-session-past-children">
+                    {group.pastFilteredSessions.map((session) => renderSessionSidebarRow(session))}
+                  </div>
+                ) : null}
+              </div>
+            ) : null}
+          </div>
+        ) : null}
+      </div>
     );
   }
 
@@ -5360,89 +5662,7 @@ export function AgentChatTab({
               No sessions match your search.
             </p>
           ) : null}
-          {taskSessions.length > 0 ? (
-            <div className="agent-chat-session-directory">
-              <button
-                type="button"
-                className={`agent-chat-session-directory-toggle ${tasksDirectoryOpen ? "open" : ""}`}
-                onClick={() => setTasksDirectoryOpen((prev) => !prev)}
-              >
-                <span className="material-symbols-rounded agent-chat-session-directory-icon" aria-hidden="true">
-                  {tasksDirectoryOpen ? "folder_open" : "folder"}
-                </span>
-                <span className="agent-chat-session-directory-label">Tasks</span>
-                <span className="agent-chat-session-directory-count">
-                  {sessionSearchLower ? `${filteredTaskSessions.length}/${taskSessions.length}` : taskSessions.length}
-                </span>
-                <span className={`material-symbols-rounded agent-chat-session-directory-chevron ${tasksDirectoryOpen ? "open" : ""}`} aria-hidden="true">
-                  expand_more
-                </span>
-              </button>
-              {tasksDirectoryOpen ? (
-                <div className="agent-chat-session-directory-children">
-                  {filteredTaskSessions.length === 0 && sessionSearchTasksEmptyButOthersMatch ? (
-                    <p className="placeholder-text agent-chat-session-directory-empty">No matching task sessions.</p>
-                  ) : null}
-                  {recentFilteredTaskSessions.map((session) => renderSessionSidebarRow(session))}
-                  {pastFilteredTaskSessions.length > 0 ? (
-                    <div className="agent-chat-session-past">
-                      <button
-                        type="button"
-                        className={`agent-chat-session-past-toggle ${sessionPastTasksOpen ? "open" : ""}`}
-                        onClick={() => setSessionPastTasksOpen((o) => !o)}
-                      >
-                        <span className="material-symbols-rounded agent-chat-session-past-icon" aria-hidden="true">
-                          history
-                        </span>
-                        <span className="agent-chat-session-past-label">Past</span>
-                        <span className="agent-chat-session-past-hint">3d+</span>
-                        <span className="agent-chat-session-directory-count">{pastFilteredTaskSessions.length}</span>
-                        <span
-                          className={`material-symbols-rounded agent-chat-session-directory-chevron ${sessionPastTasksOpen ? "open" : ""}`}
-                          aria-hidden="true"
-                        >
-                          expand_more
-                        </span>
-                      </button>
-                      {sessionPastTasksOpen ? (
-                        <div className="agent-chat-session-past-children">
-                          {pastFilteredTaskSessions.map((session) => renderSessionSidebarRow(session))}
-                        </div>
-                      ) : null}
-                    </div>
-                  ) : null}
-                </div>
-              ) : null}
-            </div>
-          ) : null}
-          {recentFilteredRegularSessions.map((session) => renderSessionSidebarRow(session))}
-          {pastFilteredRegularSessions.length > 0 ? (
-            <div className="agent-chat-session-past agent-chat-session-past--root">
-              <button
-                type="button"
-                className={`agent-chat-session-past-toggle ${sessionPastRegularOpen ? "open" : ""}`}
-                onClick={() => setSessionPastRegularOpen((o) => !o)}
-              >
-                <span className="material-symbols-rounded agent-chat-session-past-icon" aria-hidden="true">
-                  history
-                </span>
-                <span className="agent-chat-session-past-label">Past</span>
-                <span className="agent-chat-session-past-hint">3d+</span>
-                <span className="agent-chat-session-directory-count">{pastFilteredRegularSessions.length}</span>
-                <span
-                  className={`material-symbols-rounded agent-chat-session-directory-chevron ${sessionPastRegularOpen ? "open" : ""}`}
-                  aria-hidden="true"
-                >
-                  expand_more
-                </span>
-              </button>
-              {sessionPastRegularOpen ? (
-                <div className="agent-chat-session-past-children">
-                  {pastFilteredRegularSessions.map((session) => renderSessionSidebarRow(session))}
-                </div>
-              ) : null}
-            </div>
-          ) : null}
+          {sessionDirectoryGroups.map((group) => renderSessionDirectory(group))}
         </div>
         <button
           type="button"

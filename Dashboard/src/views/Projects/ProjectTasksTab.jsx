@@ -255,6 +255,9 @@ function CommentsTab({ project, task, createModalActors }) {
                                         {comment.isAgentReply ? "smart_toy" : "person"}
                                     </span>
                                     <span className="td-comment-author">{authorLabel}</span>
+                                    {comment.externalMetadata?.origin === "github" && (
+                                        <span className="td-comment-agent-badge">GitHub{comment.sourceAuthor ? `: ${comment.sourceAuthor}` : ""}</span>
+                                    )}
                                     {comment.isAgentReply && (
                                         <span className="td-comment-agent-badge">Agent reply</span>
                                     )}
@@ -1690,6 +1693,37 @@ export function ProjectTasksTab({
                                                                     {TASK_KINDS.find((k) => k.id === task.kind)?.title || task.kind}
                                                                 </span>
                                                             )}
+                                                            {task.externalMetadata?.providerId === "github" ? (
+                                                                task.externalMetadata.externalIssueURL ? (
+                                                                    <a
+                                                                        className="project-task-assignee-badge"
+                                                                        href={task.externalMetadata.externalIssueURL}
+                                                                        target="_blank"
+                                                                        rel="noreferrer"
+                                                                        onClick={(e) => e.stopPropagation()}
+                                                                    >
+                                                                        <span className="material-symbols-rounded" aria-hidden="true">
+                                                                            open_in_new
+                                                                        </span>
+                                                                        GitHub #{task.externalMetadata.externalIssueNumber || ""}
+                                                                    </a>
+                                                                ) : (
+                                                                    <span className="project-task-assignee-badge">
+                                                                        <span className="material-symbols-rounded" aria-hidden="true">
+                                                                            sync
+                                                                        </span>
+                                                                        GitHub
+                                                                    </span>
+                                                                )
+                                                            ) : null}
+                                                            {task.externalMetadata?.syncState ? (
+                                                                <span className="project-task-assignee-badge">
+                                                                    <span className="material-symbols-rounded" aria-hidden="true">
+                                                                        cloud_sync
+                                                                    </span>
+                                                                    {task.externalMetadata.syncState}
+                                                                </span>
+                                                            ) : null}
                                                             {task.swarmTaskId ? (
                                                                 <span className="project-task-claim-badge">
                                                                     <span className="material-symbols-rounded" aria-hidden="true">

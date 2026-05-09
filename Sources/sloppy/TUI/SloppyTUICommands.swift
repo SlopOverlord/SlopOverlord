@@ -82,6 +82,31 @@ struct SloppyTUIDoubleEscapeDetector {
     }
 }
 
+struct SloppyTUIControlCExitDetector {
+    static let defaultInterval: TimeInterval = 2
+
+    var interval: TimeInterval = Self.defaultInterval
+    private var lastControlCAt: Date?
+
+    init(interval: TimeInterval = Self.defaultInterval) {
+        self.interval = interval
+    }
+
+    mutating func shouldExit(now: Date = Date()) -> Bool {
+        defer { lastControlCAt = now }
+        guard let lastControlCAt else {
+            return false
+        }
+
+        let elapsed = now.timeIntervalSince(lastControlCAt)
+        return elapsed >= 0 && elapsed <= interval
+    }
+
+    mutating func reset() {
+        lastControlCAt = nil
+    }
+}
+
 final class SloppyTUIAutocompleteProvider: AutocompleteProvider {
     private let base: CombinedAutocompleteProvider
 
