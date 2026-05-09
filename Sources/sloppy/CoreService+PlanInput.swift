@@ -56,6 +56,21 @@ extension CoreService {
         do {
             let summary = try sessionStore.appendEvents(agentID: agentID, sessionID: sessionID, events: events)
             publishLiveSessionEvents(agentID: agentID, sessionID: sessionID, summary: summary, events: events)
+            let title = inputRequest.title ?? "Plan input requested"
+            await notificationService.pushInputRequired(
+                title: "Input required",
+                message: title,
+                agentId: agentID,
+                sessionId: sessionID,
+                requestId: inputRequest.id,
+                source: "agent"
+            )
+            await markTaskWaitingInputForAgentSession(
+                agentID: agentID,
+                sessionID: sessionID,
+                reason: title,
+                source: "agent"
+            )
             return ToolInvocationResult(
                 tool: request.tool,
                 ok: true,
@@ -75,7 +90,7 @@ extension CoreService {
     }
 
     func handleChannelPlanInputTool(
-        agentID _: String,
+        agentID: String,
         channelID: String,
         request: ToolInvocationRequest,
         topicID: String?,
@@ -111,6 +126,13 @@ extension CoreService {
             )
         }
 
+        await notificationService.pushInputRequired(
+            title: "Input required",
+            message: inputRequest.title ?? "Plan input requested.",
+            agentId: agentID,
+            requestId: inputRequest.id,
+            source: "agent"
+        )
         return ToolInvocationResult(
             tool: request.tool,
             ok: true,

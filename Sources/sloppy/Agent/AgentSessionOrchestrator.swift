@@ -703,6 +703,9 @@ actor AgentSessionOrchestrator {
         case .build:
             instruction = """
             Implement the requested change by writing code, editing files, and running the smallest relevant verification. 
+            Before meaningful edits, call `planning.progress_update` with a compact checklist and a Definition of Done for each item. Skip this only for trivial one-answer or no-change turns.
+            Keep that checklist current: mark an item `in_progress` before working on it, mark it `done` only after concrete evidence or checks, mark it `blocked` with details when stuck, and use `skipped` when intentionally out of scope.
+            Use `agents.delegate_task` only for independent, non-blocking side work. Pass self-contained context, narrow `toolsets`, keep parallel delegated tasks to at most 3, wait for summaries, and integrate their results before finishing.
             Write tests for the new functionality. Run them to verify the changes.
             If the tests fail, fix the code and run the tests again.
             If the tests pass, continue with the next step.

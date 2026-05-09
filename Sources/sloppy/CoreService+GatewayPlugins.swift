@@ -66,7 +66,12 @@ extension CoreService {
         }
         
         if cronRunner == nil {
-            cronRunner = CronRunner(store: self.store, runtime: self.runtime, logger: self.logger)
+            cronRunner = CronRunner(
+                store: self.store,
+                runtime: self.runtime,
+                notificationService: self.notificationService,
+                logger: self.logger
+            )
         }
         await cronRunner?.start()
 

@@ -226,6 +226,15 @@
   color: var(--accent);
 }
 
+.notif-dropdown-action:disabled {
+  cursor: default;
+  opacity: 0.55;
+}
+
+.notif-dropdown-action:disabled:hover {
+  color: var(--muted);
+}
+
 .notif-dropdown-list {
   overflow-y: auto;
   flex: 1;

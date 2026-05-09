@@ -1,7 +1,15 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
 import { subscribeNotificationBus } from "./notificationBus";
 
-export type NotificationType = "confirmation" | "agent_error" | "system_error" | "pending_approval" | "tool_approval";
+export type NotificationType =
+  | "confirmation"
+  | "agent_error"
+  | "system_error"
+  | "pending_approval"
+  | "tool_approval"
+  | "task_completed"
+  | "input_required"
+  | "cron_attention";
 
 export interface Notification {
   id: string;
@@ -16,7 +24,13 @@ export interface Notification {
 interface NotificationContextValue {
   notifications: Notification[];
   unreadCount: number;
-  push: (type: NotificationType, title: string, message: string, metadata?: Record<string, string>) => void;
+  push: (
+    type: NotificationType,
+    title: string,
+    message: string,
+    metadata?: Record<string, string>,
+    options?: NotificationPushOptions
+  ) => void;
   markRead: (id: string) => void;
   markAllRead: () => void;
   dismiss: (id: string) => void;
@@ -27,20 +41,38 @@ const NotificationContext = createContext<NotificationContextValue | null>(null)
 
 let nextId = 1;
 
+interface NotificationPushOptions {
+  id?: string;
+  timestamp?: number;
+}
+
 export function NotificationProvider({ children }: { children: React.ReactNode }) {
   const [notifications, setNotifications] = useState<Notification[]>([]);
+  const browserShownRef = React.useRef<Set<string>>(new Set());
 
-  const push = useCallback((type: NotificationType, title: string, message: string, metadata?: Record<string, string>) => {
+  const push = useCallback((
+    type: NotificationType,
+    title: string,
+    message: string,
+    metadata?: Record<string, string>,
+    options?: NotificationPushOptions
+  ) => {
+    const id = options?.id || `notif-${nextId++}-${Date.now()}`;
     const notification: Notification = {
-      id: `notif-${nextId++}-${Date.now()}`,
+      id,
       type,
       title,
       message,
-      timestamp: Date.now(),
+      timestamp: options?.timestamp || Date.now(),
       read: false,
       metadata
     };
-    setNotifications((prev) => [notification, ...prev]);
+    setNotifications((prev) => {
+      if (prev.some((item) => item.id === notification.id)) {
+        return prev;
+      }
+      return [notification, ...prev];
+    });
   }, []);
 
   const markRead = useCallback((id: string) => {
@@ -71,6 +103,28 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
       push(event.type, event.title, event.message, event.metadata);
     });
   }, [push]);
+
+  useEffect(() => {
+    if (!("Notification" in window) || window.Notification.permission !== "granted") {
+      return;
+    }
+
+    for (const notification of notifications) {
+      if (browserShownRef.current.has(notification.id)) {
+        continue;
+      }
+      browserShownRef.current.add(notification.id);
+      try {
+        new window.Notification(notification.title, {
+          body: notification.message || undefined,
+          tag: notification.id,
+          silent: false
+        });
+      } catch {
+        // Browser notification support varies by context; the in-app bell still carries the event.
+      }
+    }
+  }, [notifications]);
 
   return <NotificationContext.Provider value={value}>{children}</NotificationContext.Provider>;
 }

@@ -1794,11 +1794,26 @@ function buildTimelineItems({
     isRespondingPhase &&
     (normalizedStreamedAssistantText.length > 0 || isSending) &&
     !hasDuplicatedPersistedAssistant;
+  const latestBuildProgressEvent = [...safeEvents]
+    .reverse()
+    .find((eventItem) => eventItem?.type === "build_progress" && eventItem.buildProgress);
 
   const timelineItems = [];
   const answeredInputs = answeredInputRequestIds(safeEvents);
   for (let index = 0; index < safeEvents.length; index += 1) {
     const eventItem = safeEvents[index];
+    if (eventItem === latestBuildProgressEvent) {
+      timelineItems.push({
+        id: `${extractEventKey(eventItem, index)}-build-progress`,
+        kind: "build_progress",
+        event: eventItem
+      });
+      continue;
+    }
+    if (eventItem?.type === "build_progress") {
+      continue;
+    }
+
     if (eventItem?.type === "input_request" && eventItem.inputRequest) {
       const requestId = String(eventItem.inputRequest.id || "");
       timelineItems.push({
@@ -1871,6 +1886,78 @@ function buildTimelineItems({
     timelineItems,
     latestRunStatus
   };
+}
+
+function buildProgressIcon(status) {
+  switch (String(status || "").toLowerCase()) {
+    case "done":
+      return "check_circle";
+    case "in_progress":
+      return "progress_activity";
+    case "blocked":
+      return "error";
+    case "skipped":
+      return "remove_circle";
+    default:
+      return "radio_button_unchecked";
+  }
+}
+
+function buildProgressLabel(status) {
+  switch (String(status || "").toLowerCase()) {
+    case "in_progress":
+      return "In progress";
+    case "done":
+      return "Done";
+    case "blocked":
+      return "Blocked";
+    case "skipped":
+      return "Skipped";
+    default:
+      return "Pending";
+  }
+}
+
+function BuildProgressPanel({ progress }) {
+  const title = String(progress?.title || "Progress").trim() || "Progress";
+  const items = Array.isArray(progress?.items) ? progress.items : [];
+  if (items.length === 0) {
+    return null;
+  }
+
+  return (
+    <section className="agent-build-progress" aria-label="Build progress">
+      <div className="agent-build-progress-head">
+        <span className="material-symbols-rounded" aria-hidden="true">
+          checklist
+        </span>
+        <strong>{title}</strong>
+      </div>
+      <ol className="agent-build-progress-list">
+        {items.map((item, index) => {
+          const status = String(item?.status || "pending").toLowerCase();
+          const itemTitle = String(item?.title || `Item ${index + 1}`).trim() || `Item ${index + 1}`;
+          const definitionOfDone = String(item?.definitionOfDone || "").trim();
+          const details = String(item?.details || "").trim();
+          return (
+            <li key={String(item?.id || `progress-${index}`)} className={`agent-build-progress-item ${status}`}>
+              <span className="material-symbols-rounded agent-build-progress-icon" aria-hidden="true">
+                {buildProgressIcon(status)}
+              </span>
+              <div className="agent-build-progress-copy">
+                <div className="agent-build-progress-title-row">
+                  <strong>{itemTitle}</strong>
+                  <span>{buildProgressLabel(status)}</span>
+                </div>
+                {definitionOfDone ? <p>DoD: {definitionOfDone}</p> : null}
+                {details ? <small>{details}</small> : null}
+              </div>
+            </li>
+          );
+        })}
+      </ol>
+    </section>
+  );
 }
 
 function AgentChatEvents({
@@ -2090,6 +2177,15 @@ function AgentChatEvents({
                   request={request}
                   disabled={Boolean(timelineItem.isAnswered)}
                   onSubmit={(payload) => onAnswerInputRequest?.(String(request.id || ""), payload)}
+                />
+              );
+            }
+
+            if (timelineItem.kind === "build_progress") {
+              return (
+                <BuildProgressPanel
+                  key={timelineItem.id}
+                  progress={timelineItem.event?.buildProgress}
                 />
               );
             }

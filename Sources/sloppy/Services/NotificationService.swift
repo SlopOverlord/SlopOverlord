@@ -8,6 +8,9 @@ public struct DashboardNotification: Codable, Sendable {
         case systemError = "system_error"
         case pendingApproval = "pending_approval"
         case toolApproval = "tool_approval"
+        case taskCompleted = "task_completed"
+        case inputRequired = "input_required"
+        case cronAttention = "cron_attention"
     }
 
     public var id: String
@@ -77,7 +80,8 @@ public actor NotificationService {
         var metadata: [String: String] = [
             "approvalId": approvalId,
             "platform": platform,
-            "userId": userId
+            "userId": userId,
+            "source": "system"
         ]
         if let channelId { metadata["channelId"] = channelId }
         push(DashboardNotification(type: .pendingApproval, title: title, message: message, metadata: metadata))
@@ -95,7 +99,8 @@ public actor NotificationService {
             "status": approval.status.rawValue,
             "agentId": approval.agentId,
             "tool": approval.tool,
-            "expiresAt": ISO8601DateFormatter().string(from: approval.expiresAt)
+            "expiresAt": ISO8601DateFormatter().string(from: approval.expiresAt),
+            "source": "agent"
         ]
         if let sessionId = approval.sessionId { metadata["sessionId"] = sessionId }
         if let channelId = approval.channelId { metadata["channelId"] = channelId }
@@ -125,10 +130,69 @@ public actor NotificationService {
                 metadata: [
                     "agentId": agentId,
                     "sessionId": sessionId,
-                    "channelId": "agent:\(agentId):session:\(sessionId)"
+                    "channelId": "agent:\(agentId):session:\(sessionId)",
+                    "source": "agent"
                 ]
             )
         )
+    }
+
+    public func pushInputRequired(
+        title: String,
+        message: String,
+        agentId: String? = nil,
+        sessionId: String? = nil,
+        taskId: String? = nil,
+        projectId: String? = nil,
+        requestId: String? = nil,
+        source: String = "agent"
+    ) {
+        var metadata: [String: String] = ["source": source]
+        if let agentId { metadata["agentId"] = agentId }
+        if let sessionId { metadata["sessionId"] = sessionId }
+        if let taskId { metadata["taskId"] = taskId }
+        if let projectId { metadata["projectId"] = projectId }
+        if let requestId { metadata["requestId"] = requestId }
+        push(DashboardNotification(type: .inputRequired, title: title, message: message, metadata: metadata))
+    }
+
+    public func pushTaskCompleted(
+        title: String,
+        message: String,
+        taskId: String,
+        projectId: String,
+        source: String
+    ) {
+        push(DashboardNotification(
+            type: .taskCompleted,
+            title: title,
+            message: message,
+            metadata: [
+                "taskId": taskId,
+                "projectId": projectId,
+                "source": source
+            ]
+        ))
+    }
+
+    public func pushCronAttention(
+        title: String,
+        message: String,
+        cronTaskId: String,
+        agentId: String,
+        channelId: String
+    ) {
+        push(DashboardNotification(
+            type: .cronAttention,
+            title: title,
+            message: message,
+            metadata: [
+                "cronTaskId": cronTaskId,
+                "agentId": agentId,
+                "channelId": channelId,
+                "source": "cron"
+            ]
+        ))
     }
 
     private func unsubscribe(id: UUID) {

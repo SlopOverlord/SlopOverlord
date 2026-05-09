@@ -70,6 +70,15 @@ extension CoreService: ToolApprovalBridge {
             topicId: topicID,
             request: request
         )
+        await appendToolApprovalPausedStatusIfNeeded(agentID: agentID, sessionID: sessionID, record: record)
+        if let sessionID {
+            await markTaskWaitingInputForAgentSession(
+                agentID: agentID,
+                sessionID: sessionID,
+                reason: "Tool approval required for \(request.tool).",
+                source: "agent"
+            )
+        }
         _ = await channelDelivery.presentToolApproval(record)
         let result = await toolApprovalService.waitForDecision(id: record.id)
         if case .timedOut(let timedOut) = result {
@@ -214,5 +223,32 @@ extension CoreService: ToolApprovalBridge {
 
     private func normalizedToolApprovalToolID(_ toolID: String) -> String {
         toolID.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+    }
+
+    private func appendToolApprovalPausedStatusIfNeeded(
+        agentID: String,
+        sessionID: String?,
+        record: ToolApprovalRecord
+    ) async {
+        guard let sessionID else {
+            return
+        }
+        let details = record.reason?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
+            ? record.reason!
+            : "Tool: \(record.tool)"
+        let event = AgentSessionEvent(
+            agentId: agentID,
+            sessionId: sessionID,
+            type: .runStatus,
+            runStatus: AgentRunStatusEvent(
+                stage: .paused,
+                label: "Tool approval required",
+                details: details
+            )
+        )
+        guard let summary = try? sessionStore.appendEvents(agentID: agentID, sessionID: sessionID, events: [event]) else {
+            return
+        }
+        publishLiveSessionEvents(agentID: agentID, sessionID: sessionID, summary: summary, events: [event])
     }
 }

@@ -140,6 +140,7 @@ enum SloppyTUITimelineBlock {
     case thinking(String)
     case attachment(name: String, mimeType: String, sizeBytes: Int)
     case subSession(childSessionId: String, title: String, status: SloppyTUISubSessionStatus)
+    case buildProgress(AgentBuildProgressEvent)
     case inputRequest(PlanInputRequest)
     case toolCall(tool: String, reason: String?, summary: String?, details: String?)
     case toolResult(tool: String, ok: Bool, error: String?, durationMs: Int?, details: String?)
@@ -156,6 +157,9 @@ enum SloppyTUITimelineBlock {
             return "\(name) \(mimeType)"
         case .subSession(let childSessionId, let title, let status):
             return "\(title) \(childSessionId) \(status.plainText)"
+        case .buildProgress(let progress):
+            let items = progress.items.map { "\($0.title) \($0.status.rawValue) \($0.definitionOfDone)" }
+            return ([progress.title] + items).joined(separator: " ")
         case .inputRequest(let request):
             return SloppyTUIPlanInputPicker.requestText(request)
         case .toolCall(let tool, let reason, let summary, let details):

@@ -94,6 +94,14 @@ extension CoreService {
                 chatMode: chatMode
             )
         }
+        if trimmedToolID == "planning.progress_update" {
+            return await handleAgentBuildProgressTool(
+                agentID: normalizedAgentID,
+                sessionID: normalizedSessionID,
+                request: request,
+                chatMode: chatMode
+            )
+        }
 
         if authorization.allowed,
            let allowOverlay = sessionSubagentToolAllowList[normalizedSessionID],
@@ -416,6 +424,17 @@ extension CoreService {
                 request: request,
                 topicID: topicID,
                 chatMode: chatMode
+            )
+        }
+        if trimmedToolID == "planning.progress_update" {
+            return ToolInvocationResult(
+                tool: request.tool,
+                ok: false,
+                error: ToolErrorPayload(
+                    code: "agent_session_required",
+                    message: "`planning.progress_update` is only available in agent sessions.",
+                    retryable: false
+                )
             )
         }
 

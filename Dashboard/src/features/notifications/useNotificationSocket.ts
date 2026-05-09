@@ -13,7 +13,16 @@ interface ServerNotification {
 }
 
 const RECONNECT_DELAY_MS = 3000;
-const VALID_TYPES: NotificationType[] = ["confirmation", "agent_error", "system_error", "pending_approval", "tool_approval"];
+const VALID_TYPES: NotificationType[] = [
+  "confirmation",
+  "agent_error",
+  "system_error",
+  "pending_approval",
+  "tool_approval",
+  "task_completed",
+  "input_required",
+  "cron_attention"
+];
 const CONNECTION_LOST_DISPLAY_THRESHOLD = 5;
 
 function mapServerType(raw: string): NotificationType {
@@ -50,7 +59,17 @@ export function useNotificationSocket() {
           const payload = JSON.parse(String(event.data)) as ServerNotification;
           if (payload && typeof payload.title === "string") {
             const metadata = payload.metadata && typeof payload.metadata === "object" ? payload.metadata : undefined;
-            pushRef.current(mapServerType(payload.type), payload.title, payload.message || "", metadata);
+            const timestamp = typeof payload.timestamp === "string" ? Date.parse(payload.timestamp) : NaN;
+            pushRef.current(
+              mapServerType(payload.type),
+              payload.title,
+              payload.message || "",
+              metadata,
+              {
+                id: typeof payload.id === "string" && payload.id.trim() ? payload.id : undefined,
+                timestamp: Number.isFinite(timestamp) ? timestamp : undefined
+              }
+            );
           }
         } catch {
           // ignore malformed

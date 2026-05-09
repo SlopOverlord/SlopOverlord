@@ -9,7 +9,10 @@ const TYPE_META: Record<NotificationType, { icon: string; color: string; label: 
   agent_error: { icon: "error_outline", color: "var(--danger)", label: "AGENT" },
   system_error: { icon: "warning", color: "var(--danger)", label: "SYSTEM" },
   pending_approval: { icon: "person_add", color: "var(--accent)", label: "APPROVAL" },
-  tool_approval: { icon: "approval", color: "var(--warn)", label: "TOOL" }
+  tool_approval: { icon: "approval", color: "var(--warn)", label: "TOOL" },
+  task_completed: { icon: "task_alt", color: "var(--success)", label: "DONE" },
+  input_required: { icon: "front_hand", color: "var(--warn)", label: "INPUT" },
+  cron_attention: { icon: "schedule", color: "var(--accent)", label: "CRON" }
 };
 
 function formatTime(ts: number): string {
@@ -119,6 +122,10 @@ export function NotificationBell({
   const [open, setOpen] = useState(false);
   const [approvalId, setApprovalId] = useState<string | null>(null);
   const [toolApprovalId, setToolApprovalId] = useState<string | null>(null);
+  const [browserPermission, setBrowserPermission] = useState<NotificationPermission | "unsupported">(() => {
+    if (!("Notification" in window)) return "unsupported";
+    return window.Notification.permission;
+  });
   const containerRef = useRef<HTMLDivElement>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
 
@@ -126,6 +133,9 @@ export function NotificationBell({
 
   useEffect(() => {
     if (!open) return;
+    if ("Notification" in window) {
+      setBrowserPermission(window.Notification.permission);
+    }
     function handleClickOutside(e: MouseEvent) {
       if (
         containerRef.current && !containerRef.current.contains(e.target as Node) &&
@@ -137,6 +147,30 @@ export function NotificationBell({
     document.addEventListener("mousedown", handleClickOutside);
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, [open]);
+
+  const requestBrowserPermission = useCallback(async () => {
+    if (!("Notification" in window)) {
+      setBrowserPermission("unsupported");
+      return;
+    }
+    const nextPermission = await window.Notification.requestPermission();
+    setBrowserPermission(nextPermission);
+  }, []);
+
+  const browserPermissionLabel = (() => {
+    switch (browserPermission) {
+      case "granted":
+        return "BROWSER ON";
+      case "denied":
+        return "BROWSER BLOCKED";
+      case "default":
+        return "ENABLE BROWSER";
+      case "unsupported":
+        return "BROWSER N/A";
+      default:
+        return "BROWSER N/A";
+    }
+  })();
 
   useLayoutEffect(() => {
     if (!open || !containerRef.current || !dropdownRef.current) return;
@@ -159,6 +193,23 @@ export function NotificationBell({
           <div className="notif-dropdown-header">
             <span className="notif-dropdown-title">[NOTIFICATIONS]</span>
             <div className="notif-dropdown-actions">
+              <button
+                type="button"
+                className="notif-dropdown-action"
+                onClick={requestBrowserPermission}
+                disabled={browserPermission === "granted" || browserPermission === "denied" || browserPermission === "unsupported"}
+                title={
+                  browserPermission === "granted"
+                    ? "Browser notifications are enabled"
+                    : browserPermission === "denied"
+                      ? "Browser notification permission is blocked in this browser"
+                      : browserPermission === "unsupported"
+                        ? "Browser notifications are not supported in this context"
+                        : "Enable browser notifications"
+                }
+              >
+                {browserPermissionLabel}
+              </button>
               {unreadCount > 0 && (
                 <button type="button" className="notif-dropdown-action" onClick={markAllRead}>
                   READ ALL

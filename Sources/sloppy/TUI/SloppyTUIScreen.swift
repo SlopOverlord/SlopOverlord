@@ -23,6 +23,19 @@ private enum SloppyTUILocalCardBehavior {
     static let autoDismissCharacterLimit = 320
 }
 
+private enum SloppyTUITimelinePerformance {
+    static let animatedSessionBlockLimit = 80
+}
+
+private struct SloppyTUISessionTimelineCache {
+    var revision: Int
+    var width: Int
+    var transcriptExpanded: Bool
+    var animationFrameKey: Int
+    var lines: [String]
+    var containsToolTranscriptBlock: Bool
+}
+
 private extension Array where Element == String {
     func trimmingEmptyEdges() -> [String] {
         var startIndex = self.startIndex
@@ -142,6 +155,7 @@ final class SloppyTUIScreen: @preconcurrency Component, @unchecked Sendable {
     """
 
     private let runtime: SloppyTUIRuntime
+    private let desktopNotificationService = DesktopNotificationService.live()
     private var project: ProjectRecord
     private var agent: AgentSummary
     private var session: AgentSessionSummary
@@ -219,6 +233,8 @@ final class SloppyTUIScreen: @preconcurrency Component, @unchecked Sendable {
     private var localCardDismissTasks: [Int: Task<Void, Never>] = [:]
     private var timelineScrollOffset = 0
     private var lastTimelineViewportHeight = 1
+    private var sessionTimelineRevision = 0
+    private var sessionTimelineCache: SloppyTUISessionTimelineCache?
 
     init(
         runtime: SloppyTUIRuntime,
@@ -453,8 +469,7 @@ final class SloppyTUIScreen: @preconcurrency Component, @unchecked Sendable {
         let headerLines = header.render(width: width)
         let statusLines = status.render(width: width)
         let timelineHeight = max(1, height - headerLines.count - statusLines.count)
-        let timelineLines = renderTimelineBlocks(width: width)
-        let visibleTimeline = visibleTimelineLines(timelineLines, height: timelineHeight)
+        let visibleTimeline = renderTimelineBlocks(width: width, height: timelineHeight)
         let bottomPadding = max(0, height - headerLines.count - visibleTimeline.count - statusLines.count)
         return headerLines
             + visibleTimeline
@@ -2371,6 +2386,7 @@ final class SloppyTUIScreen: @preconcurrency Component, @unchecked Sendable {
             hasPersistedSession = false
             sessionCards = []
             subSessionCards = []
+            invalidateSessionTimelineCache()
             lastRenderedSessionEventIDs = []
             persistSelection()
             streamTask?.cancel()
@@ -2660,6 +2676,10 @@ final class SloppyTUIScreen: @preconcurrency Component, @unchecked Sendable {
                                     self.liveRunStatusLine = self.runStatusLine(status)
                                 }
                                 self.refreshStaticChrome()
+                                self.notifyForRunStatus(status)
+                            }
+                            if let inputRequest = event.inputRequest {
+                                self.notifyForInputRequest(inputRequest)
                             }
                             if self.isFinalAssistantMessage(event) {
                                 self.clearLiveAssistantDraft()
@@ -2801,6 +2821,7 @@ final class SloppyTUIScreen: @preconcurrency Component, @unchecked Sendable {
         guard hasPersistedSession else {
             sessionCards = []
             subSessionCards = []
+            invalidateSessionTimelineCache()
             lastRenderedSessionEventIDs = []
             renderTimeline()
             refreshStaticChrome()
@@ -2819,6 +2840,9 @@ final class SloppyTUIScreen: @preconcurrency Component, @unchecked Sendable {
         }.last { request in
             !answeredInputRequestIDs.contains(request.id)
         }
+        let latestBuildProgressID = events.reversed().first { event in
+            event.type == .buildProgress && event.buildProgress != nil
+        }?.id
         lastRenderedSessionEventIDs = Set(events.map(\.id))
         for event in events {
             if let message = event.message {
@@ -2875,10 +2899,13 @@ final class SloppyTUIScreen: @preconcurrency Component, @unchecked Sendable {
                 if !answeredInputRequestIDs.contains(inputRequest.id) {
                     blocks.append(.inputRequest(inputRequest))
                 }
+            } else if event.id == latestBuildProgressID, let progress = event.buildProgress {
+                blocks.append(.buildProgress(progress))
             }
         }
         sessionCards = blocks
         subSessionCards = children
+        invalidateSessionTimelineCache()
         updatePendingPlanInputRequest(pendingInputRequest)
         await refreshTokenUsage(includeCost: false)
         renderTimeline()
@@ -3110,9 +3137,18 @@ final class SloppyTUIScreen: @preconcurrency Component, @unchecked Sendable {
         return "'" + value.replacingOccurrences(of: "'", with: "'\\''") + "'"
     }
 
+    private func invalidateSessionTimelineCache() {
+        sessionTimelineRevision += 1
+        sessionTimelineCache = nil
+    }
+
     private func renderTimeline() {
-        let blocks = sessionCards + liveAssistantBlocks() + queuedMessageBlocks() + localCards.map(\.block)
-        timeline.text = blocks.map(\.plainText).joined(separator: "\n\n")
+        if sessionCards.isEmpty,
+           liveAssistantDraft == nil,
+           queuedMessages.isEmpty,
+           localCards.isEmpty {
+            timeline.text = ""
+        }
         refreshStaticChrome()
         requestRender()
     }
@@ -3134,10 +3170,74 @@ final class SloppyTUIScreen: @preconcurrency Component, @unchecked Sendable {
         queuedMessages.messages.map { .queuedMessage($0) }
     }
 
-    private func renderTimelineBlocks(width: Int) -> [String] {
-        let blocks = sessionCards + liveAssistantBlocks() + queuedMessageBlocks() + localCards.map(\.block)
-        guard !blocks.isEmpty else {
+    private func renderTimelineBlocks(width: Int, height: Int) -> [String] {
+        let sessionTimeline = cachedSessionTimelineLines(width: width)
+        let dynamicBlocks = liveAssistantBlocks() + queuedMessageBlocks() + localCards.map(\.block)
+        let dynamicLines = renderTimelineLines(dynamicBlocks, width: width)
+        let containsToolTranscriptBlock = sessionTimeline.containsToolTranscriptBlock
+            || dynamicBlocks.contains(where: isToolTranscriptBlock)
+
+        var segments: [[String]] = []
+        if !sessionTimeline.lines.isEmpty {
+            segments.append(sessionTimeline.lines)
+        }
+        if !dynamicLines.isEmpty {
+            if !segments.isEmpty {
+                segments.append([""])
+            }
+            segments.append(dynamicLines)
+        }
+        if transcriptExpanded || containsToolTranscriptBlock {
+            if !segments.isEmpty {
+                segments.append([""])
+            }
+            segments.append([
+                SloppyTUITheme.transcriptHintLine(
+                    expanded: transcriptExpanded,
+                    childSessionCount: subSessionCards.count,
+                    width: width
+                ),
+            ])
+        }
+
+        if segments.isEmpty {
             return timeline.render(width: width)
+        }
+
+        return visibleTimelineLines(segments, height: height)
+    }
+
+    private func cachedSessionTimelineLines(width: Int) -> (lines: [String], containsToolTranscriptBlock: Bool) {
+        let animationFrameKey = shouldAnimateCachedSessionBlocks ? thinkingFrame : 0
+        if let cache = sessionTimelineCache,
+           cache.revision == sessionTimelineRevision,
+           cache.width == width,
+           cache.transcriptExpanded == transcriptExpanded,
+           cache.animationFrameKey == animationFrameKey {
+            return (cache.lines, cache.containsToolTranscriptBlock)
+        }
+
+        let lines = renderTimelineLines(sessionCards, width: width)
+        let containsToolTranscriptBlock = sessionCards.contains(where: isToolTranscriptBlock)
+        sessionTimelineCache = SloppyTUISessionTimelineCache(
+            revision: sessionTimelineRevision,
+            width: width,
+            transcriptExpanded: transcriptExpanded,
+            animationFrameKey: animationFrameKey,
+            lines: lines,
+            containsToolTranscriptBlock: containsToolTranscriptBlock
+        )
+        return (lines, containsToolTranscriptBlock)
+    }
+
+    private var shouldAnimateCachedSessionBlocks: Bool {
+        sessionCards.count <= SloppyTUITimelinePerformance.animatedSessionBlockLimit
+            && sessionCards.contains(where: isAnimatedTimelineBlock)
+    }
+
+    private func renderTimelineLines(_ blocks: [SloppyTUITimelineBlock], width: Int) -> [String] {
+        guard !blocks.isEmpty else {
+            return []
         }
 
         var lines: [String] = []
@@ -3180,6 +3280,8 @@ final class SloppyTUIScreen: @preconcurrency Component, @unchecked Sendable {
                     frame: thinkingFrame,
                     width: width
                 ))
+            case .buildProgress(let progress):
+                lines.append(contentsOf: renderMarkdown(buildProgressText(progress), width: width))
             case .inputRequest(let request):
                 lines.append(contentsOf: renderMarkdown(SloppyTUIPlanInputPicker.requestText(request), width: width))
             case .toolCall(let tool, let reason, let summary, let details):
@@ -3196,22 +3298,47 @@ final class SloppyTUIScreen: @preconcurrency Component, @unchecked Sendable {
             index += 1
         }
 
-        if transcriptExpanded || blocks.contains(where: isToolTranscriptBlock) {
-            if !lines.isEmpty {
-                lines.append("")
-            }
-            lines.append(SloppyTUITheme.transcriptHintLine(
-                expanded: transcriptExpanded,
-                childSessionCount: subSessionCards.count,
-                width: width
-            ))
-        }
         return lines
     }
 
     private func isToolTranscriptBlock(_ block: SloppyTUITimelineBlock) -> Bool {
         switch block {
         case .toolCall, .toolResult:
+            return true
+        default:
+            return false
+        }
+    }
+
+    private func buildProgressText(_ progress: AgentBuildProgressEvent) -> String {
+        var lines: [String] = ["**\(progress.title)**"]
+        for item in progress.items {
+            let marker: String
+            switch item.status {
+            case .done:
+                marker = "[x]"
+            case .inProgress:
+                marker = "[~]"
+            case .blocked:
+                marker = "[!]"
+            case .skipped:
+                marker = "[-]"
+            case .pending:
+                marker = "[ ]"
+            }
+
+            var line = "\(marker) \(item.title) - DoD: \(item.definitionOfDone)"
+            if let details = item.details?.trimmingCharacters(in: .whitespacesAndNewlines), !details.isEmpty {
+                line += " - \(details)"
+            }
+            lines.append(line)
+        }
+        return lines.joined(separator: "\n")
+    }
+
+    private func isAnimatedTimelineBlock(_ block: SloppyTUITimelineBlock) -> Bool {
+        switch block {
+        case .subSession:
             return true
         default:
             return false
@@ -3333,18 +3460,37 @@ final class SloppyTUIScreen: @preconcurrency Component, @unchecked Sendable {
         lines.append(SloppyTUITheme.toolPaddingLine(width: width))
     }
 
-    private func visibleTimelineLines(_ lines: [String], height: Int) -> [String] {
+    private func visibleTimelineLines(_ segments: [[String]], height: Int) -> [String] {
         lastTimelineViewportHeight = max(1, height)
-        guard lines.count > height else {
+        let lineCount = segments.reduce(0) { $0 + $1.count }
+        guard lineCount > height else {
             timelineScrollOffset = 0
-            return lines
+            return segments.flatMap { $0 }
         }
 
-        let maxOffset = max(0, lines.count - height)
+        let maxOffset = max(0, lineCount - height)
         timelineScrollOffset = min(max(0, timelineScrollOffset), maxOffset)
-        let end = lines.count - timelineScrollOffset
+        let end = lineCount - timelineScrollOffset
         let start = max(0, end - height)
-        return Array(lines[start..<end])
+        var visible: [String] = []
+        visible.reserveCapacity(height)
+        var segmentStart = 0
+        for segment in segments {
+            let segmentEnd = segmentStart + segment.count
+            defer { segmentStart = segmentEnd }
+
+            guard segmentEnd > start, segmentStart < end else {
+                continue
+            }
+
+            let sliceStart = max(0, start - segmentStart)
+            let sliceEnd = min(segment.count, end - segmentStart)
+            visible.append(contentsOf: segment[sliceStart..<sliceEnd])
+            if segmentEnd >= end {
+                break
+            }
+        }
+        return visible
     }
 
     private func renderMarkdown(_ text: String, width: Int) -> [String] {
@@ -3668,6 +3814,78 @@ final class SloppyTUIScreen: @preconcurrency Component, @unchecked Sendable {
             return label
         }
         return status.stage.rawValue
+    }
+
+    private func notifyForRunStatus(_ status: AgentRunStatusEvent) {
+        switch status.stage {
+        case .done:
+            let body = sessionDisplayNotificationBody(fallback: status.details)
+            let metadata = [
+                "source": "tui",
+                "agentId": agent.id,
+                "sessionId": session.id
+            ]
+            Task {
+                await desktopNotificationService.notify(
+                    category: "session_done",
+                    title: "Sloppy finished",
+                    body: body,
+                    metadata: metadata
+                )
+            }
+        case .paused:
+            let label = status.label.trimmingCharacters(in: .whitespacesAndNewlines)
+            if label.caseInsensitiveCompare("Waiting for input") == .orderedSame {
+                return
+            }
+            let isToolApproval = label.localizedCaseInsensitiveContains("approval")
+            let body = sessionDisplayNotificationBody(fallback: status.details)
+            let metadata = [
+                "source": "tui",
+                "agentId": agent.id,
+                "sessionId": session.id
+            ]
+            Task {
+                await desktopNotificationService.notify(
+                    category: isToolApproval ? "tool_approval" : "input_required",
+                    title: isToolApproval ? "Tool approval required" : "Input required",
+                    body: body,
+                    metadata: metadata
+                )
+            }
+        case .thinking, .searching, .responding, .interrupted:
+            break
+        }
+    }
+
+    private func notifyForInputRequest(_ inputRequest: PlanInputRequest) {
+        let body = sessionDisplayNotificationBody(fallback: inputRequest.title)
+        let metadata = [
+            "source": "tui",
+            "agentId": agent.id,
+            "sessionId": session.id,
+            "requestId": inputRequest.id
+        ]
+        Task {
+            await desktopNotificationService.notify(
+                category: "input_required",
+                title: "Input required",
+                body: body,
+                metadata: metadata
+            )
+        }
+    }
+
+    private func sessionDisplayNotificationBody(fallback: String?) -> String {
+        let fallbackText = fallback?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if !fallbackText.isEmpty {
+            return fallbackText
+        }
+        let title = SloppyTUITheme.sessionDisplayTitle(session).trimmingCharacters(in: .whitespacesAndNewlines)
+        if !title.isEmpty {
+            return title
+        }
+        return agent.displayName
     }
 
     private func terminalPetFace() -> String {

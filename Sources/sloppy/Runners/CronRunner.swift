@@ -6,15 +6,22 @@ import Logging
 public actor CronRunner {
     private let store: any PersistenceStore
     private let runtime: RuntimeSystem
+    private let notificationService: NotificationService?
     private let logger: Logger
     private var task: Task<Void, Never>?
     private var isRunning = false
     
     private var lastRunMinuteStr: String?
 
-    public init(store: any PersistenceStore, runtime: RuntimeSystem, logger: Logger = Logger(label: "sloppy.core.cron")) {
+    public init(
+        store: any PersistenceStore,
+        runtime: RuntimeSystem,
+        notificationService: NotificationService? = nil,
+        logger: Logger = Logger(label: "sloppy.core.cron")
+    ) {
         self.store = store
         self.runtime = runtime
+        self.notificationService = notificationService
         self.logger = logger
     }
     
@@ -79,7 +86,13 @@ public actor CronRunner {
     private func executeTask(_ cronTask: AgentCronTask) async {
         let request = ChannelMessageRequest(
             userId: "system_cron",
-            content: "CRON TRIGGER: \(cronTask.command)",
+            content: """
+            CRON TRIGGER: \(cronTask.command)
+
+            Cron metadata:
+            - source: cron
+            - cronTaskId: \(cronTask.id)
+            """,
             topicId: nil
         )
         

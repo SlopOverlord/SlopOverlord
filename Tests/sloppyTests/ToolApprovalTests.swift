@@ -140,6 +140,67 @@ func riskyToolWaitsForApprovalBeforeExecution() async throws {
 }
 
 @Test
+func toolApprovalPausesSessionAndMarksLinkedTaskWaitingInput() async throws {
+    let service = CoreService(config: .test, persistenceBuilder: InMemoryCorePersistenceBuilder())
+    let agentID = "approval-task-link"
+    _ = try await service.createAgent(AgentCreateRequest(
+        id: agentID,
+        displayName: agentID,
+        role: "Tests linked task approvals"
+    ))
+    let projectID = "approval-project-\(UUID().uuidString)"
+    let projectResult = try await service.createProject(ProjectCreateRequest(
+        id: projectID,
+        name: "Approval Project",
+        description: "",
+        channels: []
+    ))
+    let projectWithTask = try await service.createProjectTask(
+        projectID: projectResult.project.id,
+        request: ProjectTaskCreateRequest(
+            title: "Needs approval",
+            description: "",
+            priority: "medium",
+            status: ProjectTaskStatus.inProgress.rawValue
+        )
+    )
+    let taskID = try #require(projectWithTask.tasks.first?.id)
+    let session = try await service.createAgentSession(
+        agentID: agentID,
+        request: AgentSessionCreateRequest(title: "task-\(taskID)", projectId: projectID)
+    )
+
+    let invocation = Task {
+        await service.invokeToolFromRuntime(
+            agentID: agentID,
+            sessionID: session.id,
+            request: ToolInvocationRequest(
+                tool: "runtime.exec",
+                arguments: [
+                    "command": .string("/bin/echo"),
+                    "arguments": .array([.string("approved")])
+                ],
+                reason: "Need shell access"
+            ),
+            recordSessionEvents: false,
+            requireApproval: true
+        )
+    }
+
+    let pending = try await waitForPendingToolApproval(service)
+    let savedProject = try await service.getProject(id: projectID)
+    let savedTask = try #require(savedProject.tasks.first(where: { $0.id == taskID }))
+    #expect(savedTask.status == ProjectTaskStatus.waitingInput.rawValue)
+
+    let detail = try await service.getAgentSession(agentID: agentID, sessionID: session.id)
+    let paused = detail.events.compactMap(\.runStatus).last(where: { $0.stage == .paused })
+    #expect(paused?.label == "Tool approval required")
+
+    _ = await service.approveToolApproval(id: pending.id, decidedBy: "test")
+    #expect((await invocation.value).ok == true)
+}
+
+@Test
 func rejectedRiskyToolDoesNotExecute() async throws {
     let service = CoreService(config: .test, persistenceBuilder: InMemoryCorePersistenceBuilder())
     let session = try await makeApprovalSession(service: service, agentID: "approval-rejects")

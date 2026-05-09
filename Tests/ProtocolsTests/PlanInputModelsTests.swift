@@ -50,4 +50,47 @@ struct PlanInputModelsTests {
         #expect(decoded.inputRequest?.questions.first?.options.last?.description == "Broader work")
         #expect(decoded.inputResponse?.answers.first?.selectedOptionId == "small")
     }
+
+    @Test("build progress round-trips through session event")
+    func buildProgressRoundTrip() throws {
+        let progress = AgentBuildProgressEvent(
+            title: "Progress",
+            items: [
+                AgentBuildProgressItem(
+                    id: "tests",
+                    title: "Add tests",
+                    status: .inProgress,
+                    definitionOfDone: "Targeted tests cover validation",
+                    details: "Writing cases"
+                ),
+                AgentBuildProgressItem(
+                    id: "verify",
+                    title: "Run verification",
+                    status: .pending,
+                    definitionOfDone: "Relevant checks pass"
+                )
+            ],
+            createdAt: Date(timeIntervalSince1970: 30)
+        )
+        let event = AgentSessionEvent(
+            id: "event-progress",
+            agentId: "assistant",
+            sessionId: "session-1",
+            type: .buildProgress,
+            buildProgress: progress
+        )
+
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        let data = try encoder.encode(event)
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        let decoded = try decoder.decode(AgentSessionEvent.self, from: data)
+
+        #expect(decoded.type == .buildProgress)
+        #expect(decoded.buildProgress?.title == "Progress")
+        #expect(decoded.buildProgress?.items.map(\.id) == ["tests", "verify"])
+        #expect(decoded.buildProgress?.items.first?.status == .inProgress)
+        #expect(decoded.buildProgress?.items.first?.definitionOfDone == "Targeted tests cover validation")
+    }
 }

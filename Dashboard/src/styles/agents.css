@@ -2192,6 +2192,115 @@ body.agent-chat-no-page-scroll .page {
   animation: agent-chat-technical-expand 0.2s ease-out;
 }
 
+.agent-build-progress {
+  width: 100%;
+  padding: 12px 14px;
+  border: 1px solid #31384a;
+  background: var(--surface-2);
+  color: var(--text);
+}
+
+.agent-build-progress-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+  color: var(--muted);
+}
+
+.agent-build-progress-head .material-symbols-rounded {
+  font-size: 19px;
+}
+
+.agent-build-progress-head strong {
+  color: var(--text);
+  font-size: 0.86rem;
+  font-weight: 650;
+}
+
+.agent-build-progress-list {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.agent-build-progress-item {
+  display: grid;
+  grid-template-columns: 22px minmax(0, 1fr);
+  gap: 8px;
+  align-items: start;
+}
+
+.agent-build-progress-icon {
+  margin-top: 1px;
+  color: var(--muted);
+  font-size: 18px;
+}
+
+.agent-build-progress-item.done .agent-build-progress-icon {
+  color: var(--success);
+}
+
+.agent-build-progress-item.in_progress .agent-build-progress-icon {
+  color: var(--accent);
+  animation: agent-progress-spin 1s linear infinite;
+}
+
+.agent-build-progress-item.blocked .agent-build-progress-icon {
+  color: var(--danger);
+}
+
+.agent-build-progress-copy {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.agent-build-progress-title-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  min-width: 0;
+}
+
+.agent-build-progress-title-row strong {
+  min-width: 0;
+  color: var(--text);
+  font-size: 0.84rem;
+  font-weight: 650;
+  line-height: 1.25;
+  overflow-wrap: anywhere;
+}
+
+.agent-build-progress-title-row span {
+  flex: 0 0 auto;
+  color: var(--muted);
+  font-size: 0.72rem;
+  line-height: 1.2;
+}
+
+.agent-build-progress-copy p,
+.agent-build-progress-copy small {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.76rem;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.agent-build-progress-copy small {
+  color: var(--text-dim);
+}
+
+@keyframes agent-progress-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 @keyframes agent-chat-technical-expand {
   from {
     opacity: 0;

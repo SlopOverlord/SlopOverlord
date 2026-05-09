@@ -55,18 +55,21 @@ struct GatewayToolInvocationTests {
         let noteURL = repoRoot.appendingPathComponent("note.txt")
         try Data("hello from gateway".utf8).write(to: noteURL)
 
+        let projectID = "gateway-project-\(UUID().uuidString)"
+        let channelID = "channel:telegram:\(UUID().uuidString)"
+
         _ = try await service.createProject(
             ProjectCreateRequest(
-                id: "gateway-project",
+                id: projectID,
                 name: "Gateway Project",
-                channels: [.init(title: "Telegram", channelId: "channel:telegram")],
+                channels: [.init(title: "Telegram", channelId: channelID)],
                 repoPath: repoRoot.path
             )
         )
 
         let result = await service.invokeToolFromChannelRuntime(
             agentID: agentID,
-            channelID: "channel:telegram",
+            channelID: channelID,
             request: ToolInvocationRequest(
                 tool: "files.read",
                 arguments: ["path": .string("note.txt")]
@@ -86,18 +89,19 @@ struct GatewayToolInvocationTests {
     func gatewayProjectToolsTreatEmptyOptionalIdsAsCurrentChannel() async throws {
         let service = makeService()
         let agentID = "gateway-project-empty-args-\(UUID().uuidString)"
-        let channelID = "telegram-agent\u{001E}tgthread:42"
+        let projectID = "gateway-empty-args-\(UUID().uuidString)"
+        let channelID = "telegram-agent-\(UUID().uuidString)\u{001E}tgthread:42"
         try await makeAgent(service: service, agentID: agentID)
 
         _ = try await service.createProject(
             ProjectCreateRequest(
-                id: "gateway-empty-args",
+                id: projectID,
                 name: "Gateway Empty Args",
                 channels: [.init(title: "Telegram topic", channelId: channelID)]
             )
         )
         _ = try await service.createProjectTask(
-            projectID: "gateway-empty-args",
+            projectID: projectID,
             request: ProjectTaskCreateRequest(title: "Existing task", status: ProjectTaskStatus.backlog.rawValue)
         )
 
@@ -117,7 +121,7 @@ struct GatewayToolInvocationTests {
         )
 
         #expect(listResult.ok == true)
-        #expect(listResult.data?.asObject?["projectId"]?.asString == "gateway-empty-args")
+        #expect(listResult.data?.asObject?["projectId"]?.asString == projectID)
         #expect(listResult.data?.asObject?["tasks"]?.asArray?.count == 1)
 
         let createResult = await service.invokeToolFromChannelRuntime(
@@ -130,7 +134,7 @@ struct GatewayToolInvocationTests {
         )
 
         #expect(createResult.ok == true)
-        #expect(createResult.data?.asObject?["projectId"]?.asString == "gateway-empty-args")
+        #expect(createResult.data?.asObject?["projectId"]?.asString == projectID)
         #expect(createResult.data?.asObject?["status"]?.asString == ProjectTaskStatus.pendingApproval.rawValue)
     }
 
@@ -225,6 +229,124 @@ struct GatewayToolInvocationTests {
         #expect(inputRequest.questions.first?.options.map(\.id) == ["mark_as_fixed", "bug_repeated"])
     }
 
+    @Test("agent build progress rejects empty items")
+    func agentBuildProgressRejectsEmptyItems() async throws {
+        let service = makeService()
+        let agentID = "agent-build-progress-empty-\(UUID().uuidString)"
+        try await makeAgent(service: service, agentID: agentID)
+        let session = try await service.createAgentSession(
+            agentID: agentID,
+            request: AgentSessionCreateRequest(title: "Build progress")
+        )
+
+        let result = await service.invokeToolFromRuntime(
+            agentID: agentID,
+            sessionID: session.id,
+            request: ToolInvocationRequest(
+                tool: "planning.progress_update",
+                arguments: ["items": .array([])]
+            ),
+            chatMode: .build
+        )
+
+        #expect(result.ok == false)
+        #expect(result.error?.code == "invalid_arguments")
+    }
+
+    @Test("agent build progress rejects duplicate item ids")
+    func agentBuildProgressRejectsDuplicateItemIDs() async throws {
+        let service = makeService()
+        let agentID = "agent-build-progress-duplicate-\(UUID().uuidString)"
+        try await makeAgent(service: service, agentID: agentID)
+        let session = try await service.createAgentSession(
+            agentID: agentID,
+            request: AgentSessionCreateRequest(title: "Build progress")
+        )
+
+        let result = await service.invokeToolFromRuntime(
+            agentID: agentID,
+            sessionID: session.id,
+            request: ToolInvocationRequest(
+                tool: "planning.progress_update",
+                arguments: [
+                    "items": .array([
+                        buildProgressItem(id: "same", title: "First", status: "pending"),
+                        buildProgressItem(id: "same", title: "Second", status: "pending")
+                    ])
+                ]
+            ),
+            chatMode: .build
+        )
+
+        #expect(result.ok == false)
+        #expect(result.error?.code == "invalid_arguments")
+        #expect(result.error?.message.contains("Duplicate") == true)
+    }
+
+    @Test("agent build progress rejects unknown statuses")
+    func agentBuildProgressRejectsUnknownStatuses() async throws {
+        let service = makeService()
+        let agentID = "agent-build-progress-status-\(UUID().uuidString)"
+        try await makeAgent(service: service, agentID: agentID)
+        let session = try await service.createAgentSession(
+            agentID: agentID,
+            request: AgentSessionCreateRequest(title: "Build progress")
+        )
+
+        let result = await service.invokeToolFromRuntime(
+            agentID: agentID,
+            sessionID: session.id,
+            request: ToolInvocationRequest(
+                tool: "planning.progress_update",
+                arguments: [
+                    "items": .array([
+                        buildProgressItem(id: "bad", title: "Bad", status: "almost_done")
+                    ])
+                ]
+            ),
+            chatMode: .build
+        )
+
+        #expect(result.ok == false)
+        #expect(result.error?.code == "invalid_arguments")
+        #expect(result.error?.message.contains("unknown") == true)
+    }
+
+    @Test("agent build progress records session event")
+    func agentBuildProgressRecordsSessionEvent() async throws {
+        let service = makeService()
+        let agentID = "agent-build-progress-valid-\(UUID().uuidString)"
+        try await makeAgent(service: service, agentID: agentID)
+        let session = try await service.createAgentSession(
+            agentID: agentID,
+            request: AgentSessionCreateRequest(title: "Build progress")
+        )
+
+        let result = await service.invokeToolFromRuntime(
+            agentID: agentID,
+            sessionID: session.id,
+            request: ToolInvocationRequest(
+                tool: "planning.progress_update",
+                arguments: [
+                    "title": .string("Progress"),
+                    "items": .array([
+                        buildProgressItem(id: "plan", title: "Plan", status: "done"),
+                        buildProgressItem(id: "verify", title: "Verify", status: "in_progress", details: "Running checks")
+                    ])
+                ]
+            ),
+            chatMode: .build
+        )
+
+        #expect(result.ok == true)
+        #expect(result.data?.asObject?["progress"]?.asObject?["title"]?.asString == "Progress")
+        let detail = try await service.getAgentSession(agentID: agentID, sessionID: session.id)
+        let progress = try #require(detail.events.compactMap(\.buildProgress).last)
+        #expect(progress.items.map(\.id) == ["plan", "verify"])
+        #expect(progress.items.last?.status == .inProgress)
+        #expect(progress.items.last?.details == "Running checks")
+    }
+
     @Test("gateway input tool rejects outside plan or debug mode")
     func gatewayInputRejectsOutsidePlanOrDebugMode() async throws {
         let service = makeService()
@@ -254,5 +376,23 @@ struct GatewayToolInvocationTests {
 
         #expect(result.ok == false)
         #expect(result.error?.code == "input_mode_required")
+    }
+
+    private func buildProgressItem(
+        id: String,
+        title: String,
+        status: String,
+        details: String? = nil
+    ) -> JSONValue {
+        var object: [String: JSONValue] = [
+            "id": .string(id),
+            "title": .string(title),
+            "status": .string(status),
+            "definitionOfDone": .string("Done when \(title.lowercased()) is complete")
+        ]
+        if let details {
+            object["details"] = .string(details)
+        }
+        return .object(object)
     }
 }

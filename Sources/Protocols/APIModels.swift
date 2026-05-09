@@ -2865,6 +2865,7 @@ public enum AgentSessionEventType: String, Codable, Sendable {
     case sessionCreated = "session_created"
     case message
     case runStatus = "run_status"
+    case buildProgress = "build_progress"
     case subSession = "sub_session"
     case runControl = "run_control"
     case toolCall = "tool_call"
@@ -2971,6 +2972,52 @@ public struct AgentRunStatusEvent: Codable, Sendable, Equatable {
         self.label = label
         self.details = details
         self.expandedText = expandedText
+        self.createdAt = createdAt
+    }
+}
+
+public enum AgentBuildProgressStatus: String, Codable, Sendable, Equatable, CaseIterable {
+    case pending
+    case inProgress = "in_progress"
+    case done
+    case blocked
+    case skipped
+}
+
+public struct AgentBuildProgressItem: Codable, Sendable, Equatable {
+    public var id: String
+    public var title: String
+    public var status: AgentBuildProgressStatus
+    public var definitionOfDone: String
+    public var details: String?
+
+    public init(
+        id: String,
+        title: String,
+        status: AgentBuildProgressStatus,
+        definitionOfDone: String,
+        details: String? = nil
+    ) {
+        self.id = id
+        self.title = title
+        self.status = status
+        self.definitionOfDone = definitionOfDone
+        self.details = details
+    }
+}
+
+public struct AgentBuildProgressEvent: Codable, Sendable, Equatable {
+    public var title: String
+    public var items: [AgentBuildProgressItem]
+    public var createdAt: Date
+
+    public init(
+        title: String,
+        items: [AgentBuildProgressItem],
+        createdAt: Date = Date()
+    ) {
+        self.title = title
+        self.items = items
         self.createdAt = createdAt
     }
 }
@@ -3194,6 +3241,7 @@ public struct AgentSessionEvent: Codable, Sendable, Equatable {
     public var metadata: AgentSessionMetadataEvent?
     public var message: AgentSessionMessage?
     public var runStatus: AgentRunStatusEvent?
+    public var buildProgress: AgentBuildProgressEvent?
     public var subSession: AgentSubSessionEvent?
     public var runControl: AgentRunControlEvent?
     public var toolCall: AgentToolCallEvent?
@@ -3211,6 +3259,7 @@ public struct AgentSessionEvent: Codable, Sendable, Equatable {
         metadata: AgentSessionMetadataEvent? = nil,
         message: AgentSessionMessage? = nil,
         runStatus: AgentRunStatusEvent? = nil,
+        buildProgress: AgentBuildProgressEvent? = nil,
         subSession: AgentSubSessionEvent? = nil,
         runControl: AgentRunControlEvent? = nil,
         toolCall: AgentToolCallEvent? = nil,
@@ -3227,6 +3276,7 @@ public struct AgentSessionEvent: Codable, Sendable, Equatable {
         self.metadata = metadata
         self.message = message
         self.runStatus = runStatus
+        self.buildProgress = buildProgress
         self.subSession = subSession
         self.runControl = runControl
         self.toolCall = toolCall

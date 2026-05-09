@@ -10,7 +10,10 @@ const TYPE_META: Record<NotificationType, { icon: string; color: string }> = {
   agent_error: { icon: "error_outline", color: "var(--danger)" },
   system_error: { icon: "warning", color: "var(--danger)" },
   pending_approval: { icon: "person_add", color: "var(--accent)" },
-  tool_approval: { icon: "approval", color: "var(--warn)" }
+  tool_approval: { icon: "approval", color: "var(--warn)" },
+  task_completed: { icon: "task_alt", color: "var(--success)" },
+  input_required: { icon: "front_hand", color: "var(--warn)" },
+  cron_attention: { icon: "schedule", color: "var(--accent)" }
 };
 
 interface ToastEntry {

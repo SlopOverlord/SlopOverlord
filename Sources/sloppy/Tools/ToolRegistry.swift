@@ -80,6 +80,7 @@ struct ToolRegistry: Sendable {
             BrowserCloseTool(),
             SleepTool(),
             PlanningRequestInputTool(),
+            PlanningProgressUpdateTool(),
             DebugReadLogsTool(),
             WebSearchTool(),
             WebFetchTool(),
