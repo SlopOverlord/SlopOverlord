@@ -2511,6 +2511,123 @@
   color: var(--accent);
 }
 
+.task-sync-form-grid {
+  grid-template-columns: minmax(0, 1fr) minmax(220px, 320px);
+  align-items: end;
+}
+
+.task-sync-default-repo-field input {
+  min-height: 42px;
+}
+
+.task-sync-token-mode-field,
+.task-sync-status-mappings {
+  display: grid;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 0.88rem;
+}
+
+.task-sync-field-label {
+  color: var(--muted);
+}
+
+.task-sync-token-options {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.task-sync-token-option {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 42px;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 0;
+  background: var(--surface-2);
+  color: var(--text-heading);
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s;
+}
+
+.task-sync-token-option:hover {
+  border-color: var(--muted);
+  background: var(--surface-3);
+}
+
+.task-sync-token-option.active {
+  border-color: var(--accent);
+  background: var(--surface-3);
+}
+
+.task-sync-token-option .material-symbols-rounded {
+  font-size: 1rem;
+  color: var(--muted);
+}
+
+.task-sync-token-option.active .material-symbols-rounded {
+  color: var(--accent);
+}
+
+.task-sync-token-option strong {
+  font-size: 0.8rem;
+  font-weight: 600;
+}
+
+.task-sync-status-mappings {
+  grid-column: 1 / -1;
+}
+
+.task-sync-status-list {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.task-sync-status-row {
+  display: grid;
+  grid-template-columns: minmax(108px, 0.95fr) minmax(120px, 1fr);
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  padding: 8px;
+  border: 1px solid var(--line);
+  background: rgba(8, 11, 17, 0.42);
+}
+
+.task-sync-status-name {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.task-sync-status-name strong,
+.task-sync-status-name code {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.task-sync-status-name strong {
+  color: var(--text-heading);
+  font-size: 0.78rem;
+  font-weight: 600;
+}
+
+.task-sync-status-name code {
+  color: var(--muted);
+  font-family: "Fira Code", monospace;
+  font-size: 0.68rem;
+}
+
+.task-sync-status-row input {
+  min-width: 0;
+  min-height: 36px;
+}
+
 .review-agent-hint {
   display: flex;
   align-items: flex-start;
@@ -3919,6 +4036,15 @@
 
 @media (max-width: 1000px) {
   .project-board-list {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .task-sync-form-grid,
+  .task-sync-status-list {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .task-sync-status-row {
     grid-template-columns: minmax(0, 1fr);
   }
 

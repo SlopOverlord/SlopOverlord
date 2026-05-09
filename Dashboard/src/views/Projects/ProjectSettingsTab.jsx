@@ -82,6 +82,18 @@ const LOOP_MODE_OPTIONS = [
     }
 ];
 
+const TASK_SYNC_STATUS_FIELDS = [
+    { id: "pending_approval", label: "Pending approval", placeholder: "Todo" },
+    { id: "backlog", label: "Backlog", placeholder: "Todo" },
+    { id: "ready", label: "Ready", placeholder: "Todo" },
+    { id: "in_progress", label: "In progress", placeholder: "In Progress" },
+    { id: "waiting_input", label: "Waiting input", placeholder: "In Progress" },
+    { id: "blocked", label: "Blocked", placeholder: "In Progress" },
+    { id: "needs_review", label: "Needs review", placeholder: "In Progress" },
+    { id: "done", label: "Done", placeholder: "Done" },
+    { id: "cancelled", label: "Cancelled", placeholder: "Done" }
+];
+
 function cloneDraft(project) {
     return {
         name: project?.name ?? "",
@@ -115,9 +127,7 @@ function cloneTaskSyncDraft(project) {
         projectNodeId: settings.projectNodeId || "",
         defaultRepo: settings.defaultRepo || "",
         tokenMode: settings.tokenMode || "inherit",
-        statusMappingsText: Object.entries(settings.statusMappings || {})
-            .map(([key, value]) => `${key}=${value}`)
-            .join("\n"),
+        statusMappings: { ...(settings.statusMappings || {}) },
         health: settings.health || {},
         webhook: settings.webhook || {}
     };
@@ -191,19 +201,12 @@ export function ProjectSettingsTab({
         });
     }
 
-    function parseStatusMappings(text) {
-        return String(text || "")
-            .split("\n")
-            .map((line) => line.trim())
-            .filter(Boolean)
-            .reduce((acc, line) => {
-                const idx = line.indexOf("=");
-                if (idx <= 0) return acc;
-                const key = line.slice(0, idx).trim();
-                const value = line.slice(idx + 1).trim();
-                if (key && value) acc[key] = value;
-                return acc;
-            }, {});
+    function sanitizedStatusMappings(mappings) {
+        return TASK_SYNC_STATUS_FIELDS.reduce((acc, field) => {
+            const value = String(mappings?.[field.id] || "").trim();
+            if (value) acc[field.id] = value;
+            return acc;
+        }, {});
     }
 
     async function saveSettings() {
@@ -1001,50 +1004,63 @@ export function ProjectSettingsTab({
                     </label>
                 </div>
 
-                <div className="entry-form-grid" style={{ marginTop: 16 }}>
+                <div className="entry-form-grid task-sync-form-grid" style={{ marginTop: 16 }}>
                     <label style={{ gridColumn: "1 / -1" }}>
                         GitHub Project URL
                         <input
                             type="text"
-                            placeholder="https://github.com/orgs/AdaEngine/projects/2"
+                            placeholder="https://github.com/AdaEngine/AdaEngine/projects/2"
                             value={taskSyncDraft.projectURL}
                             onChange={(e) => mutateTaskSync((d) => { d.projectURL = e.target.value; })}
                         />
                     </label>
-                    <label>
+                    <label className="task-sync-default-repo-field">
                         Default repo
                         <input
                             type="text"
-                            placeholder="owner/repo"
+                            placeholder="AdaEngine/AdaEngine"
                             value={taskSyncDraft.defaultRepo}
                             onChange={(e) => mutateTaskSync((d) => { d.defaultRepo = e.target.value; })}
                         />
                     </label>
-                    <label>
-                        Token mode
-                        <div className="review-approval-options" style={{ gridTemplateColumns: "repeat(2, minmax(0, 1fr))" }}>
+                    <div className="task-sync-token-mode-field">
+                        <span className="task-sync-field-label">Token mode</span>
+                        <div className="task-sync-token-options">
                             {["inherit", "override"].map((mode) => (
                                 <button
                                     key={mode}
                                     type="button"
-                                    className={`review-approval-option ${taskSyncDraft.tokenMode === mode ? "active" : ""}`}
+                                    className={`task-sync-token-option ${taskSyncDraft.tokenMode === mode ? "active" : ""}`}
                                     onClick={() => mutateTaskSync((d) => { d.tokenMode = mode; })}
                                 >
-                                    <span className="material-symbols-rounded review-approval-icon">{mode === "inherit" ? "key" : "vpn_key"}</span>
-                                    <strong className="review-approval-name">{mode === "inherit" ? "Inherit" : "Override"}</strong>
+                                    <span className="material-symbols-rounded">{mode === "inherit" ? "key" : "vpn_key"}</span>
+                                    <strong>{mode === "inherit" ? "Inherit" : "Override"}</strong>
                                 </button>
                             ))}
                         </div>
-                    </label>
-                    <label style={{ gridColumn: "1 / -1" }}>
-                        Status mappings
-                        <textarea
-                            rows={5}
-                            placeholder={"ready=Todo\nin_progress=In Progress\ndone=Done"}
-                            value={taskSyncDraft.statusMappingsText}
-                            onChange={(e) => mutateTaskSync((d) => { d.statusMappingsText = e.target.value; })}
-                        />
-                    </label>
+                    </div>
+                    <div className="task-sync-status-mappings">
+                        <span className="task-sync-field-label">Status mappings</span>
+                        <div className="task-sync-status-list">
+                            {TASK_SYNC_STATUS_FIELDS.map((field) => (
+                                <label key={field.id} className="task-sync-status-row">
+                                    <span className="task-sync-status-name">
+                                        <strong>{field.label}</strong>
+                                        <code>{field.id}</code>
+                                    </span>
+                                    <input
+                                        type="text"
+                                        placeholder={field.placeholder}
+                                        value={taskSyncDraft.statusMappings?.[field.id] || ""}
+                                        onChange={(e) => mutateTaskSync((d) => {
+                                            d.statusMappings = d.statusMappings || {};
+                                            d.statusMappings[field.id] = e.target.value;
+                                        })}
+                                    />
+                                </label>
+                            ))}
+                        </div>
+                    </div>
                 </div>
 
                 <div className="settings-danger-confirm-actions" style={{ marginTop: 16 }}>
@@ -1058,7 +1074,7 @@ export function ProjectSettingsTab({
                                 projectURL: taskSyncDraft.projectURL.trim(),
                                 defaultRepo: taskSyncDraft.defaultRepo.trim() || null,
                                 tokenMode: taskSyncDraft.tokenMode,
-                                statusMappings: parseStatusMappings(taskSyncDraft.statusMappingsText)
+                                statusMappings: sanitizedStatusMappings(taskSyncDraft.statusMappings)
                             }));
                             setStatusText(result ? "Task sync linked" : "Task sync link failed");
                         }}

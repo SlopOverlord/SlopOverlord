@@ -8,6 +8,7 @@ import Protocols
 struct GitHubProjectReference: Sendable, Equatable {
     var ownerKind: String
     var owner: String
+    var repository: String? = nil
     var number: Int
 }
 
@@ -138,11 +139,13 @@ struct GitHubProjectTaskSyncProvider: TaskSyncProvider {
         else {
             throw ProviderError.invalidProjectURL
         }
-        let ownerKind = parts[0]
-        guard ownerKind == "orgs" || ownerKind == "users" else {
+        if parts[0] == "orgs" || parts[0] == "users" {
+            return GitHubProjectReference(ownerKind: parts[0], owner: parts[1], number: number)
+        }
+        guard !parts[0].isEmpty, !parts[1].isEmpty else {
             throw ProviderError.invalidProjectURL
         }
-        return GitHubProjectReference(ownerKind: ownerKind, owner: parts[1], number: number)
+        return GitHubProjectReference(ownerKind: "repos", owner: parts[0], repository: parts[1], number: number)
     }
 
     static func parseRepository(_ raw: String) throws -> GitHubRepositoryReference {
@@ -177,9 +180,17 @@ struct GitHubProjectTaskSyncProvider: TaskSyncProvider {
 
     private func fetchProjectNodeId(ref: GitHubProjectReference, token: String?) async throws -> String? {
         guard let token else { throw ProviderError.missingToken }
-        let ownerField = ref.ownerKind == "orgs" ? "organization" : "user"
-        let query = "query($login:String!,$number:Int!){ \(ownerField)(login:$login){ projectV2(number:$number){ id } } }"
-        let body: [String: Any] = ["query": query, "variables": ["login": ref.owner, "number": ref.number]]
+        let query: String
+        let variables: [String: Any]
+        if ref.ownerKind == "repos", let repository = ref.repository {
+            query = "query($owner:String!,$name:String!,$number:Int!){ repository(owner:$owner,name:$name){ projectV2(number:$number){ id } } }"
+            variables = ["owner": ref.owner, "name": repository, "number": ref.number]
+        } else {
+            let ownerField = ref.ownerKind == "orgs" ? "organization" : "user"
+            query = "query($login:String!,$number:Int!){ \(ownerField)(login:$login){ projectV2(number:$number){ id } } }"
+            variables = ["login": ref.owner, "number": ref.number]
+        }
+        let body: [String: Any] = ["query": query, "variables": variables]
         var request = URLRequest(url: URL(string: "https://api.github.com/graphql")!)
         request.httpMethod = "POST"
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
@@ -189,8 +200,14 @@ struct GitHubProjectTaskSyncProvider: TaskSyncProvider {
             throw ProviderError.githubHTTP(response.statusCode, String(data: data, encoding: .utf8) ?? "")
         }
         guard let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let dataObj = object["data"] as? [String: Any],
-              let ownerObj = dataObj[ownerField] as? [String: Any],
+              let dataObj = object["data"] as? [String: Any]
+        else {
+            return nil
+        }
+        let containerKey = ref.ownerKind == "repos"
+            ? "repository"
+            : (ref.ownerKind == "orgs" ? "organization" : "user")
+        guard let ownerObj = dataObj[containerKey] as? [String: Any],
               let projectObj = ownerObj["projectV2"] as? [String: Any]
         else {
             return nil
@@ -252,7 +269,10 @@ struct GitHubProjectTaskSyncProvider: TaskSyncProvider {
     }
 
     private func normalizedProjectURL(_ ref: GitHubProjectReference) -> String {
-        "https://github.com/\(ref.ownerKind)/\(ref.owner)/projects/\(ref.number)"
+        if ref.ownerKind == "repos", let repository = ref.repository {
+            return "https://github.com/\(ref.owner)/\(repository)/projects/\(ref.number)"
+        }
+        return "https://github.com/\(ref.ownerKind)/\(ref.owner)/projects/\(ref.number)"
     }
 
     private func addHeaders(_ request: inout URLRequest, token: String) {

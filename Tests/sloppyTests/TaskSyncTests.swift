@@ -17,10 +17,12 @@ func gitHubProjectURLParserAcceptsOrgAndUserProjects() throws {
 }
 
 @Test
-func gitHubProjectURLParserRejectsClassicRepoProjects() throws {
-    #expect(throws: (any Error).self) {
-        _ = try GitHubProjectTaskSyncProvider.parseProjectReference("https://github.com/owner/repo/projects/1")
-    }
+func gitHubProjectURLParserAcceptsRepositoryProjects() throws {
+    let repo = try GitHubProjectTaskSyncProvider.parseProjectReference("https://github.com/AdaEngine/AdaEngine/projects/2")
+    #expect(repo.ownerKind == "repos")
+    #expect(repo.owner == "AdaEngine")
+    #expect(repo.repository == "AdaEngine")
+    #expect(repo.number == 2)
 }
 
 @Test
