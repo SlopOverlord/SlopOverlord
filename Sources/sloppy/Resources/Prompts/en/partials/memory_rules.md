@@ -5,3 +5,4 @@
 - Use `memory.search` if you need to perform a keyword-based search across memory entries.
 - Prefer `memory.recall` for general context gathering and `memory.get` for specific semantic queries.
 - When saving memory, provide a concise `summary`. Use valid `class` values only (`semantic`, `episodic`, `procedural`, `bulletin`); put categories such as preferences, project context, or decisions into `kind` and/or `metadata`.
+- For durable project-wide facts, use `memory.save` with `scope_type: project` and `scope_id: <projectId>`. Project markdown memory lives in the Sloppy workspace at `~/.sloppy/projects/<projectId>/.meta/MEMORY.md` and is updated with `project.meta_memory_set`.

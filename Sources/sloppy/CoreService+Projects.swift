@@ -343,7 +343,7 @@ extension CoreService {
 
         let resolvedRoot = resolvedProjectRootFromStored(repoPath: project.repoPath, normalizedProjectID: normalizedID)
         let loader = ProjectContextLoader()
-        let loaded = loader.load(repoPath: resolvedRoot.path)
+        let loaded = loader.load(repoPath: resolvedRoot.path, projectMemoryURL: projectMetaMemoryFileURL(projectID: normalizedID))
         let content = renderProjectContextBootstrap(projectID: normalizedID, projectName: project.name, loaded: loaded)
 
         let channelIDs = project.channels.map(\.channelId)
@@ -352,11 +352,16 @@ extension CoreService {
             await runtime.setChannelBootstrap(channelId: channelID, content: content)
         }
 
+        var loadedDocPaths = loaded.loadedDocs.map(\.relativePath)
+        if let loadedProjectMemory = loaded.loadedProjectMemory {
+            loadedDocPaths.append(loadedProjectMemory.relativePath)
+        }
+
         return ProjectContextRefreshResponse(
             projectId: normalizedID,
             repoPath: loaded.repoPath,
             appliedChannelIds: channelIDs,
-            loadedDocPaths: loaded.loadedDocs.map(\.relativePath),
+            loadedDocPaths: loadedDocPaths,
             loadedSkillPaths: loaded.loadedSkills.map(\.relativePath),
             totalChars: loaded.totalChars,
             truncated: loaded.truncated
@@ -379,7 +384,7 @@ extension CoreService {
 
         let resolvedRoot = resolvedProjectRootFromStored(repoPath: project.repoPath, normalizedProjectID: normalizedID)
         let loader = ProjectContextLoader()
-        let loaded = loader.load(repoPath: resolvedRoot.path)
+        let loaded = loader.load(repoPath: resolvedRoot.path, projectMemoryURL: projectMetaMemoryFileURL(projectID: normalizedID))
         return renderProjectContextBootstrap(projectID: normalizedID, projectName: project.name, loaded: loaded)
     }
 
@@ -405,6 +410,25 @@ extension CoreService {
                     lines.append("")
                     lines.append("(truncated)")
                 }
+            }
+            if let file = loaded.loadedProjectMemory {
+                lines.append("")
+                lines.append("[\(file.relativePath)]")
+                lines.append(file.content)
+                if file.truncated {
+                    lines.append("")
+                    lines.append("(truncated)")
+                }
+            }
+        } else if let file = loaded.loadedProjectMemory {
+            lines.append("")
+            lines.append("[Project files]")
+            lines.append("")
+            lines.append("[\(file.relativePath)]")
+            lines.append(file.content)
+            if file.truncated {
+                lines.append("")
+                lines.append("(truncated)")
             }
         }
 
@@ -1321,6 +1345,10 @@ extension CoreService {
 
     func projectMetaDirectoryURL(projectID: String) -> URL {
         projectDirectoryURL(projectID: projectID).appendingPathComponent(".meta", isDirectory: true)
+    }
+
+    func projectMetaMemoryFileURL(projectID: String) -> URL {
+        projectMetaDirectoryURL(projectID: projectID).appendingPathComponent("MEMORY.md", isDirectory: false)
     }
 
     func projectTaskLogFileURL(projectID: String, taskID: String) -> URL {

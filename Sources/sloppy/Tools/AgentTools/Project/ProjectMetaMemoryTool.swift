@@ -7,7 +7,7 @@ struct ProjectMetaMemoryTool: CoreTool {
     let title = "Set project .meta/MEMORY.md"
     let status = "fully_functional"
     let name = "project.meta_memory_set"
-    let description = "Writes `.meta/MEMORY.md` under the project repository path (max \(AgentMarkdownLimits.projectMetaMemoryMarkdownMaxCharacters) characters)."
+    let description = "Writes workspace-private `projects/<projectId>/.meta/MEMORY.md` (max \(AgentMarkdownLimits.projectMetaMemoryMarkdownMaxCharacters) characters)."
 
     var parameters: GenerationSchema {
         .objectSchema([
@@ -43,10 +43,10 @@ struct ProjectMetaMemoryTool: CoreTool {
 
         do {
             let project = try await projectService.getProject(id: projectId)
-            guard let repo = project.repoPath?.trimmingCharacters(in: .whitespacesAndNewlines), !repo.isEmpty else {
-                return toolFailure(tool: name, code: "invalid_project", message: "Project has no repo path.", retryable: false)
-            }
-            let root = URL(fileURLWithPath: repo, isDirectory: true).standardizedFileURL
+            let root = context.workspaceRootURL
+                .appendingPathComponent("projects", isDirectory: true)
+                .appendingPathComponent(project.id, isDirectory: true)
+                .standardizedFileURL
             let metaDir = root.appendingPathComponent(".meta", isDirectory: true)
             let dest = metaDir.appendingPathComponent("MEMORY.md", isDirectory: false)
             try FileManager.default.createDirectory(at: metaDir, withIntermediateDirectories: true)

@@ -17,6 +17,44 @@ private enum SloppyTUIStreamTyping {
     static let maxCatchupSeconds = 0.85
 }
 
+enum SloppyTUILiveDraftPolicy {
+    static func shouldInterpolate(current: String, target: String) -> Bool {
+        guard !target.isEmpty,
+              target.hasPrefix(current),
+              target.count > current.count else {
+            return false
+        }
+
+        if current.contains("\n") || target.contains("\n") || target.count > 240 {
+            return false
+        }
+
+        return !hasMarkdownControlPrefix(target)
+    }
+
+    private static func hasMarkdownControlPrefix(_ text: String) -> Bool {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            return false
+        }
+
+        if trimmed.hasPrefix("#") || trimmed.hasPrefix("- ") || trimmed.hasPrefix("* ") || trimmed.hasPrefix("> ") {
+            return true
+        }
+
+        var sawDigit = false
+        for scalar in trimmed.unicodeScalars {
+            if CharacterSet.decimalDigits.contains(scalar) {
+                sawDigit = true
+                continue
+            }
+            return sawDigit && scalar == "."
+        }
+
+        return false
+    }
+}
+
 private enum SloppyTUILocalCardBehavior {
     static let autoDismissSeconds: TimeInterval = 10
     static let autoDismissLineLimit = 3
@@ -2679,6 +2717,7 @@ final class SloppyTUIScreen: @preconcurrency Component, @unchecked Sendable {
                                 self.notifyForRunStatus(status)
                             }
                             if let inputRequest = event.inputRequest {
+                                self.settleLiveAssistantDraft()
                                 self.notifyForInputRequest(inputRequest)
                             }
                             if self.isFinalAssistantMessage(event) {
@@ -3521,7 +3560,7 @@ final class SloppyTUIScreen: @preconcurrency Component, @unchecked Sendable {
         }
 
         let current = liveAssistantDraft ?? ""
-        if !target.hasPrefix(current) || target.count <= current.count {
+        if !SloppyTUILiveDraftPolicy.shouldInterpolate(current: current, target: target) {
             setLiveAssistantDraftImmediately(target)
             return
         }
@@ -3538,6 +3577,16 @@ final class SloppyTUIScreen: @preconcurrency Component, @unchecked Sendable {
         liveAssistantInterpolationTask = nil
         liveAssistantTarget = value
         liveAssistantDraft = value
+        renderTimeline()
+    }
+
+    private func settleLiveAssistantDraft() {
+        liveAssistantInterpolationTask?.cancel()
+        liveAssistantInterpolationTask = nil
+        if let liveAssistantTarget {
+            liveAssistantDraft = liveAssistantTarget
+        }
+        liveAssistantTarget = nil
         renderTimeline()
     }
 

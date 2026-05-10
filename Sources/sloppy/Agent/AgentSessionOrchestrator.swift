@@ -722,7 +722,7 @@ actor AgentSessionOrchestrator {
             Improve the existing debug session in a hypothesis-driven loop. Before adding instrumentation, state the hypotheses you are testing and which log fields would confirm or reject each one.
             Add focused diagnostic logging or instrumentation to the code so the behavior can be understood, then run or describe the smallest check that would produce useful evidence.
             Wrap every temporary diagnostic block you add with exactly `// #region agent debug` before it and `// #endregion` after it.
-            Write temporary agent logs as NDJSON to a session-scoped workspace file such as `.cursor/debug-<shortSessionId>.log`; each line should include `sessionId`, `timestamp`, `hypothesisId`, `location`, `message`, and optional `data`.
+            Write temporary agent logs as NDJSON to a session-scoped workspace file such as `.sloppy/debug/debug-<shortSessionId>.log`; each line should include `sessionId`, `timestamp`, `hypothesisId`, `location`, `message`, and optional `data`.
             Before pausing for the user, always show the exact log path and a short `Reproduction steps` section.
             Use `planning.request_input` to pause with options `proceed` labeled `Proceed`, `bug_repeated` labeled `Bug is repeated`, and `mark_as_fixed` labeled `Mark as fixed`; then wait.
             If the user selects `proceed`, read the log path you provided, prefer `debug.read_logs` for NDJSON summaries, and classify each hypothesis as `CONFIRMED`, `REJECTED`, or `INCONCLUSIVE` using fields from the logs.

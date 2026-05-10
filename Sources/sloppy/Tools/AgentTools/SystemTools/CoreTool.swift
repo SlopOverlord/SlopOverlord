@@ -125,6 +125,7 @@ protocol ProjectToolService: Sendable {
     func createTaskClarification(projectID: String, taskID: String, request: TaskClarificationCreateRequest) async throws -> TaskClarificationRecord
     func deliverMessage(channelId: String, content: String) async
     func actorBoard() async throws -> ActorBoardSnapshot
+    func requestProjectMemoryCheckpoint(agentID: String, sessionID: String, projectID: String, taskID: String, status: String) async
 
     func listAllProjects() async -> [ProjectRecord]
     func createProject(_ request: ProjectCreateRequest) async throws -> ProjectCreateResult

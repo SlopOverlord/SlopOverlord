@@ -328,6 +328,101 @@ func openAIOAuthEnsureValidTokenCanForceRefreshUnexpiredToken() async throws {
 }
 
 @Test
+func openAIOAuthEnsureValidTokenSerializesConcurrentExpiredRefreshes() async throws {
+    let workspaceRootURL = FileManager.default.temporaryDirectory
+        .appendingPathComponent("openai-oauth-concurrent-refresh-\(UUID().uuidString)", isDirectory: true)
+
+    let expiredToken = try makeJWT(
+        claims: [
+            "exp": NSNumber(value: 1_000_000),
+            "https://api.openai.com/auth": [
+                "chatgpt_account_id": "acct_test_123",
+                "chatgpt_plan_type": "plus"
+            ]
+        ]
+    )
+    let freshToken = try makeJWT(
+        claims: [
+            "exp": NSNumber(value: 4_000_000_000),
+            "https://api.openai.com/auth": [
+                "chatgpt_account_id": "acct_test_123",
+                "chatgpt_plan_type": "plus"
+            ]
+        ]
+    )
+
+    let attempts = RefreshAttemptRecorder()
+    let service = OpenAIOAuthService(
+        workspaceRootURL: workspaceRootURL,
+        transport: { request in
+            let bodyString = request.httpBody.flatMap { String(data: $0, encoding: .utf8) } ?? ""
+            if bodyString.contains("grant_type=refresh_token") {
+                let attempt = await attempts.record()
+                try await Task.sleep(nanoseconds: 50_000_000)
+                if attempt > 1 {
+                    let body =
+                        """
+                        {
+                          "error": {
+                            "message": "Your refresh token has already been used to generate a new access token.",
+                            "type": "invalid_request_error",
+                            "code": "refresh_token_reused"
+                          }
+                        }
+                        """
+                    return (
+                        Data(body.utf8),
+                        makeOAuthHTTPResponse(
+                            url: request.url ?? URL(string: "https://auth.openai.com/oauth/token")!,
+                            statusCode: 401
+                        )
+                    )
+                }
+                let body =
+                    """
+                    {
+                      "access_token": "\(freshToken)",
+                      "refresh_token": "refresh_new",
+                      "id_token": "id_test"
+                    }
+                    """
+                return (
+                    Data(body.utf8),
+                    makeOAuthHTTPResponse(url: request.url ?? URL(string: "https://auth.openai.com/oauth/token")!)
+                )
+            }
+
+            let body =
+                """
+                {
+                  "access_token": "\(expiredToken)",
+                  "refresh_token": "refresh_initial",
+                  "id_token": "id_test"
+                }
+                """
+            return (
+                Data(body.utf8),
+                makeOAuthHTTPResponse(url: request.url ?? URL(string: "https://auth.openai.com/oauth/token")!)
+            )
+        }
+    )
+
+    let start = try service.startLogin(redirectURI: "http://127.0.0.1:4173/config")
+    _ = try await service.completeLogin(
+        request: OpenAIOAuthCompleteRequest(
+            callbackURL: "http://127.0.0.1:4173/config?code=test-code&state=\(start.state)"
+        )
+    )
+
+    async let first: Void = service.ensureValidToken()
+    async let second: Void = service.ensureValidToken()
+    _ = try await (first, second)
+
+    #expect(await attempts.value() == 1)
+    #expect(service.currentAccessToken() == freshToken)
+}
+
+@Test
 func openAIOAuthStartDeviceCodeReturnsUserCode() async throws {
     let workspaceRootURL = FileManager.default.temporaryDirectory
         .appendingPathComponent("openai-oauth-device-\(UUID().uuidString)", isDirectory: true)
@@ -581,4 +676,17 @@ private final class SendableFlag: @unchecked Sendable {
 
 private final class SendableStringBox: @unchecked Sendable {
     var value = ""
+}
+
+private actor RefreshAttemptRecorder {
+    private var count = 0
+
+    func record() -> Int {
+        count += 1
+        return count
+    }
+
+    func value() -> Int {
+        count
+    }
 }

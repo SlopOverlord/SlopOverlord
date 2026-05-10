@@ -888,6 +888,14 @@ extension CoreService: ProjectToolService {
         try getActorBoard()
     }
 
+    func requestProjectMemoryCheckpoint(agentID: String, sessionID: String, projectID: String, taskID: String, status: String) async {
+        await runAgentMemoryCheckpoint(
+            agentID: agentID,
+            sessionID: sessionID,
+            reason: "project_task_\(status):\(projectID):\(taskID)"
+        )
+    }
+
     func listAllProjects() async -> [ProjectRecord] {
         await listProjects()
     }

@@ -106,6 +106,16 @@ struct ProjectTaskUpdateTool: CoreTool {
                 )
             )
             let updatedTask = updatedProject.tasks.first(where: { $0.id == task.id }) ?? task
+            if task.status != updatedTask.status,
+               updatedTask.status == ProjectTaskStatus.done.rawValue || updatedTask.status == ProjectTaskStatus.needsReview.rawValue {
+                await svc.requestProjectMemoryCheckpoint(
+                    agentID: context.agentID,
+                    sessionID: context.sessionID,
+                    projectID: updatedProject.id,
+                    taskID: updatedTask.id,
+                    status: updatedTask.status
+                )
+            }
             return toolSuccess(tool: name, data: .object([
                 "projectId": .string(updatedProject.id),
                 "taskId": .string(updatedTask.id),

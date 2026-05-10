@@ -9,6 +9,7 @@ extension CoreService {
 
     static let memoryCheckpointToolAllowlist: Set<String> = [
         "visor.status",
+        "memory.save",
         "agent.documents.set_user_markdown",
         "agent.documents.set_memory_markdown",
         "project.meta_memory_set",
@@ -134,6 +135,25 @@ extension CoreService {
 
         let transcript = Self.formattedCheckpointTranscript(from: detail, maxUTF16Scalars: 90_000)
         let projects = await store.listProjects()
+        let currentProjectID = detail.summary.projectId?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let currentProject = currentProjectID.flatMap { pid in
+            projects.first { $0.id.caseInsensitiveCompare(pid) == .orderedSame }
+        }
+        let currentProjectBlock: String
+        if let currentProject {
+            let repoPath = currentProject.repoPath?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            currentProjectBlock = """
+            - id: `\(currentProject.id)`
+            - name: \(currentProject.name)
+            - repoPath: \(repoPath.isEmpty ? "(none)" : repoPath)
+            - memoryPath: \(projectMetaMemoryFileURL(projectID: currentProject.id).path)
+            """
+        } else if let currentProjectID, !currentProjectID.isEmpty {
+            currentProjectBlock = "- id: `\(currentProjectID)` (not found in project registry)"
+        } else {
+            currentProjectBlock = "(session is not attached to a project)"
+        }
+        let currentProjectMetaMemory = currentProject.map { readProjectMetaMemory(projectID: $0.id) } ?? ""
         let projectIndex: String
         if projects.isEmpty {
             projectIndex = "(no projects registered)"
@@ -154,7 +174,9 @@ extension CoreService {
             userMarkdown: documents.userMarkdown,
             memoryMarkdown: documents.memoryMarkdown,
             transcript: transcript,
-            projectIndex: projectIndex
+            projectIndex: projectIndex,
+            currentProject: currentProjectBlock,
+            currentProjectMetaMemory: currentProjectMetaMemory
         )
 
         let uuid = UUID().uuidString.lowercased()
@@ -169,7 +191,7 @@ extension CoreService {
                     ok: false,
                     error: ToolErrorPayload(
                         code: "checkpoint_tool_not_allowed",
-                        message: "This tool is not available during memory checkpoints. Use visor.status, agent.documents.set_* or project.meta_memory_set only.",
+                        message: "This tool is not available during memory checkpoints. Use visor.status, memory.save, agent.documents.set_* or project.meta_memory_set only.",
                         retryable: false
                     )
                 )
@@ -185,7 +207,8 @@ extension CoreService {
         let userPrompt = """
         Execute the memory checkpoint now: read visor status if useful, then update persistent memory via the allowed tools. \
         Do not address the end user. Keep tool arguments concise. Prefer updating `agent.documents.set_memory_markdown`; \
-        use `project.meta_memory_set` only for durable project-wide facts that belong in the repo `.meta/MEMORY.md` file.
+        use `memory.save` with `scope_type: project` for durable project facts, and use `project.meta_memory_set` for \
+        durable project-wide facts that belong in the workspace-private `.meta/MEMORY.md` file.
         """
 
         await runtime.postMessage(
@@ -226,6 +249,11 @@ extension CoreService {
         "\(agentID)::\(sessionID)"
     }
 
+    private func readProjectMetaMemory(projectID: String) -> String {
+        guard let normalizedID = normalizedProjectID(projectID) else { return "" }
+        return (try? String(contentsOf: projectMetaMemoryFileURL(projectID: normalizedID), encoding: .utf8)) ?? ""
+    }
+
     private static func formattedCheckpointTranscript(from detail: AgentSessionDetail, maxUTF16Scalars: Int) -> String {
         let sorted = detail.events.sorted { $0.createdAt < $1.createdAt }
         var lines: [String] = []
@@ -260,28 +288,50 @@ extension CoreService {
         return result
     }
 
-    private static func memoryCheckpointBootstrap(
+    static func memoryCheckpointBootstrap(
         agentID: String,
         sessionID: String,
         reason: String,
         userMarkdown: String,
         memoryMarkdown: String,
         transcript: String,
-        projectIndex: String
+        projectIndex: String,
+        currentProject: String,
+        currentProjectMetaMemory: String
     ) -> String {
         let um = truncatePrefix(userMarkdown, maxScalars: 6_000)
         let mm = truncatePrefix(memoryMarkdown, maxScalars: 8_000)
+        let pm = truncatePrefix(currentProjectMetaMemory, maxScalars: 8_000)
         return """
         Internal MEMORY checkpoint (not visible in the user chat). Reason: \(reason).
 
         Agent: \(agentID)
         Session: \(sessionID)
 
-        Allowed tools only: `visor.status`, `agent.documents.set_user_markdown`, `agent.documents.set_memory_markdown`, `project.meta_memory_set`.
+        Allowed tools only: `visor.status`, `memory.save`, `agent.documents.set_user_markdown`, `agent.documents.set_memory_markdown`, `project.meta_memory_set`.
         Character limits: USER.md ≤ \(AgentMarkdownLimits.userMarkdownMaxCharacters), MEMORY.md ≤ \(AgentMarkdownLimits.memoryMarkdownMaxCharacters), `.meta/MEMORY.md` ≤ \(AgentMarkdownLimits.projectMetaMemoryMarkdownMaxCharacters).
+        Project `.meta/MEMORY.md` is workspace-private at `~/.sloppy/projects/<projectId>/.meta/MEMORY.md`, not inside the source repository.
+
+        If the session is attached to a project, save durable project facts, decisions, conventions, preferences, and follow-ups with `memory.save` using:
+        - `scope_type`: `project`
+        - `scope_id`: the current project id
+        - `summary`: concise
+        - `kind`: one of `decision`, `preference`, `fact`, `todo`, `goal`, or `observation`
+        - `class`: `semantic` or `procedural`
+        - `source_type`: `memory_checkpoint`
+        - `source_id`: `\(sessionID)`
+        - `metadata`: include `agentId`, `sessionId`, and `reason`
+
+        Do not save runtime bulletins, transient status, or duplicate facts. Keep project memory writes high-signal; at most five project-scoped saves per checkpoint.
 
         Projects (use `project.meta_memory_set` with a project id when appropriate):
         \(projectIndex)
+
+        Current project:
+        \(currentProject)
+
+        Current project .meta/MEMORY.md:
+        \(pm)
 
         Current USER.md:
         \(um)

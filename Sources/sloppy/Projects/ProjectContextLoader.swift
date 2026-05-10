@@ -17,6 +17,7 @@ struct ProjectContextLoader {
     struct Result: Sendable {
         var repoPath: String
         var loadedDocs: [LoadedFile]
+        var loadedProjectMemory: LoadedFile?
         var loadedSkills: [LoadedFile]
         var totalChars: Int
         var truncated: Bool
@@ -28,9 +29,10 @@ struct ProjectContextLoader {
         self.limits = limits
     }
 
-    func load(repoPath: String) -> Result {
+    func load(repoPath: String, projectMemoryURL: URL? = nil) -> Result {
         let rootURL = URL(fileURLWithPath: repoPath, isDirectory: true).standardized
         var loadedDocs: [LoadedFile] = []
+        var loadedProjectMemory: LoadedFile?
         var loadedSkills: [LoadedFile] = []
         var totalChars = 0
         var truncated = false
@@ -91,12 +93,18 @@ struct ProjectContextLoader {
         let docPaths: [String] = [
             "AGENTS.md",
             "CLAUDE.md",
-            "SLOPPY.md",
-            ".meta/MEMORY.md"
+            "SLOPPY.md"
         ]
         for relativePath in docPaths {
             guard let text = readTextFileIfExists(relativePath: relativePath) else { continue }
             addFile(relativePath: relativePath, content: text, to: &loadedDocs)
+        }
+
+        if let projectMemoryURL,
+           let text = try? String(contentsOf: projectMemoryURL, encoding: .utf8) {
+            var memoryDocs: [LoadedFile] = []
+            addFile(relativePath: ".meta/MEMORY.md", content: text, to: &memoryDocs)
+            loadedProjectMemory = memoryDocs.first
         }
 
         if totalChars < limits.maxTotalChars {
@@ -110,6 +118,7 @@ struct ProjectContextLoader {
         return Result(
             repoPath: rootURL.path,
             loadedDocs: loadedDocs,
+            loadedProjectMemory: loadedProjectMemory,
             loadedSkills: loadedSkills,
             totalChars: totalChars,
             truncated: truncated
@@ -158,4 +167,3 @@ struct ProjectContextLoader {
         }
     }
 }
-

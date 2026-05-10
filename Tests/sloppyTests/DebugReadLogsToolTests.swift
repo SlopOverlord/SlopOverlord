@@ -10,7 +10,7 @@ struct DebugReadLogsToolTests {
     @Test("summarizes valid NDJSON and parse errors")
     func summarizesValidNDJSONAndParseErrors() async throws {
         let workspace = try makeWorkspace()
-        let logURL = workspace.appendingPathComponent(".cursor/debug-abc123.log")
+        let logURL = workspace.appendingPathComponent(".sloppy/debug/debug-abc123.log")
         try FileManager.default.createDirectory(at: logURL.deletingLastPathComponent(), withIntermediateDirectories: true)
         try """
         {"sessionId":"abc123","timestamp":1000,"hypothesisId":"H1","location":"Autocomplete:getSuggestions","message":"enter","data":{"elapsedMs":4,"itemCount":2}}
@@ -22,7 +22,7 @@ struct DebugReadLogsToolTests {
 
         let result = await DebugReadLogsTool().invoke(
             arguments: [
-                "path": .string(".cursor/debug-abc123.log"),
+                "path": .string(".sloppy/debug/debug-abc123.log"),
                 "sessionId": .string("abc123"),
             ],
             context: makeContext(workspace: workspace)
@@ -53,12 +53,12 @@ struct DebugReadLogsToolTests {
     @Test("empty log returns empty summary")
     func emptyLogReturnsEmptySummary() async throws {
         let workspace = try makeWorkspace()
-        let logURL = workspace.appendingPathComponent(".cursor/debug-empty.log")
+        let logURL = workspace.appendingPathComponent(".sloppy/debug/debug-empty.log")
         try FileManager.default.createDirectory(at: logURL.deletingLastPathComponent(), withIntermediateDirectories: true)
         try "".write(to: logURL, atomically: true, encoding: .utf8)
 
         let result = await DebugReadLogsTool().invoke(
-            arguments: ["path": .string(".cursor/debug-empty.log")],
+            arguments: ["path": .string(".sloppy/debug/debug-empty.log")],
             context: makeContext(workspace: workspace)
         )
 

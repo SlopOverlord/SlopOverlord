@@ -63,6 +63,7 @@ struct ToolRegistry: Sendable {
         ToolRegistry(tools: [
             FilesReadTool(),
             FilesListTool(),
+            FilesGrepTool(),
             FilesEditTool(),
             FilesWriteTool(),
             RuntimeExecTool(),

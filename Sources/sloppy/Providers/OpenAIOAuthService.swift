@@ -74,6 +74,42 @@ struct OpenAIOAuthService: @unchecked Sendable {
         }
     }
 
+    private static let refreshCoordinator = TokenRefreshCoordinator()
+
+    private actor TokenRefreshCoordinator {
+        private var refreshTasks: [String: Task<StoredAuth, Swift.Error>] = [:]
+
+        func validCredentials(for service: OpenAIOAuthService, forceRefresh: Bool) async throws -> StoredAuth {
+            let key = service.authFileURL().path
+            let stored = try service.loadStoredAuth()
+            guard forceRefresh || OpenAIOAuthService.tokenNeedsRefresh(stored.tokens.accessToken, now: service.now()) else {
+                return stored
+            }
+
+            if let refreshTask = refreshTasks[key] {
+                return try await refreshTask.value
+            }
+
+            let refreshTask = Task<StoredAuth, Swift.Error> {
+                let latestStored = try service.loadStoredAuth()
+                if !forceRefresh && !OpenAIOAuthService.tokenNeedsRefresh(latestStored.tokens.accessToken, now: service.now()) {
+                    return latestStored
+                }
+                let refreshed = try await service.refresh(stored: latestStored)
+                try service.saveStoredAuth(refreshed)
+                return refreshed
+            }
+            refreshTasks[key] = refreshTask
+
+            do {
+                defer { refreshTasks[key] = nil }
+                return try await refreshTask.value
+            } catch {
+                throw error
+            }
+        }
+    }
+
     private struct DeviceCodeAPIResponse: Sendable {
         var deviceAuthId: String
         var userCode: String
@@ -591,13 +627,7 @@ struct OpenAIOAuthService: @unchecked Sendable {
     }
 
     private func validCredentials(forceRefresh: Bool = false) async throws -> StoredAuth {
-        let stored = try loadStoredAuth()
-        if forceRefresh || Self.tokenNeedsRefresh(stored.tokens.accessToken, now: now()) {
-            let refreshed = try await refresh(stored: stored)
-            try saveStoredAuth(refreshed)
-            return refreshed
-        }
-        return stored
+        try await Self.refreshCoordinator.validCredentials(for: self, forceRefresh: forceRefresh)
     }
 
     private func fetchModels(using stored: StoredAuth) async throws -> [ProviderModelOption] {

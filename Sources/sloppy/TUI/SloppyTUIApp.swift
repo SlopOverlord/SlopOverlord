@@ -31,32 +31,13 @@ struct SloppyTUIApp {
         let selection = state.selections[selectionKey]
 
         let agents = (try? await runtime.service.listAgents(includeSystem: false)) ?? []
-        let resolved: SloppyTUILaunchSelection
-        if let requestedSessionID = requestedSessionID?.trimmingCharacters(in: .whitespacesAndNewlines),
-           !requestedSessionID.isEmpty {
-            let explicit = try await resolveExplicitSession(
-                service: runtime.service,
-                projectID: project.id,
-                sessionID: requestedSessionID,
-                agents: agents
-            )
-            resolved = SloppyTUILaunchSelection(
-                agent: explicit.agent,
-                session: explicit.session,
-                hasPersistedSession: true
-            )
-        } else {
-            let agent = try await resolveAgent(
-                service: runtime.service,
-                preferredID: selection?.agentId,
-                agents: agents
-            )
-            resolved = SloppyTUILaunchSelection(
-                agent: agent,
-                session: Self.makeDraftSession(agent: agent, projectID: project.id),
-                hasPersistedSession: false
-            )
-        }
+        let resolved = try await Self.resolveLaunchSelection(
+            service: runtime.service,
+            projectID: project.id,
+            requestedSessionID: requestedSessionID,
+            selection: selection,
+            agents: agents
+        )
         let agent = resolved.agent
         let session = resolved.session
 
@@ -138,7 +119,67 @@ struct SloppyTUIApp {
         }
     }
 
-    private func resolveAgent(
+    static func resolveLaunchSelection(
+        service: CoreService,
+        projectID: String,
+        requestedSessionID: String?,
+        selection: SloppyTUIState.Selection?,
+        agents: [AgentSummary]
+    ) async throws -> SloppyTUILaunchSelection {
+        if let requestedSessionID = requestedSessionID?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !requestedSessionID.isEmpty {
+            let explicit = try await resolveExplicitSession(
+                service: service,
+                projectID: projectID,
+                sessionID: requestedSessionID,
+                agents: agents
+            )
+            return SloppyTUILaunchSelection(
+                agent: explicit.agent,
+                session: explicit.session,
+                hasPersistedSession: true
+            )
+        }
+
+        let agent = try await resolveAgent(
+            service: service,
+            preferredID: selection?.agentId,
+            agents: agents
+        )
+        if let persistedSessionID = selection?.sessionId?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !persistedSessionID.isEmpty,
+           let persistedSession = await resolvePersistedSession(
+                service: service,
+                agentID: agent.id,
+                projectID: projectID,
+                sessionID: persistedSessionID
+           ) {
+            return SloppyTUILaunchSelection(
+                agent: agent,
+                session: persistedSession,
+                hasPersistedSession: true
+            )
+        }
+        if let latestSession = await resolveLatestSession(
+            service: service,
+            agentID: agent.id,
+            projectID: projectID
+        ) {
+            return SloppyTUILaunchSelection(
+                agent: agent,
+                session: latestSession,
+                hasPersistedSession: true
+            )
+        }
+
+        return SloppyTUILaunchSelection(
+            agent: agent,
+            session: Self.makeDraftSession(agent: agent, projectID: projectID),
+            hasPersistedSession: false
+        )
+    }
+
+    private static func resolveAgent(
         service: CoreService,
         preferredID: String?,
         agents: [AgentSummary]
@@ -159,7 +200,36 @@ struct SloppyTUIApp {
         )
     }
 
-    private func resolveExplicitSession(
+    private static func resolvePersistedSession(
+        service: CoreService,
+        agentID: String,
+        projectID: String,
+        sessionID: String
+    ) async -> AgentSessionSummary? {
+        let scoped = (try? await service.listAgentSessions(agentID: agentID, projectID: projectID)) ?? []
+        if let session = scoped.first(where: { $0.id == sessionID }) {
+            return session
+        }
+
+        let all = (try? await service.listAgentSessions(agentID: agentID)) ?? []
+        return all.first(where: { $0.id == sessionID })
+    }
+
+    private static func resolveLatestSession(
+        service: CoreService,
+        agentID: String,
+        projectID: String
+    ) async -> AgentSessionSummary? {
+        let scoped = (try? await service.listAgentSessions(agentID: agentID, projectID: projectID)) ?? []
+        if let latest = scoped.first {
+            return latest
+        }
+
+        let all = (try? await service.listAgentSessions(agentID: agentID)) ?? []
+        return all.first { ($0.projectId ?? "").isEmpty }
+    }
+
+    private static func resolveExplicitSession(
         service: CoreService,
         projectID: String,
         sessionID: String,
@@ -168,6 +238,10 @@ struct SloppyTUIApp {
         for agent in agents {
             let sessions = (try? await service.listAgentSessions(agentID: agent.id, projectID: projectID)) ?? []
             if let session = sessions.first(where: { $0.id == sessionID }) {
+                return (agent, session)
+            }
+            let allSessions = (try? await service.listAgentSessions(agentID: agent.id)) ?? []
+            if let session = allSessions.first(where: { $0.id == sessionID }) {
                 return (agent, session)
             }
         }
@@ -184,7 +258,7 @@ struct SloppyTUIApp {
     }
 }
 
-private struct SloppyTUILaunchSelection {
+struct SloppyTUILaunchSelection {
     var agent: AgentSummary
     var session: AgentSessionSummary
     var hasPersistedSession: Bool

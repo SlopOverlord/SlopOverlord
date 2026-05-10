@@ -27,11 +27,14 @@ When you refresh project context, Sloppy loads (if present) these files from `re
 - `AGENTS.md`
 - `CLAUDE.md`
 - `SLOPPY.md`
-- `.meta/MEMORY.md`
 
 It also scans for local skill docs under:
 
 - `.skills/**/SKILL.md`
+
+Project markdown memory is loaded separately from the Sloppy workspace-private path:
+
+- `~/.sloppy/projects/<projectId>/.meta/MEMORY.md`
 
 These files are treated as **read-only context**. If a file doesn’t exist, it’s skipped.
 
@@ -70,4 +73,3 @@ The response includes which channels were updated and which file paths were load
 - [Project Design](/architecture/project-design)
 - [Workspace](/agents/workspace)
 - [About Channels](/channels/about)
-

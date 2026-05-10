@@ -43,7 +43,7 @@ func agentChatModeRuntimeInstructionsMatchModeSemantics() {
     #expect(debug.contains("instrumentation"))
     #expect(debug.contains("// #region agent debug"))
     #expect(debug.contains("// #endregion"))
-    #expect(debug.contains(".cursor/debug-<shortSessionId>.log"))
+    #expect(debug.contains(".sloppy/debug/debug-<shortSessionId>.log"))
     #expect(debug.contains("Reproduction steps"))
     #expect(debug.contains("debug.read_logs"))
     #expect(debug.contains("planning.request_input"))

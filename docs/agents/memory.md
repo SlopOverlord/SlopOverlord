@@ -15,7 +15,7 @@ This page describes how both layers work, how they show up in the Dashboard, whi
 | --- | --- | --- |
 | **Hybrid memory** | Structured entries (note, summary, kind, class, scope, edges). Indexed for recall and search. | **Agents → Memories** tab (list and graph). SQLite in your workspace. |
 | **Agent markdown** | Plain files in the agent catalog: `USER.md` (identity/instructions), `FRIEND_REMINDER.md` (short per-turn reminders), `MEMORY.md` (long-form narrative the model reads). | **Agents → Agent files** in the Dashboard; files under `.sloppy/agents/<agent>/` on disk. |
-| **Project meta memory** | Optional `.meta/MEMORY.md` inside a project repo. | On disk; updated via tools when the agent targets a project. |
+| **Project meta memory** | Optional workspace-private `.meta/MEMORY.md` under `~/.sloppy/projects/<projectId>/.meta/MEMORY.md`. | On disk; updated via tools when the agent targets a project. |
 
 These are **not** the same list: saving a hybrid entry does **not** automatically rewrite `MEMORY.md`, and editing `MEMORY.md` does **not** create hybrid rows unless a workflow explicitly does both.
 
@@ -62,7 +62,7 @@ Agents use tools to read and write memory. Policy may hide some tools depending 
 | `memory.recall` / `memory.get` | Semantic-style recall with a query. |
 | `agent.documents.set_user_markdown` | Update `USER.md` (validated limits). |
 | `agent.documents.set_memory_markdown` | Update agent `MEMORY.md` (validated limits). |
-| `project.meta_memory_set` | Write project `.meta/MEMORY.md` when a repo path exists. |
+| `project.meta_memory_set` | Write workspace-private project `.meta/MEMORY.md`; no repo path is required. |
 | `visor.status` | Read Visor readiness and latest bulletin digest (operational snapshot, not a substitute for long-term hybrid memory). |
 
 Direct **`files.write` / `files.edit`** on agent `USER.md` / `MEMORY.md` paths are blocked—use the `agent.documents.*` tools instead.
