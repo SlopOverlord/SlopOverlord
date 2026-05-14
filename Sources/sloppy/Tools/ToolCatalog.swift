@@ -130,6 +130,18 @@ enum ToolCatalog {
             ]),
             "required": .array([.string("action")])
         ]),
+        "agent_delegate.finish": .object([
+            "type": .string("object"),
+            "properties": .object([
+                "status": .object([
+                    "type": .string("string"),
+                    "enum": .array([.string("completed"), .string("failed"), .string("blocked")]),
+                ]),
+                "summary": .object(["type": .string("string")]),
+                "error": .object(["type": .string("string")]),
+            ]),
+            "required": .array([.string("status"), .string("summary")])
+        ]),
         "computer.click": .object([
             "type": .string("object"),
             "properties": .object([

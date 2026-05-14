@@ -88,6 +88,7 @@ struct ToolRegistry: Sendable {
             BranchesSpawnTool(),
             WorkersSpawnTool(),
             AgentsDelegateTaskTool(),
+            AgentDelegateFinishTool(),
             WorkersRouteTool(),
             SessionsSpawnTool(),
             SessionsListTool(),

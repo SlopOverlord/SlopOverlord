@@ -3,6 +3,10 @@ import Protocols
 
 /// Tool allowlists for isolated subagent runs (`agents.delegate_task`, worker-backed sessions).
 enum SubagentDelegation {
+    static let controlToolIDs: Set<String> = [
+        "agent_delegate.finish",
+    ]
+
     /// Tools subagents must never use (recursive delegation, user messaging, shared memory, etc.).
     static let hardDeniedToolIDs: Set<String> = [
         "agents.delegate_task",
@@ -83,6 +87,9 @@ enum SubagentDelegation {
         } else {
             candidates = parentAllowed
         }
-        return candidates.subtracting(hardDeniedToolIDs)
+        let controlTools = parentAllowed.intersection(controlToolIDs)
+        return candidates
+            .union(controlTools)
+            .subtracting(hardDeniedToolIDs)
     }
 }

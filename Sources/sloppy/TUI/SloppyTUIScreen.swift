@@ -120,6 +120,7 @@ final class SloppyTUIScreen: @preconcurrency Component, @unchecked Sendable {
         SloppyTUISlashCommand("agents", "Switch agent"),
         SloppyTUISlashCommand("sessions", "Switch session"),
         SloppyTUISlashCommand("subagents", "Open a child subagent session"),
+        SloppyTUISlashCommand("parent", "Return to the parent session"),
         SloppyTUISlashCommand("new", "Create a new session"),
         SloppyTUISlashCommand("clear", "Clear local cards"),
         SloppyTUISlashCommand("stop", "Interrupt the current run"),
@@ -152,6 +153,8 @@ final class SloppyTUIScreen: @preconcurrency Component, @unchecked Sendable {
         "agent",
         "subagents",
         "children",
+        "parent",
+        "back",
         "sessions",
         "session",
         "new",
@@ -794,6 +797,12 @@ final class SloppyTUIScreen: @preconcurrency Component, @unchecked Sendable {
             refreshStaticChrome()
             renderTimeline()
             return true
+        case .character("p") where modifiers.contains(.control):
+            Task { @MainActor in await self.openParentSession() }
+            return true
+        case .character("P") where modifiers.contains(.control):
+            Task { @MainActor in await self.openParentSession() }
+            return true
         case .character("g") where modifiers.contains(.control):
             Task { @MainActor in await self.openLatestSubSession() }
             return true
@@ -1435,6 +1444,8 @@ final class SloppyTUIScreen: @preconcurrency Component, @unchecked Sendable {
             await showAgentPicker()
         case "subagents", "children":
             showSubSessionPicker()
+        case "parent", "back":
+            await openParentSession()
         case "sessions", "session":
             await showSessionPicker()
         case "new":
@@ -1527,6 +1538,7 @@ final class SloppyTUIScreen: @preconcurrency Component, @unchecked Sendable {
         Use `@path` in a message to inline a project file as explicit context. Tab completes slash commands.
         Use `#` to autocomplete active project tasks by id or title.
         Press Ctrl+O to toggle the full tool-call transcript. Ctrl+G enters the newest subagent session.
+        Press Ctrl+P or run `/parent` to return from a subagent to its parent session.
         Use `/subagents` to pick a specific child session.
 
         ## History scroll
@@ -2103,6 +2115,15 @@ final class SloppyTUIScreen: @preconcurrency Component, @unchecked Sendable {
             return
         }
         await switchSession(child.childSessionId)
+    }
+
+    private func openParentSession() async {
+        guard let parentSessionID = session.parentSessionId?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !parentSessionID.isEmpty else {
+            appendLocalCard("This session does not have a parent session.", autoDismissAfter: 6)
+            return
+        }
+        await switchSession(parentSessionID)
     }
 
     private func orderedSubSessions() -> [SloppyTUISubSessionCard] {
@@ -3897,9 +3918,10 @@ final class SloppyTUIScreen: @preconcurrency Component, @unchecked Sendable {
         let queue = queuedMessages.isEmpty ? "" : "  queue: \(queuedMessages.count) ctrl+b cancel"
         let pet = state.petEnabled ? "  pet: \(terminalPetFace())" : ""
         let transcript = transcriptExpanded ? "  transcript: full" : ""
+        let parent = session.parentSessionId == nil ? "" : "  parent: ctrl+p"
         let elapsed = elapsedStatusContext()
         let defaultStatus = SloppyTUITheme.sessionStatusLine(
-            context: context + queue + pet + transcript + elapsed.idleSuffix,
+            context: context + queue + pet + transcript + parent + elapsed.idleSuffix,
             attachments: attachments,
             sessionID: hasPersistedSession ? session.id : "not created"
         )

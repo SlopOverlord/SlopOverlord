@@ -10,6 +10,7 @@ func subagentEffectiveToolsAppliesDenylist() {
         "files.read",
         "memory.save",
         "agents.delegate_task",
+        "agent_delegate.finish",
     ]
     let eff = SubagentDelegation.effectiveToolIDs(
         policy: policy,
@@ -19,19 +20,20 @@ func subagentEffectiveToolsAppliesDenylist() {
     #expect(!eff.contains("workers.spawn"))
     #expect(!eff.contains("memory.save"))
     #expect(!eff.contains("agents.delegate_task"))
+    #expect(eff.contains("agent_delegate.finish"))
     #expect(eff.contains("files.read"))
 }
 
 @Test
 func subagentEffectiveToolsIntersectsToolsets() {
     let policy = AgentToolsPolicy(defaultPolicy: .allow, tools: [:])
-    let known: Set<String> = ["files.read", "web.search", "workers.spawn", "runtime.process"]
+    let known: Set<String> = ["files.read", "web.search", "workers.spawn", "runtime.process", "agent_delegate.finish"]
     let eff = SubagentDelegation.effectiveToolIDs(
         policy: policy,
         knownToolIDs: known,
         toolsetNames: ["file"]
     )
-    #expect(eff == Set(["files.read"]))
+    #expect(eff == Set(["files.read", "agent_delegate.finish"]))
 }
 
 @Test

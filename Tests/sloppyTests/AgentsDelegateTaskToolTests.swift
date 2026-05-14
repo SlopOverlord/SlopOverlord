@@ -87,4 +87,38 @@ struct AgentsDelegateTaskToolTests {
         let first = try #require(results.first?.asObject)
         #expect(first["summary"]?.asString == "session-test")
     }
+
+    @Test("Finish tool accepts completed outcomes")
+    func finishToolAcceptsCompletedOutcomes() async throws {
+        let tool = AgentDelegateFinishTool()
+        let context = makeContext(delegateSubagent: nil)
+        let result = await tool.invoke(
+            arguments: [
+                "status": .string("done"),
+                "summary": .string("Found the source file and returned snippets."),
+            ],
+            context: context
+        )
+
+        let data = try #require(result.data?.asObject)
+        #expect(result.ok)
+        #expect(data["finished"]?.asBool == true)
+        #expect(data["status"]?.asString == "completed")
+    }
+
+    @Test("Finish tool requires error for failed outcomes")
+    func finishToolRequiresErrorForFailedOutcomes() async {
+        let tool = AgentDelegateFinishTool()
+        let context = makeContext(delegateSubagent: nil)
+        let result = await tool.invoke(
+            arguments: [
+                "status": .string("failed"),
+                "summary": .string("Could not inspect the tree."),
+            ],
+            context: context
+        )
+
+        #expect(!result.ok)
+        #expect(result.error?.code == "invalid_arguments")
+    }
 }

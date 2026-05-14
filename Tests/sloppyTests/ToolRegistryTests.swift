@@ -21,7 +21,7 @@ struct ToolRegistryTests {
             "debug.read_logs",
             "web.search", "web.fetch",
             "branches.spawn",
-            "workers.spawn", "agents.delegate_task", "workers.route",
+            "workers.spawn", "agents.delegate_task", "agent_delegate.finish", "workers.route",
             "sessions.spawn", "sessions.list", "sessions.history", "sessions.status",
             "messages.send", "sessions.send",
             "memory.recall", "memory.get", "memory.save", "memory.search",
@@ -76,6 +76,7 @@ struct ToolRegistryTests {
         #expect(ToolCatalog.knownToolIDs.contains("project.current"))
         #expect(ToolCatalog.knownToolIDs.contains("project.task_list"))
         #expect(ToolCatalog.knownToolIDs.contains("actor.discuss_with_actor"))
+        #expect(ToolCatalog.knownToolIDs.contains("agent_delegate.finish"))
         #expect(ToolCatalog.knownToolIDs.contains("mcp.call_tool"))
         #expect(ToolCatalog.knownToolIDs.contains("browser.open"))
         #expect(ToolCatalog.knownToolIDs.contains("browser.screenshot"))

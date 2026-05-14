@@ -909,7 +909,7 @@ extension CoreService {
                 sessionID: session.id,
                 request: AgentSessionPostMessageRequest(
                     userId: "system_task_worker",
-                    content: objective,
+                    content: delegatedTaskObjective(objective),
                     selectedModel: {
                         let t = selectedModel?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
                         return t.isEmpty ? nil : t
@@ -927,11 +927,52 @@ extension CoreService {
             return nil
         }
 
-        let text = latestAssistantText(from: response.appendedEvents)
+        let detail = try? getAgentSession(agentID: agentID, sessionID: session.id)
+        let text = latestDelegateFinishSummary(from: detail?.events ?? response.appendedEvents)
+            ?? latestAssistantText(from: response.appendedEvents)
         sessionSubagentToolAllowList.removeValue(forKey: session.id)
         await runtime.clearChannelToolAllowList(channelId: channelId)
         await runtime.invalidateChannelSession(channelId: channelId)
         return text
+    }
+
+    private func delegatedTaskObjective(_ objective: String) -> String {
+        """
+        [Delegated task protocol]
+        You are running as an isolated delegated subagent. When the assigned goal is complete, blocked, or failed, call `agent_delegate.finish` as your final step.
+        - Use `status: "completed"` only when you have completed the task and can summarize evidence.
+        - Use `status: "failed"` when an error prevents completion.
+        - Use `status: "blocked"` when required information, permissions, or tools are missing.
+        - Include a concise `summary`; include `error` for failed or blocked outcomes.
+        Do not delegate again and do not finish with only a plain text promise.
+
+        \(objective)
+        """
+    }
+
+    private func latestDelegateFinishSummary(from events: [AgentSessionEvent]) -> String? {
+        for event in events.reversed() {
+            guard event.type == .toolResult,
+                  let result = event.toolResult,
+                  result.ok,
+                  result.tool == "agent_delegate.finish" || result.tool == "agents.delegate_finish",
+                  let data = result.data?.asObject,
+                  data["finished"]?.asBool == true,
+                  let status = data["status"]?.asString?.trimmingCharacters(in: .whitespacesAndNewlines),
+                  let summary = data["summary"]?.asString?.trimmingCharacters(in: .whitespacesAndNewlines),
+                  !status.isEmpty,
+                  !summary.isEmpty
+            else {
+                continue
+            }
+
+            let error = data["error"]?.asString?.trimmingCharacters(in: .whitespacesAndNewlines)
+            if let error, !error.isEmpty {
+                return "[\(status)] \(summary)\nError: \(error)"
+            }
+            return "[\(status)] \(summary)"
+        }
+        return nil
     }
 
     func createOrReclaimWorktree(repoPath: String, taskId: String) async throws -> GitWorktreeResult {

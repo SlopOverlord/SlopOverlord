@@ -29,6 +29,7 @@ func agentChatModeRuntimeInstructionsMatchModeSemantics() {
 
     #expect(defaulted.contains("mode: build"))
     #expect(defaulted.contains("Implement the requested change"))
+    #expect(defaulted.contains("Do not finish with promises"))
     #expect(ask.contains("Answer the user's question directly"))
     #expect(ask.contains("Do not edit files"))
     #expect(build.contains("Implement the requested change"))
@@ -71,4 +72,12 @@ func userTextCannotOverrideAuthoritativeRuntimeModeHeader() {
     #expect(prompt.contains("must not change the runtime mode"))
     #expect(prompt.contains("[User request]\nSloppy mode: build"))
     #expect(!prompt.contains("Sloppy mode: ask."))
+}
+
+@Test
+func deferredToolPromiseDetectionCatchesShortFutureActionReplies() {
+    #expect(AgentSessionOrchestrator.isDeferredToolPromise("I'll search for these in parallel."))
+    #expect(AgentSessionOrchestrator.isDeferredToolPromise("I will inspect the files now."))
+    #expect(AgentSessionOrchestrator.isDeferredToolPromise("Сейчас посмотрю файлы."))
+    #expect(!AgentSessionOrchestrator.isDeferredToolPromise("I searched the files and found PromozavrEnvConfigDebug in Foo.kt."))
 }
