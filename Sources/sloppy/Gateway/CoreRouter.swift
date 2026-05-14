@@ -217,6 +217,7 @@ enum ErrorCode {
     static let invalidPluginPayload = "invalid_plugin_payload"
     static let pluginNotFound = "plugin_not_found"
     static let pluginConflict = "plugin_conflict"
+    static let pluginInstallFailed = "plugin_install_failed"
     static let skillsRegistryFailed = "skills_registry_failed"
     static let skillsListFailed = "skills_list_failed"
     static let skillsInstallFailed = "skills_install_failed"

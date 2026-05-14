@@ -104,6 +104,90 @@ private actor FixedOutputModelProvider: ModelProvider {
     }
 }
 
+private actor SequentialTextStore {
+    private let outputs: [String]
+    private var index = 0
+
+    init(outputs: [String]) {
+        self.outputs = outputs
+    }
+
+    func next() -> String {
+        defer { index += 1 }
+        guard outputs.indices.contains(index) else {
+            return outputs.last ?? ""
+        }
+        return outputs[index]
+    }
+
+    func requestCount() -> Int {
+        index
+    }
+}
+
+private struct SequentialTextLanguageModel: LanguageModel {
+    typealias UnavailableReason = Never
+    let store: SequentialTextStore
+
+    func respond<Content>(
+        within session: LanguageModelSession,
+        to prompt: Prompt,
+        generating type: Content.Type,
+        includeSchemaInPrompt: Bool,
+        options: GenerationOptions
+    ) async throws -> LanguageModelSession.Response<Content> where Content: Generable {
+        guard type == String.self else { fatalError("SequentialTextLanguageModel: only String supported") }
+        let text = await store.next()
+        return LanguageModelSession.Response(
+            content: text as! Content,
+            rawContent: GeneratedContent(text),
+            transcriptEntries: []
+        )
+    }
+
+    func streamResponse<Content>(
+        within session: LanguageModelSession,
+        to prompt: Prompt,
+        generating type: Content.Type,
+        includeSchemaInPrompt: Bool,
+        options: GenerationOptions
+    ) -> sending LanguageModelSession.ResponseStream<Content> where Content: Generable {
+        let stream = AsyncThrowingStream<LanguageModelSession.ResponseStream<Content>.Snapshot, any Error> { continuation in
+            Task {
+                guard let response = try? await respond(
+                    within: session, to: prompt, generating: type,
+                    includeSchemaInPrompt: includeSchemaInPrompt, options: options
+                ) else {
+                    continuation.finish()
+                    return
+                }
+                continuation.yield(.init(content: response.content.asPartiallyGenerated(), rawContent: response.rawContent))
+                continuation.finish()
+            }
+        }
+        return LanguageModelSession.ResponseStream(stream: stream)
+    }
+}
+
+private actor SequentialOutputModelProvider: ModelProvider {
+    let id: String = "sequential-output"
+    let supportedModels: [String]
+    nonisolated let store: SequentialTextStore
+
+    init(models: [String], outputs: [String]) {
+        self.supportedModels = models
+        self.store = SequentialTextStore(outputs: outputs)
+    }
+
+    func createLanguageModel(for modelName: String) async throws -> any LanguageModel {
+        SequentialTextLanguageModel(store: store)
+    }
+
+    func requestCount() async -> Int {
+        await store.requestCount()
+    }
+}
+
 private struct ToolCallingLanguageModel: LanguageModel {
     typealias UnavailableReason = Never
     let toolName: String
@@ -346,6 +430,54 @@ func agentSessionOrchestratorDropsReasoningEffortForNonReasoningModels() async t
 
     #expect(await provider.requestedModelsSnapshot() == ["openai:gpt-5.4-mini"])
     #expect(await provider.requestedReasoningEffortsSnapshot() == [nil])
+}
+
+@Test
+func agentSessionRetriesDeferredToolPromiseInAskMode() async throws {
+    let availableModels = [
+        ProviderModelOption(id: "openai:gpt-5.4-mini", title: "openai:gpt-5.4-mini", capabilities: ["tools"])
+    ]
+    let (catalogStore, sessionStore, _) = try makeAgentSessionFixture(
+        agentID: "ask-retry-agent",
+        selectedModel: "openai:gpt-5.4-mini",
+        availableModels: availableModels
+    )
+    let provider = SequentialOutputModelProvider(
+        models: availableModels.map(\.id),
+        outputs: [
+            "Looking at the previous conversation, the user asked why the setting does not affect anything. Let me analyze the code and look for the relevant context.",
+            "Recovered after retry."
+        ]
+    )
+    let runtime = RuntimeSystem(modelProvider: provider, defaultModel: "openai:gpt-5.4-mini")
+    let orchestrator = AgentSessionOrchestrator(
+        runtime: runtime,
+        sessionStore: sessionStore,
+        agentCatalogStore: catalogStore,
+        availableModels: availableModels
+    )
+
+    let session = try await orchestrator.createSession(agentID: "ask-retry-agent", request: AgentSessionCreateRequest())
+    let response = try await orchestrator.postMessage(
+        agentID: "ask-retry-agent",
+        sessionID: session.id,
+        request: AgentSessionPostMessageRequest(
+            userId: "dashboard",
+            content: "Continue the failed restore",
+            mode: .ask
+        )
+    )
+
+    let assistantTexts = response.appendedEvents.compactMap { event -> String? in
+        guard event.type == .message, event.message?.role == .assistant else {
+            return nil
+        }
+        return event.message?.segments.compactMap(\.text).joined(separator: "\n")
+    }
+
+    #expect(await provider.requestCount() == 2)
+    #expect(assistantTexts.last == "Recovered after retry.")
+    #expect(response.appendedEvents.last?.runStatus?.stage == .done)
 }
 
 @Test

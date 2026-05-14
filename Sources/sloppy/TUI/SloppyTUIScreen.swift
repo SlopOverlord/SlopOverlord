@@ -382,7 +382,7 @@ final class SloppyTUIScreen: @preconcurrency Component, @unchecked Sendable {
     func render(width: Int) -> [String] {
         let height = max(terminal?.rows ?? 24, 12)
         let lines = renderBaseScreen(width: width, height: height)
-        return SloppyTUITheme.normalize(lines: lines, width: width, height: height)
+        return SloppyTUITheme.normalize(lines: lines, width: width, height: max(height, lines.count))
     }
 
     func handle(input: TerminalInput) {
@@ -845,6 +845,9 @@ final class SloppyTUIScreen: @preconcurrency Component, @unchecked Sendable {
     }
 
     private func handleTimelineScroll(_ input: TerminalInput) -> Bool {
+        guard !usesNativeTimelineScroll else {
+            return false
+        }
         guard case let .key(key, modifiers) = input else {
             return false
         }
@@ -882,6 +885,10 @@ final class SloppyTUIScreen: @preconcurrency Component, @unchecked Sendable {
     private func scrollTimelineToBottom() {
         timelineScrollOffset = 0
         requestRender()
+    }
+
+    private var usesNativeTimelineScroll: Bool {
+        true
     }
 
     private var commandPaletteVisible: Bool {
@@ -1574,11 +1581,7 @@ final class SloppyTUIScreen: @preconcurrency Component, @unchecked Sendable {
         Use `/subagents` to pick a specific child session.
 
         ## History scroll
-        - PageUp / PageDown scroll by pages.
-        - Up/Down scroll by a few lines.
-        - Option+Up/Down or Ctrl+Up/Down also scroll by a few lines.
-        - Option+Home / Ctrl+Home jumps to the start of history.
-        - Option+End / Ctrl+End jumps back to the bottom.
+        Scroll with the terminal's normal mouse or trackpad scrollback. Opening a session renders the whole transcript into scrollback instead of clipping it to the current viewport.
 
         ## Tips
         - Esc interrupts the current run after picker overlays are closed.
@@ -3639,6 +3642,15 @@ final class SloppyTUIScreen: @preconcurrency Component, @unchecked Sendable {
 
     private func visibleTimelineLines(_ segments: [[String]], height: Int) -> [String] {
         lastTimelineViewportHeight = max(1, height)
+        guard !usesNativeTimelineScroll else {
+            timelineScrollOffset = 0
+            return segments.flatMap { $0 }
+        }
+
+        return clippedTimelineLines(segments, height: height)
+    }
+
+    private func clippedTimelineLines(_ segments: [[String]], height: Int) -> [String] {
         let lineCount = segments.reduce(0) { $0 + $1.count }
         guard lineCount > height else {
             timelineScrollOffset = 0

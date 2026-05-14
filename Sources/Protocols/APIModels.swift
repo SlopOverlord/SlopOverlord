@@ -2255,6 +2255,44 @@ public struct ChannelPluginUpdateRequest: Codable, Sendable {
     }
 }
 
+public struct ChannelPluginInstallRequest: Codable, Sendable {
+    public var sourceUrl: String
+    public var ref: String?
+    public var force: Bool?
+    public var enabled: Bool?
+
+    public init(
+        sourceUrl: String,
+        ref: String? = nil,
+        force: Bool? = nil,
+        enabled: Bool? = nil
+    ) {
+        self.sourceUrl = sourceUrl
+        self.ref = ref
+        self.force = force
+        self.enabled = enabled
+    }
+}
+
+public struct ChannelPluginInstallResponse: Codable, Sendable {
+    public var plugin: ChannelPluginRecord
+    public var sourcePath: String
+    public var binaryPath: String
+    public var rebuilt: Bool
+
+    public init(
+        plugin: ChannelPluginRecord,
+        sourcePath: String,
+        binaryPath: String,
+        rebuilt: Bool
+    ) {
+        self.plugin = plugin
+        self.sourcePath = sourcePath
+        self.binaryPath = binaryPath
+        self.rebuilt = rebuilt
+    }
+}
+
 public struct ChannelPluginDeliverRequest: Codable, Sendable {
     public var channelId: String
     public var userId: String

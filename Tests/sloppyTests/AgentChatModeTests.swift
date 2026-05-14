@@ -79,5 +79,9 @@ func deferredToolPromiseDetectionCatchesShortFutureActionReplies() {
     #expect(AgentSessionOrchestrator.isDeferredToolPromise("I'll search for these in parallel."))
     #expect(AgentSessionOrchestrator.isDeferredToolPromise("I will inspect the files now."))
     #expect(AgentSessionOrchestrator.isDeferredToolPromise("Сейчас посмотрю файлы."))
+    #expect(AgentSessionOrchestrator.isDeferredToolPromise("Looking at the previous conversation, the user asked why the setting does not affect anything. Let me analyze the code and look for the relevant context."))
+    #expect(AgentSessionOrchestrator.isDeferredToolPromise("Читаю файл, чтобы восстановить контекст после обрыва сети."))
+    #expect(AgentSessionOrchestrator.isDeferredToolPromise("Восстанавливаю контекст прошлого вопроса и читаю файл."))
+    #expect(AgentSessionOrchestrator.isDeferredToolPromise("Давай изучу окружение - нужно найти PromozavrDebugSettings и PromozavrEnvConfigDebug."))
     #expect(!AgentSessionOrchestrator.isDeferredToolPromise("I searched the files and found PromozavrEnvConfigDebug in Foo.kt."))
 }

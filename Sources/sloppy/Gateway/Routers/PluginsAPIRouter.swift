@@ -30,6 +30,36 @@ struct PluginsAPIRouter: APIRouter {
             }
         }
 
+        router.post("/v1/plugins/install", metadata: RouteMetadata(summary: "Install source plugin", description: "Clones, builds, caches, and loads a SwiftPM source gateway plugin", tags: ["Plugins"])) { request in
+            guard let body = request.body,
+                  let payload = CoreRouter.decode(body, as: ChannelPluginInstallRequest.self)
+            else {
+                return CoreRouter.json(status: HTTPStatus.badRequest, payload: ["error": ErrorCode.invalidPluginPayload])
+            }
+            do {
+                let installed = try await service.installSourceChannelPlugin(payload)
+                return CoreRouter.encodable(status: HTTPStatus.created, payload: installed)
+            } catch let error as CoreService.ChannelPluginError {
+                return CoreRouter.channelPluginErrorResponse(error)
+            } catch let error as PluginPackageInstallError {
+                let status = pluginInstallHTTPStatus(error)
+                return CoreRouter.json(
+                    status: status,
+                    payload: ["error": ErrorCode.pluginInstallFailed, "message": error.localizedDescription]
+                )
+            } catch let error as PluginPackageBuildError {
+                return CoreRouter.json(
+                    status: HTTPStatus.internalServerError,
+                    payload: ["error": ErrorCode.pluginInstallFailed, "message": error.localizedDescription]
+                )
+            } catch {
+                return CoreRouter.json(
+                    status: HTTPStatus.internalServerError,
+                    payload: ["error": ErrorCode.pluginInstallFailed, "message": "\(error)"]
+                )
+            }
+        }
+
         router.get("/v1/plugins/:pluginId", metadata: RouteMetadata(summary: "Get channel plugin", description: "Returns details of a specific channel plugin", tags: ["Plugins"])) { request in
             let pluginId = request.pathParam("pluginId") ?? ""
             do {
@@ -70,5 +100,16 @@ struct PluginsAPIRouter: APIRouter {
                 return CoreRouter.json(status: HTTPStatus.internalServerError, payload: ["error": ErrorCode.pluginNotFound])
             }
         }
+    }
+}
+
+private func pluginInstallHTTPStatus(_ error: PluginPackageInstallError) -> Int {
+    switch error {
+    case .conflict:
+        return HTTPStatus.conflict
+    case .gitCommandFailed, .moveFailed:
+        return HTTPStatus.internalServerError
+    case .invalidSourceURL, .missingPackageSwift, .missingOrInvalidManifest, .unsupportedProtocol, .invalidPluginName:
+        return HTTPStatus.badRequest
     }
 }

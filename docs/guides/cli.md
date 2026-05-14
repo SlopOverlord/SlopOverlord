@@ -268,6 +268,7 @@ sloppy actor route --message "Who should review this PR?"
 sloppy plugin list
 sloppy plugin get <pluginId>
 sloppy plugin create --file plugin.json
+sloppy plugin install https://github.com/example/my-platform-plugin.git --ref v1.0.0 --force
 sloppy plugin update <pluginId> --file updated.json
 sloppy plugin delete <pluginId>
 ```

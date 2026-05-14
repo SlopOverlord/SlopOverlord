@@ -205,6 +205,7 @@ export function ProjectList({
             <div className="project-grid-footer">
               <div className="project-grid-badges">
                 <span className="project-grid-badge">{taskCounts.total} tasks</span>
+                <span className="project-grid-badge project-grid-badge--progress">{taskCounts.not_done} not done</span>
                 {taskCounts.in_progress > 0 && (
                   <span className="project-grid-badge project-grid-badge--progress">{taskCounts.in_progress} in progress</span>
                 )}

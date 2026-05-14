@@ -960,13 +960,13 @@ enum SloppyTUITheme {
         let compact = contentWidth < 58
         let tips: [String] = compact
             ? [
-                "/help lists commands and scroll keys.",
+                "/help lists commands and native scroll behavior.",
                 "Use /pet to toggle your Sloppie.",
                 "Type # to reference project tasks.",
                 "/undo and /redo are per-session.",
             ]
             : [
-                "PageUp / PageDown scroll history; Option+End jumps back to the latest message.",
+                "Mouse or trackpad scroll uses your terminal's normal scrollback.",
                 "Use /pet to toggle your terminal Sloppie and peek at its current mood.",
                 "/undo and /redo restore file changes from the last completed TUI turn.",
                 "Type @path to attach project files as explicit context with autocomplete.",

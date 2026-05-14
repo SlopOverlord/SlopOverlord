@@ -87,6 +87,16 @@ extension CoreService {
         }
         plugin.updatedAt = Date()
         await store.saveChannelPlugin(plugin)
+        if plugin.deliveryMode == ChannelPluginRecord.DeliveryMode.inProcess {
+            if plugin.enabled {
+                let sourceURL = pluginsRootURL.appendingPathComponent(plugin.id, isDirectory: true)
+                if FileManager.default.fileExists(atPath: sourceURL.appendingPathComponent("Package.swift").path) {
+                    try await startSourceChannelPluginIfNeeded(record: plugin)
+                }
+            } else {
+                await stopActiveGatewayPlugin(id: plugin.id)
+            }
+        }
         return plugin
     }
 
@@ -97,7 +107,75 @@ extension CoreService {
         guard await store.channelPlugin(id: normalized) != nil else {
             throw ChannelPluginError.notFound
         }
+        await stopActiveGatewayPlugin(id: normalized)
         await store.deleteChannelPlugin(id: normalized)
+    }
+
+    public func installSourceChannelPlugin(_ request: ChannelPluginInstallRequest) async throws -> ChannelPluginInstallResponse {
+        let installer = PluginPackageInstaller(
+            pluginsRootURL: pluginsRootURL,
+            cacheRootURL: pluginCacheRootURL,
+            logger: logger
+        )
+        let result = try await installer.install(request)
+        let enabled = request.enabled ?? true
+        await stopActiveGatewayPlugin(id: result.manifest.name)
+
+        let record: ChannelPluginRecord
+        if enabled {
+            let loader = PluginLoader(logger: logger)
+            guard let plugin = loader.loadDylibGatewayPlugin(
+                binaryURL: result.binaryURL,
+                manifest: result.manifest,
+                inboundReceiver: self
+            ) else {
+                throw ChannelPluginError.invalidPayload
+            }
+            await channelDelivery.registerPlugin(plugin)
+            do {
+                try await plugin.start(inboundReceiver: self)
+            } catch {
+                await channelDelivery.unregisterPlugin(plugin)
+                throw error
+            }
+            activeGatewayPlugins.append(plugin)
+
+            let now = Date()
+            let existing = await store.channelPlugin(id: result.manifest.name)
+            record = ChannelPluginRecord(
+                id: result.manifest.name,
+                type: result.manifest.name,
+                baseUrl: "",
+                channelIds: plugin.channelIds,
+                config: existing?.config ?? [:],
+                enabled: true,
+                deliveryMode: ChannelPluginRecord.DeliveryMode.inProcess,
+                createdAt: existing?.createdAt ?? now,
+                updatedAt: now
+            )
+        } else {
+            let now = Date()
+            let existing = await store.channelPlugin(id: result.manifest.name)
+            record = ChannelPluginRecord(
+                id: result.manifest.name,
+                type: result.manifest.name,
+                baseUrl: "",
+                channelIds: existing?.channelIds ?? [],
+                config: existing?.config ?? [:],
+                enabled: false,
+                deliveryMode: ChannelPluginRecord.DeliveryMode.inProcess,
+                createdAt: existing?.createdAt ?? now,
+                updatedAt: now
+            )
+        }
+
+        await store.saveChannelPlugin(record)
+        return ChannelPluginInstallResponse(
+            plugin: record,
+            sourcePath: result.sourceURL.path,
+            binaryPath: result.binaryURL.path,
+            rebuilt: result.rebuilt
+        )
     }
 
     /// Finds the enabled plugin responsible for a given channel ID.
@@ -110,6 +188,41 @@ extension CoreService {
         let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         guard !trimmed.isEmpty, trimmed.count <= 128 else { return nil }
         return trimmed
+    }
+
+    private func startSourceChannelPluginIfNeeded(record: ChannelPluginRecord) async throws {
+        guard activeGatewayPlugins.contains(where: { $0.id == record.id }) == false else {
+            return
+        }
+        let sourceURL = pluginsRootURL.appendingPathComponent(record.id, isDirectory: true)
+        let loader = PluginLoader(logger: logger)
+        guard let manifest = loader.loadManifest(at: sourceURL),
+              manifest.name == record.id,
+              manifest.protocol == "gateway",
+              let loaded = await loader.loadGatewayPlugin(
+                from: sourceURL,
+                cacheRootURL: pluginCacheRootURL,
+                manifest: manifest,
+                inboundReceiver: self
+              )
+        else {
+            throw ChannelPluginError.invalidPayload
+        }
+        let plugin = loaded.plugin
+        await channelDelivery.registerPlugin(plugin)
+        do {
+            try await plugin.start(inboundReceiver: self)
+        } catch {
+            await channelDelivery.unregisterPlugin(plugin)
+            throw error
+        }
+        activeGatewayPlugins.append(plugin)
+        await seedExternalPluginRecord(
+            id: manifest.name,
+            type: record.type,
+            channelIds: plugin.channelIds,
+            enabled: true
+        )
     }
 
     /// Returns actor graph snapshot used by visual canvas board.

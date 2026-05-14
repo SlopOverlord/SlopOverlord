@@ -294,6 +294,7 @@ export function buildTaskCounts(tasks) {
   for (const status of TASK_STATUSES) {
     counts[status.id] = tasks.filter((task) => task.status === status.id).length;
   }
+  counts.not_done = Math.max(0, counts.total - counts.done);
   return counts;
 }
 

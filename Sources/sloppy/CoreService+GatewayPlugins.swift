@@ -34,20 +34,36 @@ extension CoreService {
             )
         }
 
-        let pluginsDir = workspaceRootURL.appendingPathComponent("plugins", isDirectory: true)
+        let pluginsDir = pluginsRootURL
         let loader = PluginLoader(logger: logger)
-        let externalPlugins = await loader.loadGatewayPlugins(
-            from: pluginsDir,
-            inboundReceiver: self
+        let disabledPluginIDs = Set(
+            await store.listChannelPlugins()
+                .filter { !$0.enabled && $0.deliveryMode == ChannelPluginRecord.DeliveryMode.inProcess }
+                .map(\.id)
         )
-        for plugin in externalPlugins {
+        let externalPlugins = await loader.loadGatewayPluginBundles(
+            from: pluginsDir,
+            cacheRootURL: pluginCacheRootURL,
+            inboundReceiver: self,
+            disabledPluginIDs: disabledPluginIDs
+        )
+        for loaded in externalPlugins {
+            let plugin = loaded.plugin
             await channelDelivery.registerPlugin(plugin)
             activeGatewayPlugins.append(plugin)
             do {
                 try await plugin.start(inboundReceiver: self)
+                await seedExternalPluginRecord(
+                    id: loaded.manifest.name,
+                    type: loaded.manifest.name,
+                    channelIds: plugin.channelIds,
+                    enabled: true
+                )
                 logger.info("External gateway plugin \(plugin.id) started.")
             } catch {
                 logger.error("Failed to start external gateway plugin \(plugin.id): \(error)")
+                await channelDelivery.unregisterPlugin(plugin)
+                activeGatewayPlugins.removeAll { $0.id == plugin.id }
             }
         }
 
@@ -130,6 +146,7 @@ extension CoreService {
     public func shutdownChannelPlugins() async {
         for plugin in activeGatewayPlugins {
             await plugin.stop()
+            await channelDelivery.unregisterPlugin(plugin)
         }
         activeGatewayPlugins.removeAll()
 
@@ -161,6 +178,47 @@ extension CoreService {
             updatedAt: now
         )
         await store.saveChannelPlugin(record)
+    }
+
+    func seedExternalPluginRecord(
+        id pluginId: String,
+        type: String,
+        channelIds: [String],
+        enabled: Bool
+    ) async {
+        let existing = await store.channelPlugin(id: pluginId)
+        let now = Date()
+        let record = ChannelPluginRecord(
+            id: pluginId,
+            type: existing?.type ?? type,
+            baseUrl: "",
+            channelIds: channelIds,
+            config: existing?.config ?? [:],
+            enabled: enabled,
+            deliveryMode: ChannelPluginRecord.DeliveryMode.inProcess,
+            createdAt: existing?.createdAt ?? now,
+            updatedAt: now
+        )
+        await store.saveChannelPlugin(record)
+    }
+
+    var pluginsRootURL: URL {
+        workspaceRootURL.appendingPathComponent("plugins", isDirectory: true)
+    }
+
+    var pluginCacheRootURL: URL {
+        workspaceRootURL.appendingPathComponent("plugin-cache", isDirectory: true)
+    }
+
+    func stopActiveGatewayPlugin(id: String) async {
+        let matches = activeGatewayPlugins.filter { $0.id == id }
+        for plugin in matches {
+            await plugin.stop()
+            await channelDelivery.unregisterPlugin(plugin)
+        }
+        if !matches.isEmpty {
+            activeGatewayPlugins.removeAll { $0.id == id }
+        }
     }
 
     /// Accepts a user channel message and returns routing decision.

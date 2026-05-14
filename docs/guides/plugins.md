@@ -269,18 +269,19 @@ For `GatewayPlugin` implementations, bootstrap them inside `CoreService.bootstra
 
 ---
 
-## Writing an external plugin (dlopen)
+## Writing a SwiftPM source plugin
 
-External plugins are pre-compiled `.dylib` binaries placed in the `plugins/` directory under the workspace root. Sloppy loads them at startup using `dlopen`. Currently only `GatewayPlugin` is supported via this mechanism.
+Swift source plugins are distributed as standalone SwiftPM packages. Sloppy clones the package into the workspace, builds a dynamic library for the current OS and architecture, caches the binary, and loads it with `dlopen`. Currently only `GatewayPlugin` is supported through this source-package path.
 
 ### Directory structure
 
 ```
-<workspace>/
-  plugins/
-    my-platform/
-      plugin.json
-      my-platform.dylib   (or plugin.dylib)
+MyPlatformPlugin/
+  Package.swift
+  plugin.json
+  Sources/
+    MyPlatformPlugin/
+      MyPlatformPlugin.swift
 ```
 
 ### plugin.json manifest
@@ -295,9 +296,37 @@ External plugins are pre-compiled `.dylib` binaries placed in the `plugins/` dir
 
 | Field | Description |
 | --- | --- |
-| `name` | Unique plugin identifier. Must match the binary name or be `plugin`. |
+| `name` | Unique plugin identifier. Use lowercase letters, numbers, `.`, `_`, or `-`. Must match the source package product name. |
 | `protocol` | Must be `"gateway"` for external plugins. |
 | `version` | Optional semver string for diagnostics. |
+
+The package must expose a dynamic library product named exactly like `plugin.json` `name`:
+
+```swift
+.library(
+    name: "my-platform",
+    type: .dynamic,
+    targets: ["MyPlatformPlugin"]
+)
+```
+
+Install it through the API:
+
+```bash
+curl -X POST http://localhost:25101/v1/plugins/install \
+  -H 'Authorization: Bearer dev-token' \
+  -H 'Content-Type: application/json' \
+  -d '{"sourceUrl":"https://github.com/example/my-platform-plugin.git"}'
+```
+
+Or through the CLI:
+
+```bash
+sloppy plugin install https://github.com/example/my-platform-plugin.git
+sloppy plugin install https://github.com/example/my-platform-plugin.git --ref v1.0.0 --force
+```
+
+Sloppy stores the cloned source under `<workspace>/plugins/<name>/` and the built binary under `<workspace>/plugin-cache/<name>/<fingerprint>/`. The `plugin.json` file is read as-is and is not rewritten.
 
 ### C ABI entry point
 
@@ -308,10 +337,22 @@ void* sloppy_gateway_create(const char* manifest_json, void* inbound_receiver_op
 ```
 
 - `manifest_json` is a UTF-8 JSON string of the manifest.
-- `inbound_receiver_opaque` is an opaque pointer to a retained `InboundMessageReceiver` box.
-- Return an opaque pointer to a retained `AnyGatewayPluginBox` (defined in `PluginLoader.swift`) or `NULL` on failure.
+- `inbound_receiver_opaque` is an opaque pointer to a retained `GatewayPluginReceiverBox`.
+- Return an opaque pointer to a retained `AnyGatewayPluginBox` from `PluginSDK`, or `NULL` on failure.
 
 Sloppy will call `start`, `stop`, and `send` on the returned object through the `GatewayPlugin` protocol.
+
+### Legacy prebuilt plugin layout
+
+Prebuilt dynamic libraries are still supported for backward compatibility:
+
+```
+<workspace>/
+  plugins/
+    my-platform/
+      plugin.json
+      my-platform.dylib   (or plugin.dylib, libmy-platform.dylib, .so on Linux)
+```
 
 ---
 
@@ -458,9 +499,9 @@ Or add it to `sloppy.json` so it is registered on startup (consult the API refer
 ### Startup
 
 1. Sloppy reads `sloppy.json` and instantiates built-in gateway plugins (Telegram, Discord) if configured.
-2. `PluginLoader` scans the `plugins/` directory and loads any external `.dylib` gateway plugins via `dlopen`.
+2. `PluginLoader` scans the `plugins/` directory. SwiftPM source plugins are built or reused from `plugin-cache`, then loaded via `dlopen`; legacy prebuilt dynamic libraries are loaded directly.
 3. All in-process plugins are registered with `ChannelDeliveryService` and `start(inboundReceiver:)` is called.
-4. HTTP plugin records stored in the database become active immediately — no restart required after registration.
+4. HTTP plugin records stored in the database become active immediately; source plugins can be installed through `POST /v1/plugins/install` or `sloppy plugin install`.
 
 ### Message delivery
 

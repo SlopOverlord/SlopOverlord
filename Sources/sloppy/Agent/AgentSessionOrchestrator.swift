@@ -367,14 +367,15 @@ actor AgentSessionOrchestrator {
             }
         }
 
+        var didRetryDeferredToolPromise = false
         if agentConfig.runtime.type == .native,
            shouldRetryDeferredToolPromise(
                assistantText: runtimeOutcome.assistantText,
-               requestMode: requestMode,
                agentID: agentID,
                sessionID: sessionID,
                since: turnStartedAt
            ) {
+            didRetryDeferredToolPromise = true
             logger.warning(
                 "Retrying deferred tool promise response",
                 metadata: [
@@ -396,6 +397,24 @@ actor AgentSessionOrchestrator {
 
         var finalEvents: [AgentSessionEvent] = []
         if runtimeOutcome.pausedInputRequestID != nil {
+            logSessionRunCompletion(
+                agentID: agentID,
+                sessionID: sessionID,
+                userID: request.userId,
+                runtimeType: agentConfig.runtime.type,
+                requestMode: requestMode,
+                selectedModel: selectedModel,
+                reasoningEffort: reasoningEffort,
+                status: AgentRunStatusEvent(
+                    stage: .paused,
+                    label: "Paused",
+                    details: "Waiting for input request."
+                ),
+                outcome: runtimeOutcome,
+                startedAt: turnStartedAt,
+                didRetryDeferredToolPromise: didRetryDeferredToolPromise,
+                finalEventsCount: 0
+            )
             return AgentSessionMessageResponse(
                 summary: summary,
                 appendedEvents: initialEvents,
@@ -478,65 +497,45 @@ actor AgentSessionOrchestrator {
             )
         }
 
+        let completionStatus: AgentRunStatusEvent
         if runtimeOutcome.wasInterrupted {
-            finalEvents.append(
-                AgentSessionEvent(
-                    agentId: agentID,
-                    sessionId: sessionID,
-                    type: .runStatus,
-                    runStatus: AgentRunStatusEvent(
-                        stage: .interrupted,
-                        label: "Interrupted",
-                        details: "Response generation stopped."
-                    )
-                )
+            completionStatus = AgentRunStatusEvent(
+                stage: .interrupted,
+                label: "Interrupted",
+                details: "Response generation stopped."
             )
         } else if isAssistantErrorText(runtimeOutcome.assistantText) {
-            finalEvents.append(
-                AgentSessionEvent(
-                    agentId: agentID,
-                    sessionId: sessionID,
-                    type: .runStatus,
-                    runStatus: AgentRunStatusEvent(
-                        stage: .interrupted,
-                        label: "Error",
-                        details: runtimeOutcome.assistantText
-                    )
-                )
+            completionStatus = AgentRunStatusEvent(
+                stage: .interrupted,
+                label: "Error",
+                details: runtimeOutcome.assistantText
             )
         } else if shouldMarkDeferredToolPromiseIncomplete(
             assistantText: runtimeOutcome.assistantText,
-            requestMode: requestMode,
             agentID: agentID,
             sessionID: sessionID,
             since: turnStartedAt
         ) {
-            finalEvents.append(
-                AgentSessionEvent(
-                    agentId: agentID,
-                    sessionId: sessionID,
-                    type: .runStatus,
-                    runStatus: AgentRunStatusEvent(
-                        stage: .interrupted,
-                        label: "Incomplete",
-                        details: "Model stopped after promising tool use without executing any tool."
-                    )
-                )
+            completionStatus = AgentRunStatusEvent(
+                stage: .interrupted,
+                label: "Incomplete",
+                details: "Model stopped after promising tool use without executing any tool."
             )
         } else {
-            finalEvents.append(
-                AgentSessionEvent(
-                    agentId: agentID,
-                    sessionId: sessionID,
-                    type: .runStatus,
-                    runStatus: AgentRunStatusEvent(
-                        stage: .done,
-                        label: "Done",
-                        details: "Response is ready."
-                    )
-                )
+            completionStatus = AgentRunStatusEvent(
+                stage: .done,
+                label: "Done",
+                details: "Response is ready."
             )
         }
+        finalEvents.append(
+            AgentSessionEvent(
+                agentId: agentID,
+                sessionId: sessionID,
+                type: .runStatus,
+                runStatus: completionStatus
+            )
+        )
 
         if !finalEvents.isEmpty {
             do {
@@ -549,6 +548,21 @@ actor AgentSessionOrchestrator {
                 throw mapSessionStoreError(error)
             }
         }
+
+        logSessionRunCompletion(
+            agentID: agentID,
+            sessionID: sessionID,
+            userID: request.userId,
+            runtimeType: agentConfig.runtime.type,
+            requestMode: requestMode,
+            selectedModel: selectedModel,
+            reasoningEffort: reasoningEffort,
+            status: completionStatus,
+            outcome: runtimeOutcome,
+            startedAt: turnStartedAt,
+            didRetryDeferredToolPromise: didRetryDeferredToolPromise,
+            finalEventsCount: finalEvents.count
+        )
 
         return AgentSessionMessageResponse(
             summary: summary,
@@ -814,6 +828,8 @@ actor AgentSessionOrchestrator {
         let deferredPrefixes = [
             "i'll search",
             "i will search",
+            "i'll analyze",
+            "i will analyze",
             "i'll inspect",
             "i will inspect",
             "i'll look",
@@ -826,18 +842,55 @@ actor AgentSessionOrchestrator {
             "i will run",
             "let me search",
             "let me inspect",
+            "let me analyze",
             "let me check",
+            "let me read",
+            "let me look",
             "сейчас поищу",
             "сейчас посмотрю",
+            "сейчас изучу",
             "я поищу",
             "я посмотрю",
+            "я изучу",
+            "давай изучу",
+            "читаю файл",
+            "восстанавливаю контекст",
         ]
-        guard deferredPrefixes.contains(where: { compact.hasPrefix($0) }) else {
-            return false
-        }
 
         let wordCount = compact.split(separator: " ").count
-        return wordCount <= 24
+        if deferredPrefixes.contains(where: { compact.hasPrefix($0) }) {
+            return wordCount <= 40
+        }
+
+        let lead = String(compact.prefix(320))
+        let deferredFragments = [
+            " let me search",
+            " let me analyze",
+            " let me inspect",
+            " let me check",
+            " let me read",
+            " let me look",
+            " i'll search",
+            " i'll analyze",
+            " i'll inspect",
+            " i'll check",
+            " i will search",
+            " i will analyze",
+            " i will inspect",
+            " i will check",
+            " читаю файл",
+            " восстановлю контекст",
+            " восстанавливаю контекст",
+            " сейчас поищу",
+            " сейчас посмотрю",
+            " сейчас изучу",
+            " давай изучу",
+            " запущу grep",
+        ]
+        guard deferredFragments.contains(where: { lead.contains($0) }) else {
+            return false
+        }
+        return wordCount <= 60
     }
 
     static func deferredToolPromiseRetryContent(originalRequest: String) -> String {
@@ -1024,13 +1077,11 @@ actor AgentSessionOrchestrator {
 
     private func shouldRetryDeferredToolPromise(
         assistantText: String,
-        requestMode: AgentChatMode,
         agentID: String,
         sessionID: String,
         since turnStartedAt: Date
     ) -> Bool {
-        guard requestMode != .ask,
-              Self.isDeferredToolPromise(assistantText),
+        guard Self.isDeferredToolPromise(assistantText),
               !sessionHasToolActivity(agentID: agentID, sessionID: sessionID, since: turnStartedAt)
         else {
             return false
@@ -1040,18 +1091,67 @@ actor AgentSessionOrchestrator {
 
     private func shouldMarkDeferredToolPromiseIncomplete(
         assistantText: String,
-        requestMode: AgentChatMode,
         agentID: String,
         sessionID: String,
         since turnStartedAt: Date
     ) -> Bool {
         shouldRetryDeferredToolPromise(
             assistantText: assistantText,
-            requestMode: requestMode,
             agentID: agentID,
             sessionID: sessionID,
             since: turnStartedAt
         )
+    }
+
+    private func logSessionRunCompletion(
+        agentID: String,
+        sessionID: String,
+        userID: String,
+        runtimeType: AgentRuntimeType,
+        requestMode: AgentChatMode,
+        selectedModel: String?,
+        reasoningEffort: ReasoningEffort?,
+        status: AgentRunStatusEvent,
+        outcome: SessionRuntimeOutcome,
+        startedAt: Date,
+        didRetryDeferredToolPromise: Bool,
+        finalEventsCount: Int
+    ) {
+        let durationMs = Int(Date().timeIntervalSince(startedAt) * 1000)
+        let toolActivity = sessionHasToolActivity(agentID: agentID, sessionID: sessionID, since: startedAt)
+        let routeDecision = outcome.routeDecision
+        let metadata: Logger.Metadata = [
+            "agent_id": .string(agentID),
+            "session_id": .string(sessionID),
+            "user_id": .string(userID),
+            "runtime_type": .string(runtimeType.rawValue),
+            "mode": .string(requestMode.rawValue),
+            "selected_model": .string(optionalString(selectedModel)),
+            "reasoning_effort": .string(reasoningEffort?.rawValue ?? "none"),
+            "stage": .string(status.stage.rawValue),
+            "label": .string(status.label),
+            "details": .string(truncateForLog(status.details ?? "")),
+            "assistant_chars": .stringConvertible(outcome.assistantText.count),
+            "duration_ms": .stringConvertible(durationMs),
+            "tool_activity": .string(toolActivity ? "true" : "false"),
+            "retried_deferred_tool_promise": .string(didRetryDeferredToolPromise ? "true" : "false"),
+            "was_interrupted": .string(outcome.wasInterrupted ? "true" : "false"),
+            "did_reset_context": .string(outcome.didResetContext ? "true" : "false"),
+            "paused_input_request_id": .string(optionalString(outcome.pausedInputRequestID)),
+            "final_events_count": .stringConvertible(finalEventsCount),
+            "route_action": .string(routeDecision?.action.rawValue ?? "(none)"),
+            "route_confidence": .string(routeDecision.map { String($0.confidence) } ?? "(none)"),
+            "route_queued": .string(routeDecision?.queued.map { $0 ? "true" : "false" } ?? "(none)"),
+            "route_queue_depth": .string(routeDecision?.queueDepth.map(String.init) ?? "(none)")
+        ]
+
+        if status.stage == .paused {
+            logger.info("Session run paused", metadata: metadata)
+        } else if status.stage == .interrupted {
+            logger.warning("Session run completed", metadata: metadata)
+        } else {
+            logger.info("Session run completed", metadata: metadata)
+        }
     }
 
     private func sessionHasToolActivity(agentID: String, sessionID: String, since turnStartedAt: Date) -> Bool {

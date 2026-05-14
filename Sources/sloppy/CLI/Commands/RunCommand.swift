@@ -473,6 +473,7 @@ func createServerWorkspaceDirectories(at workspaceRoot: URL) throws {
         workspaceRoot.appendingPathComponent("memory", isDirectory: true),
         workspaceRoot.appendingPathComponent("logs", isDirectory: true),
         workspaceRoot.appendingPathComponent("plugins", isDirectory: true),
+        workspaceRoot.appendingPathComponent("plugin-cache", isDirectory: true),
         workspaceRoot.appendingPathComponent("tmp", isDirectory: true)
     ]
 

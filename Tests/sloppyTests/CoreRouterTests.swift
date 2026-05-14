@@ -3015,6 +3015,12 @@ func channelPluginValidation() async throws {
     )
     let emptyUrlResponse = await router.handle(method: "POST", path: "/v1/plugins", body: emptyUrlBody)
     #expect(emptyUrlResponse.status == 400)
+
+    let emptyInstallBody = try JSONEncoder().encode(
+        ChannelPluginInstallRequest(sourceUrl: "")
+    )
+    let emptyInstallResponse = await router.handle(method: "POST", path: "/v1/plugins/install", body: emptyInstallBody)
+    #expect(emptyInstallResponse.status == 400)
 }
 
 @Test

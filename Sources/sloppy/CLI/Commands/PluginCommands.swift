@@ -1,5 +1,6 @@
 import ArgumentParser
 import Foundation
+import Protocols
 
 struct PluginCommand: SloppyGroupCommand {
     static let configuration = CommandConfiguration(
@@ -9,6 +10,7 @@ struct PluginCommand: SloppyGroupCommand {
             PluginListCommand.self,
             PluginGetCommand.self,
             PluginCreateCommand.self,
+            PluginInstallCommand.self,
             PluginUpdateCommand.self,
             PluginDeleteCommand.self,
         ]
@@ -77,6 +79,37 @@ struct PluginCreateCommand: AsyncParsableCommand {
         do {
             let data = try await client.post("/v1/plugins", body: body)
             CLIStyle.success("Plugin created.")
+            CLIFormatters.output(data, format: CLIFormatters.resolveFormat(format))
+        } catch {
+            CLIStyle.error(error.localizedDescription); throw ExitCode.failure
+        }
+    }
+}
+
+struct PluginInstallCommand: AsyncParsableCommand {
+    static let configuration = CommandConfiguration(commandName: "install", abstract: "Install a SwiftPM source plugin from a Git URL.")
+
+    @Argument(help: "SwiftPM package Git URL") var sourceUrl: String
+    @Option(name: .long, help: "Git ref, branch, or tag to checkout") var ref: String?
+    @Flag(name: .long, help: "Replace an existing plugin with the same plugin.json name") var force: Bool = false
+    @Flag(name: .long, help: "Install and build without starting the plugin") var disabled: Bool = false
+    @Option(name: .long) var url: String?
+    @Option(name: .long) var token: String?
+    @Option(name: .long) var format: String = "json"
+    @Flag(name: .long) var verbose: Bool = false
+
+    mutating func run() async throws {
+        let client = SloppyCLIClient.resolve(url: url, token: token, verbose: verbose)
+        let request = ChannelPluginInstallRequest(
+            sourceUrl: sourceUrl,
+            ref: ref,
+            force: force,
+            enabled: !disabled
+        )
+        do {
+            let body = try client.encode(request)
+            let data = try await client.post("/v1/plugins/install", body: body)
+            CLIStyle.success("Plugin installed.")
             CLIFormatters.output(data, format: CLIFormatters.resolveFormat(format))
         } catch {
             CLIStyle.error(error.localizedDescription); throw ExitCode.failure
