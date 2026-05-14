@@ -241,6 +241,7 @@ final class SloppyTUIScreen: @preconcurrency Component, @unchecked Sendable {
     private var suppressedProjectFileSearch: SloppyTUIProjectPathSearchSuppression?
     private var projectFileIndexGeneration = 0
     private var projectFileSearchCache: (generation: Int, token: String, items: [SloppyTUIPickerItem])?
+    private var restoredDirectorySessionKeys: Set<String> = []
     private var projectTaskSearchSelection = 0
     private var projectTaskAutocompleteLoading = false
     private var projectTaskAutocompleteTask: Task<Void, Never>?
@@ -335,7 +336,10 @@ final class SloppyTUIScreen: @preconcurrency Component, @unchecked Sendable {
 
     func start() {
         if hasPersistedSession {
-            Task { @MainActor in await reloadSession() }
+            Task { @MainActor in
+                await restorePersistedDirectoriesForCurrentSession()
+                await reloadSession()
+            }
         }
         Task { @MainActor in await reloadSkillSlashCommands() }
         Task { @MainActor in
@@ -789,6 +793,12 @@ final class SloppyTUIScreen: @preconcurrency Component, @unchecked Sendable {
             transcriptExpanded.toggle()
             refreshStaticChrome()
             renderTimeline()
+            return true
+        case .character("g") where modifiers.contains(.control):
+            Task { @MainActor in await self.openLatestSubSession() }
+            return true
+        case .character("G") where modifiers.contains(.control):
+            Task { @MainActor in await self.openLatestSubSession() }
             return true
         case .arrowRight where modifiers.contains(.control):
             Task { @MainActor in await self.openLatestSubSession() }
@@ -1332,6 +1342,8 @@ final class SloppyTUIScreen: @preconcurrency Component, @unchecked Sendable {
         guard !hasPersistedSession else {
             return false
         }
+        let draftDirectoryKey = currentSessionDirectoryKey()
+        let draftDirectories = persistedDirectoriesForCurrentSession()
         let checkpointSessionID = pendingDraftCheckpointSessionID
         session = try await runtime.service.createAgentSession(
             agentID: agent.id,
@@ -1342,6 +1354,9 @@ final class SloppyTUIScreen: @preconcurrency Component, @unchecked Sendable {
         )
         pendingDraftCheckpointSessionID = nil
         hasPersistedSession = true
+        if !draftDirectories.isEmpty {
+            await applyDraftDirectories(draftDirectories, previousKey: draftDirectoryKey)
+        }
         persistSelection()
         streamSession()
         refreshStaticChrome()
@@ -1511,7 +1526,8 @@ final class SloppyTUIScreen: @preconcurrency Component, @unchecked Sendable {
         Paste file paths normally to send them as text. Press Ctrl+V to attach files or images from the macOS clipboard.
         Use `@path` in a message to inline a project file as explicit context. Tab completes slash commands.
         Use `#` to autocomplete active project tasks by id or title.
-        Press Ctrl+O to toggle the full tool-call transcript. Ctrl+Right enters the newest subagent session.
+        Press Ctrl+O to toggle the full tool-call transcript. Ctrl+G enters the newest subagent session.
+        Use `/subagents` to pick a specific child session.
 
         ## History scroll
         - PageUp / PageDown scroll by pages.
@@ -1784,14 +1800,23 @@ final class SloppyTUIScreen: @preconcurrency Component, @unchecked Sendable {
     }
 
     private func addDirectoryToCurrentSession(_ raw: String) async {
-        guard hasPersistedSession else {
-            appendLocalCard("No session yet. Send a message first or open an existing session with `/sessions`.")
-            return
-        }
         guard let path = ChannelAddDirCommandParsing.pathTailIfCommand(raw),
               !path.isEmpty
         else {
             appendLocalCard("Usage: `/add_dir <path>`")
+            return
+        }
+
+        guard hasPersistedSession else {
+            do {
+                let resolvedPath = try await resolveDraftSessionDirectoryPath(path)
+                let directories = appendingUniqueDirectory(resolvedPath, to: persistedDirectoriesForCurrentSession())
+                persistSessionDirectories(directories)
+                loadProjectFileIndex()
+                appendLocalCard("Added working directory for the next session:\n`\(resolvedPath)`", autoDismissAfter: 8)
+            } catch {
+                appendLocalCard("Directory not found: `\(path)`")
+            }
             return
         }
 
@@ -1801,6 +1826,8 @@ final class SloppyTUIScreen: @preconcurrency Component, @unchecked Sendable {
                 sessionID: session.id,
                 request: AgentSessionDirectoryRequest(path: path)
             )
+            persistSessionDirectories(response.directories)
+            loadProjectFileIndex()
             appendLocalCard("Added working directory:\n`\(response.path)`", autoDismissAfter: 8)
         } catch {
             appendLocalCard("Add directory failed: \(String(describing: error))")
@@ -2484,6 +2511,8 @@ final class SloppyTUIScreen: @preconcurrency Component, @unchecked Sendable {
         pendingDraftCheckpointSessionID = nil
         persistSelection()
         streamSession()
+        await restorePersistedDirectoriesForCurrentSession()
+        loadProjectFileIndex()
         await reloadSession()
         appendLocalCard("Session switched to `\(nextSession.title)`.\nResume shortcut: `sloppy -s \(nextSession.id)`")
     }
@@ -2804,7 +2833,8 @@ final class SloppyTUIScreen: @preconcurrency Component, @unchecked Sendable {
                 let rootURL = try await runtime.service.resolveProjectWorkspaceRoot(projectID: project.id)
                 projectFileRootURL = rootURL
 
-                let rootPath = rootURL.standardizedFileURL.path
+                let additionalRoots = indexedAdditionalDirectoryURLs(projectRootURL: rootURL)
+                let rootPath = projectFileIndexRootPath(rootURL: rootURL, additionalRootURLs: additionalRoots)
                 let workspaceRoot = runtime.workspaceRoot
                 let projectID = project.id
                 let cached = await Task.detached(priority: .utility) {
@@ -2844,9 +2874,16 @@ final class SloppyTUIScreen: @preconcurrency Component, @unchecked Sendable {
         requestRender()
         let projectID = project.id
         let workspaceRoot = runtime.workspaceRoot
+        let additionalRoots = indexedAdditionalDirectoryURLs(projectRootURL: rootURL)
+        let rootPath = projectFileIndexRootPath(rootURL: rootURL, additionalRootURLs: additionalRoots)
         projectFileReindexTask = Task { [weak self] in
             let buildTask = Task.detached(priority: .utility) {
-                let index = ProjectFileIndex.build(projectId: projectID, rootURL: rootURL)
+                var index = ProjectFileIndex.build(
+                    projectId: projectID,
+                    rootURL: rootURL,
+                    additionalRootURLs: additionalRoots
+                )
+                index.rootPath = rootPath
                 guard !Task.isCancelled else {
                     return nil as ProjectFileIndex?
                 }
@@ -3225,6 +3262,33 @@ final class SloppyTUIScreen: @preconcurrency Component, @unchecked Sendable {
         }
         refreshStaticChrome()
         requestRender()
+    }
+
+    private func indexedAdditionalDirectoryURLs(projectRootURL: URL) -> [URL] {
+        let projectRootPath = projectRootURL.resolvingSymlinksInPath().standardizedFileURL.path
+        var seen = Set<String>()
+        return persistedDirectoriesForCurrentSession().compactMap { path in
+            let url = URL(fileURLWithPath: path, isDirectory: true)
+                .resolvingSymlinksInPath()
+                .standardizedFileURL
+            guard url.path != projectRootPath,
+                  seen.insert(url.path).inserted
+            else {
+                return nil
+            }
+            var isDirectory: ObjCBool = false
+            guard FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory),
+                  isDirectory.boolValue
+            else {
+                return nil
+            }
+            return url
+        }
+    }
+
+    private func projectFileIndexRootPath(rootURL: URL, additionalRootURLs: [URL]) -> String {
+        ([rootURL.resolvingSymlinksInPath().standardizedFileURL.path] + additionalRootURLs.map(\.path))
+            .joined(separator: "\n")
     }
 
     private func liveAssistantBlocks() -> [SloppyTUITimelineBlock] {
@@ -4021,6 +4085,134 @@ final class SloppyTUIScreen: @preconcurrency Component, @unchecked Sendable {
         stateStore.save(state)
     }
 
+    private func currentSessionDirectoryKey() -> String {
+        SloppyTUIStateStore.sessionDirectoryKey(
+            projectId: project.id,
+            agentId: agent.id,
+            sessionId: session.id
+        )
+    }
+
+    private func persistedDirectoriesForCurrentSession() -> [String] {
+        state.sessionDirectories[currentSessionDirectoryKey()] ?? []
+    }
+
+    private func persistSessionDirectories(_ directories: [String]) {
+        let normalized = normalizedDirectoryList(directories)
+        let key = currentSessionDirectoryKey()
+        if normalized.isEmpty {
+            state.sessionDirectories.removeValue(forKey: key)
+        } else {
+            state.sessionDirectories[key] = normalized
+        }
+        restoredDirectorySessionKeys.insert(key)
+        stateStore.save(state)
+    }
+
+    private func restorePersistedDirectoriesForCurrentSession() async {
+        guard hasPersistedSession else {
+            return
+        }
+        let key = currentSessionDirectoryKey()
+        guard restoredDirectorySessionKeys.insert(key).inserted else {
+            return
+        }
+
+        var restored: [String] = []
+        for directory in persistedDirectoriesForCurrentSession() {
+            do {
+                let response = try await runtime.service.addAgentSessionDirectory(
+                    agentID: agent.id,
+                    sessionID: session.id,
+                    request: AgentSessionDirectoryRequest(path: directory)
+                )
+                restored = response.directories
+            } catch {
+                continue
+            }
+        }
+        if !restored.isEmpty {
+            state.sessionDirectories[key] = normalizedDirectoryList(restored)
+            stateStore.save(state)
+        }
+    }
+
+    private func applyDraftDirectories(_ directories: [String], previousKey: String) async {
+        var restored: [String] = []
+        for directory in directories {
+            do {
+                let response = try await runtime.service.addAgentSessionDirectory(
+                    agentID: agent.id,
+                    sessionID: session.id,
+                    request: AgentSessionDirectoryRequest(path: directory)
+                )
+                restored = response.directories
+            } catch {
+                continue
+            }
+        }
+
+        state.sessionDirectories.removeValue(forKey: previousKey)
+        if !restored.isEmpty {
+            state.sessionDirectories[currentSessionDirectoryKey()] = normalizedDirectoryList(restored)
+            restoredDirectorySessionKeys.insert(currentSessionDirectoryKey())
+        }
+        stateStore.save(state)
+    }
+
+    private func normalizedDirectoryList(_ directories: [String]) -> [String] {
+        var seen = Set<String>()
+        return directories.compactMap { directory in
+            let trimmed = directory.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty else {
+                return nil
+            }
+            let normalized = URL(fileURLWithPath: (trimmed as NSString).expandingTildeInPath, isDirectory: true)
+                .resolvingSymlinksInPath()
+                .standardizedFileURL
+                .path
+            guard seen.insert(normalized).inserted else {
+                return nil
+            }
+            return normalized
+        }
+    }
+
+    private func appendingUniqueDirectory(_ directory: String, to directories: [String]) -> [String] {
+        normalizedDirectoryList(directories + [directory])
+    }
+
+    private func resolveDraftSessionDirectoryPath(_ rawPath: String) async throws -> String {
+        var trimmed = rawPath.trimmingCharacters(in: .whitespacesAndNewlines)
+        if (trimmed.hasPrefix("\"") && trimmed.hasSuffix("\"")) ||
+            (trimmed.hasPrefix("'") && trimmed.hasSuffix("'")) {
+            trimmed = String(trimmed.dropFirst().dropLast())
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        guard !trimmed.isEmpty else {
+            throw CocoaError(.fileNoSuchFile)
+        }
+
+        let expanded = (trimmed as NSString).expandingTildeInPath
+        let candidate: URL
+        if expanded.hasPrefix("/") {
+            candidate = URL(fileURLWithPath: expanded, isDirectory: true)
+        } else {
+            let root = (try? await runtime.service.resolveProjectWorkspaceRoot(projectID: project.id))
+                ?? URL(fileURLWithPath: runtime.cwd, isDirectory: true)
+            candidate = root.appendingPathComponent(expanded, isDirectory: true)
+        }
+
+        let resolved = candidate.resolvingSymlinksInPath().standardizedFileURL
+        var isDirectory: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: resolved.path, isDirectory: &isDirectory),
+              isDirectory.boolValue
+        else {
+            throw CocoaError(.fileNoSuchFile)
+        }
+        return resolved.path
+    }
+
     private func persistDraft(_ value: String) {
         let key = SloppyTUIStateStore.draftKey(projectId: project.id, agentId: agent.id, sessionId: session.id)
         if value.isEmpty {
@@ -4282,6 +4474,9 @@ final class SloppyTUIScreen: @preconcurrency Component, @unchecked Sendable {
 
     private func projectPathContext(for rawPath: String) async -> String {
         let path = rawPath.trimmingCharacters(in: .whitespacesAndNewlines)
+        if path.hasPrefix("/") {
+            return absolutePathContext(for: path)
+        }
         let normalizedPath = path.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
         let cachedType = projectFileIndex?.entries.first { $0.path == normalizedPath }?.type
         let shouldTryDirectoryFirst = path.hasSuffix("/") || cachedType == .directory
@@ -4303,6 +4498,9 @@ final class SloppyTUIScreen: @preconcurrency Component, @unchecked Sendable {
     }
 
     private func directoryContextBlock(path: String) async -> String? {
+        if path.hasPrefix("/") {
+            return absoluteDirectoryContextBlock(path: path)
+        }
         let manifestLimit = 80
         do {
             let rootURL: URL
@@ -4335,6 +4533,80 @@ final class SloppyTUIScreen: @preconcurrency Component, @unchecked Sendable {
         } catch {
             return nil
         }
+    }
+
+    private func absolutePathContext(for rawPath: String) -> String {
+        guard let url = allowedAbsoluteAttachmentURL(rawPath) else {
+            return "[Attachment failed: \(rawPath)] Path is outside directories added with `/add_dir`."
+        }
+
+        var isDirectory: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory) else {
+            return "[Attachment failed: \(rawPath)] Path does not exist."
+        }
+        if isDirectory.boolValue {
+            return absoluteDirectoryContextBlock(path: url.path) ?? "[Attached directory: \(url.path)/]\n- (empty directory)"
+        }
+
+        do {
+            let maxBytes = 2 * 1024 * 1024
+            let data = try Data(contentsOf: url)
+            guard data.count <= maxBytes else {
+                return "[Attachment failed: \(url.path)] File is too large."
+            }
+            guard let text = String(data: data, encoding: .utf8) else {
+                return "[Attachment failed: \(url.path)] Only UTF-8 files are supported."
+            }
+            return "[Attached file: \(url.path)]\n```\n\(text)\n```"
+        } catch {
+            return "[Attachment failed: \(url.path)] \(String(describing: error))"
+        }
+    }
+
+    private func absoluteDirectoryContextBlock(path: String) -> String? {
+        guard let url = allowedAbsoluteAttachmentURL(path) else {
+            return nil
+        }
+        var isDirectory: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory),
+              isDirectory.boolValue
+        else {
+            return nil
+        }
+
+        let entries = (try? FileManager.default.contentsOfDirectory(
+            at: url,
+            includingPropertiesForKeys: [.isDirectoryKey],
+            options: [.skipsHiddenFiles]
+        )) ?? []
+        let lines = entries
+            .sorted { $0.lastPathComponent.localizedCaseInsensitiveCompare($1.lastPathComponent) == .orderedAscending }
+            .prefix(80)
+            .map { entry -> String in
+                let values = try? entry.resourceValues(forKeys: [.isDirectoryKey])
+                return "- \(entry.path)\((values?.isDirectory == true) ? "/" : "")"
+            }
+            .joined(separator: "\n")
+        return """
+        [Attached directory: \(url.path)/]
+        \(lines.isEmpty ? "- (empty directory)" : lines)
+        """
+    }
+
+    private func allowedAbsoluteAttachmentURL(_ rawPath: String) -> URL? {
+        let candidate = URL(fileURLWithPath: rawPath, isDirectory: false)
+            .resolvingSymlinksInPath()
+            .standardizedFileURL
+        for directory in persistedDirectoriesForCurrentSession() {
+            let root = URL(fileURLWithPath: directory, isDirectory: true)
+                .resolvingSymlinksInPath()
+                .standardizedFileURL
+            let rootPrefix = root.path.hasSuffix("/") ? root.path : root.path + "/"
+            if candidate.path == root.path || candidate.path.hasPrefix(rootPrefix) {
+                return candidate
+            }
+        }
+        return nil
     }
 }
 

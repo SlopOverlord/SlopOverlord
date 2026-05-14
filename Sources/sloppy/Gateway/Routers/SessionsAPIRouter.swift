@@ -11,6 +11,11 @@ struct SessionsAPIRouter: APIRouter {
     func configure(on router: CoreRouterRegistrar) {
         router.get("/v1/channel-sessions", metadata: RouteMetadata(summary: "List channel sessions", description: "Returns a list of all active channel sessions", tags: ["Sessions"])) { request in
             let agentId = request.queryParam("agentId")
+            let parsedLimit = Int(request.queryParam("limit") ?? "")
+            let limit = parsedLimit.map { max(0, min($0, 500)) }
+            let offset = max(0, Int(request.queryParam("offset") ?? "") ?? 0)
+            let parsedRecentMessagesLimit = Int(request.queryParam("recentMessagesLimit") ?? "")
+            let recentMessagesLimit = parsedRecentMessagesLimit.map { max(0, min($0, 50)) }
             let statusValue = request.queryParam("status")?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
             let status: ChannelSessionStatus?
             if let statusValue, !statusValue.isEmpty {
@@ -23,7 +28,13 @@ struct SessionsAPIRouter: APIRouter {
             }
 
             do {
-                let sessions = try await service.listChannelSessions(status: status, agentID: agentId)
+                let sessions = try await service.listChannelSessions(
+                    status: status,
+                    agentID: agentId,
+                    recentMessagesLimit: recentMessagesLimit,
+                    limit: limit,
+                    offset: offset
+                )
                 return CoreRouter.encodable(status: HTTPStatus.ok, payload: sessions)
             } catch CoreService.AgentStorageError.invalidID {
                 return CoreRouter.json(status: HTTPStatus.badRequest, payload: ["error": ErrorCode.invalidAgentId])

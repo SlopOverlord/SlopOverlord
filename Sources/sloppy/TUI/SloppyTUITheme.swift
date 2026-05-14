@@ -300,15 +300,22 @@ enum SloppyTUITheme {
 
     static func highlightedComposerLines(_ lines: [String]) -> [String] {
         var borderCount = 0
+        var isContinuingProjectPath = false
         return lines.map { line in
             if isEditorBorderLine(line) {
                 borderCount += 1
+                isContinuingProjectPath = false
                 return line
             }
             guard borderCount == 1 else {
                 return line
             }
-            return highlightedComposerSyntax(in: line)
+            let highlighted = highlightedComposerSyntax(
+                in: line,
+                isContinuingProjectPath: isContinuingProjectPath
+            )
+            isContinuingProjectPath = highlighted.isContinuingProjectPath
+            return highlighted.line
         }
     }
 
@@ -561,7 +568,7 @@ enum SloppyTUITheme {
                 + foreground(" \(title)")
                 + muted(" · ")
                 + statusText
-                + muted(" · \(shortID(childSessionId)) · ctrl+right to enter"),
+                + muted(" · \(shortID(childSessionId)) · ctrl+g to enter"),
             width: paddedBlockLineWidth(width)
         )
         return applyBackground(padded(line, width: width), width: width, background: toolBackground)
@@ -569,7 +576,7 @@ enum SloppyTUITheme {
 
     static func transcriptHintLine(expanded: Bool, childSessionCount: Int, width: Int) -> String {
         let mode = expanded ? "detailed transcript" : "compact transcript"
-        let childHint = childSessionCount > 0 ? " · ctrl+right enters latest subagent" : ""
+        let childHint = childSessionCount > 0 ? " · ctrl+g enters latest subagent · /subagents picks" : ""
         let line = fittedLine(" " + muted("\(mode) · ctrl+o toggles\(childHint)"), width: width)
         return applyPanelBackground(padded(line, width: width), width: width)
     }
@@ -1175,11 +1182,17 @@ enum SloppyTUITheme {
         var style: (String) -> String
     }
 
-    private static func highlightedComposerSyntax(in line: String) -> String {
+    private static func highlightedComposerSyntax(
+        in line: String,
+        isContinuingProjectPath: Bool
+    ) -> (line: String, isContinuingProjectPath: Bool) {
         let plain = strippingANSI(from: line)
-        let spans = composerHighlightSpans(in: plain)
+        let (spans, nextIsContinuingProjectPath) = composerHighlightSpans(
+            in: plain,
+            isContinuingProjectPath: isContinuingProjectPath
+        )
         guard !spans.isEmpty else {
-            return line
+            return (line, nextIsContinuingProjectPath)
         }
 
         var result = ""
@@ -1202,7 +1215,7 @@ enum SloppyTUITheme {
             visibleOffset += 1
             index = line.index(after: index)
         }
-        return result
+        return (result, nextIsContinuingProjectPath)
     }
 
     private static func truncateVisible(_ text: String, maxWidth: Int) -> String {
@@ -1229,7 +1242,10 @@ enum SloppyTUITheme {
         return result
     }
 
-    private static func composerHighlightSpans(in line: String) -> [ComposerHighlightSpan] {
+    private static func composerHighlightSpans(
+        in line: String,
+        isContinuingProjectPath: Bool
+    ) -> (spans: [ComposerHighlightSpan], isContinuingProjectPath: Bool) {
         var spans: [ComposerHighlightSpan] = []
         appendComposerSpans(
             pattern: #"(\[paste #[0-9]+(?: [^\]]+)?\])"#,
@@ -1238,11 +1254,9 @@ enum SloppyTUITheme {
             line: line,
             spans: &spans
         )
-        appendComposerSpans(
-            pattern: #"(^|\s)(@[A-Za-z0-9._/\-~]+)"#,
-            captureGroup: 2,
-            style: { yellow($0) },
+        let nextIsContinuingProjectPath = appendComposerProjectPathSpans(
             line: line,
+            isContinuingProjectPath: isContinuingProjectPath,
             spans: &spans
         )
         appendComposerSpans(
@@ -1259,7 +1273,10 @@ enum SloppyTUITheme {
             line: line,
             spans: &spans
         )
-        return spans.sorted { $0.range.lowerBound < $1.range.lowerBound }
+        return (
+            spans.sorted { $0.range.lowerBound < $1.range.lowerBound },
+            nextIsContinuingProjectPath
+        )
     }
 
     private static func messageHighlightSpans(in line: String) -> [MessageHighlightSpan] {
@@ -1316,6 +1333,105 @@ enum SloppyTUITheme {
             }
             spans.append(ComposerHighlightSpan(range: offsetRange, style: style))
         }
+    }
+
+    private static func appendComposerProjectPathSpans(
+        line: String,
+        isContinuingProjectPath: Bool,
+        spans: inout [ComposerHighlightSpan]
+    ) -> Bool {
+        var nextIsContinuingProjectPath = false
+        var index = line.startIndex
+        var activeStart: String.Index?
+        var activeHasPathCharacter = isContinuingProjectPath
+
+        if isContinuingProjectPath {
+            activeStart = line.startIndex
+        }
+
+        while index < line.endIndex {
+            let character = line[index]
+            if let start = activeStart {
+                if character.isWhitespace, !isEscapedProjectPathWhitespace(in: line, at: index, end: line.endIndex) {
+                    appendComposerProjectPathSpan(
+                        line: line,
+                        start: start,
+                        end: index,
+                        hasPathCharacter: activeHasPathCharacter,
+                        spans: &spans
+                    )
+                    activeStart = nil
+                    activeHasPathCharacter = false
+                } else if character != "@" {
+                    activeHasPathCharacter = true
+                }
+            } else if character == "@", isProjectPathTokenStart(in: line, at: index) {
+                activeStart = index
+                activeHasPathCharacter = false
+            }
+            index = line.index(after: index)
+        }
+
+        if let start = activeStart {
+            appendComposerProjectPathSpan(
+                line: line,
+                start: start,
+                end: line.endIndex,
+                hasPathCharacter: activeHasPathCharacter,
+                spans: &spans
+            )
+            nextIsContinuingProjectPath = activeHasPathCharacter
+        }
+        return nextIsContinuingProjectPath
+    }
+
+    private static func appendComposerProjectPathSpan(
+        line: String,
+        start: String.Index,
+        end: String.Index,
+        hasPathCharacter: Bool,
+        spans: inout [ComposerHighlightSpan]
+    ) {
+        guard hasPathCharacter, start < end else {
+            return
+        }
+        let lower = line.distance(from: line.startIndex, to: start)
+        let upper = line.distance(from: line.startIndex, to: end)
+        let offsetRange = lower..<upper
+        guard !spans.contains(where: { overlaps($0.range, offsetRange) }) else {
+            return
+        }
+        spans.append(ComposerHighlightSpan(range: offsetRange, style: { yellow($0) }))
+    }
+
+    private static func isProjectPathTokenStart(in line: String, at index: String.Index) -> Bool {
+        guard index > line.startIndex else {
+            return true
+        }
+        let previous = line.index(before: index)
+        return line[previous].isWhitespace
+    }
+
+    private static func isEscapedProjectPathWhitespace(in line: String, at index: String.Index, end: String.Index) -> Bool {
+        if hasOddProjectPathBackslashRunBefore(index, in: line) {
+            return true
+        }
+        let next = line.index(after: index)
+        return next < end && line[next] == "\\"
+    }
+
+    private static func hasOddProjectPathBackslashRunBefore(_ index: String.Index, in line: String) -> Bool {
+        var count = 0
+        var cursor = index
+        while cursor > line.startIndex {
+            let previous = line.index(before: cursor)
+            guard line[previous] == "\\" else {
+                break
+            }
+            count += 1
+            cursor = previous
+        }
+        return count % 2 == 1
     }
 
     private static func appendMessageSpans(

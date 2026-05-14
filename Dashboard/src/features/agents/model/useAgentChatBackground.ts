@@ -55,7 +55,7 @@ export function useAgentChatBackground(agentId: string, enabled: boolean): void 
     let streamCleanup: (() => void) | null = null;
 
     async function connectToLatestSession() {
-      const sessions = await fetchAgentSessions(agentId);
+      const sessions = await fetchAgentSessions(agentId, { limit: 1 });
       if (disposed || !Array.isArray(sessions)) return;
 
       const userSessions = sortSessionsByUpdate(

@@ -13,12 +13,14 @@ struct SloppyTUIState: Codable, Sendable {
 
     var selections: [String: Selection]
     var drafts: [String: String]
+    var sessionDirectories: [String: [String]]
     var petEnabled: Bool
     var welcomeTipCursor: Int
 
     enum CodingKeys: String, CodingKey {
         case selections
         case drafts
+        case sessionDirectories
         case petEnabled
         case welcomeTipCursor
     }
@@ -26,11 +28,13 @@ struct SloppyTUIState: Codable, Sendable {
     init(
         selections: [String: Selection] = [:],
         drafts: [String: String] = [:],
+        sessionDirectories: [String: [String]] = [:],
         petEnabled: Bool = true,
         welcomeTipCursor: Int = 0
     ) {
         self.selections = selections
         self.drafts = drafts
+        self.sessionDirectories = sessionDirectories
         self.petEnabled = petEnabled
         self.welcomeTipCursor = welcomeTipCursor
     }
@@ -39,6 +43,7 @@ struct SloppyTUIState: Codable, Sendable {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         selections = try container.decodeIfPresent([String: Selection].self, forKey: .selections) ?? [:]
         drafts = try container.decodeIfPresent([String: String].self, forKey: .drafts) ?? [:]
+        sessionDirectories = try container.decodeIfPresent([String: [String]].self, forKey: .sessionDirectories) ?? [:]
         petEnabled = try container.decodeIfPresent(Bool.self, forKey: .petEnabled) ?? true
         welcomeTipCursor = try container.decodeIfPresent(Int.self, forKey: .welcomeTipCursor) ?? 0
     }
@@ -82,6 +87,10 @@ struct SloppyTUIStateStore {
     }
 
     static func draftKey(projectId: String, agentId: String, sessionId: String) -> String {
+        "\(projectId):\(agentId):\(sessionId)"
+    }
+
+    static func sessionDirectoryKey(projectId: String, agentId: String, sessionId: String) -> String {
         "\(projectId):\(agentId):\(sessionId)"
     }
 }

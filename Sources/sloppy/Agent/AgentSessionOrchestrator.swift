@@ -342,7 +342,7 @@ actor AgentSessionOrchestrator {
                     primerContent: primerContent,
                     onChunk: { [weak self] partialText in
                         guard let self else { return }
-                        await self.handleSessionResponseChunk(
+                        _ = await self.handleSessionResponseChunk(
                             agentID: agentID,
                             sessionID: sessionID,
                             channelID: self.sessionChannelID(agentID: agentID, sessionID: sessionID),
@@ -597,7 +597,9 @@ actor AgentSessionOrchestrator {
         var appendedEvents: [AgentSessionEvent] = []
         for targetSessionID in targetSessionIDs {
             if request.action == .interrupt || request.action == .interruptTree {
-                interruptedSessionRunChannels.insert(sessionChannelID(agentID: agentID, sessionID: targetSessionID))
+                let channelID = sessionChannelID(agentID: agentID, sessionID: targetSessionID)
+                interruptedSessionRunChannels.insert(channelID)
+                _ = await runtime.abortChannel(channelId: channelID, reason: request.reason ?? "Interrupted by user")
             }
 
             let events = [

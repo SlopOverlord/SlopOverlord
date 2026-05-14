@@ -5,7 +5,12 @@ import Protocols
 // MARK: - Agent Sessions
 
 extension CoreService {
-    public func listAgentSessions(agentID: String, projectID: String? = nil) throws -> [AgentSessionSummary] {
+    public func listAgentSessions(
+        agentID: String,
+        projectID: String? = nil,
+        limit: Int? = nil,
+        offset: Int = 0
+    ) throws -> [AgentSessionSummary] {
         guard let normalizedAgentID = normalizedAgentID(agentID) else {
             throw AgentSessionError.invalidAgentID
         }
@@ -17,7 +22,7 @@ extension CoreService {
             if let filter = projectID?.trimmingCharacters(in: .whitespacesAndNewlines), !filter.isEmpty {
                 sessions = sessions.filter { ($0.projectId ?? "").caseInsensitiveCompare(filter) == .orderedSame }
             }
-            return sessions
+            return Self.paginatedAgentSessions(sessions, limit: limit, offset: offset)
         } catch {
             throw mapSessionStoreError(error)
         }
@@ -437,11 +442,18 @@ extension CoreService {
         _ = try getAgent(id: normalizedAgentID)
 
         do {
-            return try await sessionOrchestrator.controlSession(
+            let response = try await sessionOrchestrator.controlSession(
                 agentID: normalizedAgentID,
                 sessionID: normalizedSessionID,
                 request: request
             )
+            if request.action == .interrupt || request.action == .interruptTree {
+                let interruptedSessionIDs = Set(response.appendedEvents.map(\.sessionId))
+                for interruptedSessionID in interruptedSessionIDs {
+                    await toolExecution.cleanupSessionProcesses(interruptedSessionID)
+                }
+            }
+            return response
         } catch {
             throw mapSessionOrchestratorError(error)
         }
@@ -544,6 +556,19 @@ extension CoreService {
         }
         var seen = Set<String>()
         return result.filter { seen.insert($0).inserted }
+    }
+
+    private static func paginatedAgentSessions(
+        _ sessions: [AgentSessionSummary],
+        limit: Int?,
+        offset: Int
+    ) -> [AgentSessionSummary] {
+        let start = min(max(0, offset), sessions.count)
+        let tail = sessions[start...]
+        guard let limit else {
+            return Array(tail)
+        }
+        return Array(tail.prefix(max(0, limit)))
     }
 
 }

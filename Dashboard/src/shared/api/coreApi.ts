@@ -23,6 +23,9 @@ interface ChannelEventsQuery {
 interface ChannelSessionsQuery {
   status?: string;
   agentId?: string;
+  recentMessagesLimit?: number;
+  limit?: number;
+  offset?: number;
 }
 
 interface AgentMemoryQuery {
@@ -157,7 +160,7 @@ export interface CoreApi {
   deleteActorTeam: (teamId: string) => Promise<AnyRecord | null>;
   fetchAgentSessions: (
     agentId: string,
-    options?: { projectId?: string | null }
+    options?: { projectId?: string | null; limit?: number; offset?: number }
   ) => Promise<AnyRecord[] | null>;
   createAgentSession: (agentId: string, payload?: AnyRecord) => Promise<AnyRecord | null>;
   postAgentMemoryCheckpoint: (
@@ -325,6 +328,15 @@ export function createCoreApi(): CoreApi {
       }
       if (typeof query.agentId === "string" && query.agentId.length > 0) {
         params.set("agentId", query.agentId);
+      }
+      if (Number.isFinite(query.recentMessagesLimit)) {
+        params.set("recentMessagesLimit", String(query.recentMessagesLimit));
+      }
+      if (Number.isFinite(query.limit)) {
+        params.set("limit", String(query.limit));
+      }
+      if (Number.isFinite(query.offset)) {
+        params.set("offset", String(query.offset));
       }
 
       const queryString = params.toString();
@@ -1296,9 +1308,19 @@ export function createCoreApi(): CoreApi {
         typeof options.projectId === "string" && options.projectId.trim().length > 0
           ? options.projectId.trim()
           : "";
-      const query = projectId ? `?projectId=${encodeURIComponent(projectId)}` : "";
+      const params = new URLSearchParams();
+      if (projectId) {
+        params.set("projectId", projectId);
+      }
+      if (Number.isFinite(options.limit)) {
+        params.set("limit", String(options.limit));
+      }
+      if (Number.isFinite(options.offset)) {
+        params.set("offset", String(options.offset));
+      }
+      const query = params.toString();
       const response = await requestJson<AnyRecord[]>({
-        path: `/v1/agents/${encodeURIComponent(agentId)}/sessions${query}`
+        path: `/v1/agents/${encodeURIComponent(agentId)}/sessions${query ? `?${query}` : ""}`
       });
       if (!response.ok || !Array.isArray(response.data)) {
         return null;

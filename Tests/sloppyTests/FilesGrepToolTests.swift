@@ -7,8 +7,16 @@ import Testing
 
 @Suite("files.grep")
 struct FilesGrepToolTests {
-    private func makeContext(workspaceRootURL: URL, maxReadBytes: Int = 512 * 1024) -> ToolContext {
-        let guardrails = AgentToolsGuardrails(maxReadBytes: maxReadBytes)
+    private func makeContext(
+        workspaceRootURL: URL,
+        maxReadBytes: Int = 512 * 1024,
+        allowedWriteRoots: [String] = [],
+        currentDirectoryURL: URL? = nil
+    ) -> ToolContext {
+        let guardrails = AgentToolsGuardrails(
+            maxReadBytes: maxReadBytes,
+            allowedWriteRoots: allowedWriteRoots
+        )
         let policy = AgentToolsPolicy(guardrails: guardrails)
         let tmp = FileManager.default.temporaryDirectory
         return ToolContext(
@@ -16,6 +24,7 @@ struct FilesGrepToolTests {
             sessionID: "session-test",
             policy: policy,
             workspaceRootURL: workspaceRootURL,
+            currentDirectoryURL: currentDirectoryURL,
             runtime: RuntimeSystem(),
             memoryStore: InMemoryMemoryStore(),
             sessionStore: AgentSessionFileStore(agentsRootURL: tmp),
@@ -192,6 +201,39 @@ struct FilesGrepToolTests {
 
         #expect(result.ok == false)
         #expect(result.error?.code == "path_not_allowed")
+    }
+
+    @Test("default grep searches added roots as well as current directory")
+    func defaultGrepSearchesAddedRoots() async throws {
+        let workspace = try makeWorkspace()
+        let firstRoot = try makeWorkspace()
+        let secondRoot = try makeWorkspace()
+        defer {
+            try? FileManager.default.removeItem(at: workspace)
+            try? FileManager.default.removeItem(at: firstRoot)
+            try? FileManager.default.removeItem(at: secondRoot)
+        }
+
+        try "only in second root\n".write(
+            to: secondRoot.appendingPathComponent("marker.txt"),
+            atomically: true,
+            encoding: .utf8
+        )
+
+        let result = await FilesGrepTool(executableResolver: { _ in nil }).invoke(
+            arguments: ["query": .string("second root")],
+            context: makeContext(
+                workspaceRootURL: workspace,
+                allowedWriteRoots: [firstRoot.path, secondRoot.path],
+                currentDirectoryURL: firstRoot
+            )
+        )
+
+        #expect(result.ok == true)
+        let paths = (result.data?.asObject?["paths"]?.asArray ?? []).compactMap(\.asString)
+        #expect(paths.contains(secondRoot.path))
+        let matches = result.data?.asObject?["matches"]?.asArray ?? []
+        #expect(matches.first?.asObject?["path"]?.asString == secondRoot.appendingPathComponent("marker.txt").path)
     }
 
     private func makeWorkspace() throws -> URL {

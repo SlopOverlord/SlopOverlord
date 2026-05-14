@@ -32,6 +32,7 @@ final class AgentSessionFileStore {
     private let encoder: JSONEncoder
     private let decoder: JSONDecoder
     private let logger: Logger
+    private static let summaryCacheSchemaVersion = 1
 
     init(agentsRootURL: URL, fileManager: FileManager = .default) {
         self.fileManager = fileManager
@@ -52,7 +53,12 @@ final class AgentSessionFileStore {
         self.agentsRootURL = url
     }
 
-    func listSessions(agentID: String, includeHeartbeat: Bool = false) throws -> [AgentSessionSummary] {
+    func listSessions(
+        agentID: String,
+        includeHeartbeat: Bool = false,
+        limit: Int? = nil,
+        offset: Int = 0
+    ) throws -> [AgentSessionSummary] {
         let normalizedAgentID = try normalizedAgentID(agentID)
         let sessionsDirectory = try sessionsDirectoryURL(agentID: normalizedAgentID, createIfMissing: false)
 
@@ -70,14 +76,14 @@ final class AgentSessionFileStore {
         var summaries: [AgentSessionSummary] = []
         for file in sessionFiles {
             let sessionID = file.deletingPathExtension().lastPathComponent
-            if let detail = try? loadSession(agentID: normalizedAgentID, sessionID: sessionID) {
-                if includeHeartbeat || detail.summary.kind != .heartbeat {
-                    summaries.append(detail.summary)
-                }
+            if let summary = try? loadSessionSummary(agentID: normalizedAgentID, sessionID: sessionID, fileURL: file),
+               includeHeartbeat || summary.kind != .heartbeat {
+                summaries.append(summary)
             }
         }
 
-        return summaries.sorted { $0.updatedAt > $1.updatedAt }
+        let sorted = summaries.sorted { $0.updatedAt > $1.updatedAt }
+        return Self.paginated(sorted, limit: limit, offset: offset)
     }
 
     func createSession(agentID: String, request: AgentSessionCreateRequest) throws -> AgentSessionSummary {
@@ -115,7 +121,7 @@ final class AgentSessionFileStore {
 
         let fileURL = sessionsDirectory.appendingPathComponent("\(sessionID).jsonl")
         try append(events: [createdEvent], to: fileURL, createIfMissing: true)
-        return try loadSession(agentID: normalizedAgentID, sessionID: sessionID).summary
+        return try refreshSummaryCache(agentID: normalizedAgentID, sessionID: sessionID, fileURL: fileURL)
     }
 
     func loadSession(agentID: String, sessionID: String) throws -> AgentSessionDetail {
@@ -140,7 +146,7 @@ final class AgentSessionFileStore {
         }
 
         try append(events: events, to: fileURL, createIfMissing: false)
-        return try loadSession(agentID: normalizedAgentID, sessionID: normalizedSessionID).summary
+        return try refreshSummaryCache(agentID: normalizedAgentID, sessionID: normalizedSessionID, fileURL: fileURL)
     }
 
     func deleteSession(agentID: String, sessionID: String) throws {
@@ -153,6 +159,7 @@ final class AgentSessionFileStore {
         }
 
         try fileManager.removeItem(at: fileURL)
+        removeSummaryCache(agentID: normalizedAgentID, sessionID: normalizedSessionID)
 
         if let sidecar = sessionSidecarURL(agentID: normalizedAgentID, sessionID: normalizedSessionID),
            fileManager.fileExists(atPath: sidecar.path) {
@@ -207,6 +214,7 @@ final class AgentSessionFileStore {
         try fileManager.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
         let payload = try JSONEncoder().encode(AgentSessionSidecar(userTurnCount: max(0, count)))
         try payload.write(to: url, options: .atomic)
+        removeSummaryCache(agentID: agentID, sessionID: sessionID)
     }
 
     func persistAttachments(agentID: String, sessionID: String, uploads: [AgentAttachmentUpload]) throws -> [AgentAttachment] {
@@ -339,6 +347,91 @@ final class AgentSessionFileStore {
         }
 
         return events.sorted { $0.createdAt < $1.createdAt }
+    }
+
+    private struct AgentSessionSummaryCache: Codable {
+        var schemaVersion: Int
+        var sourceByteCount: Int
+        var sourceModifiedAt: TimeInterval
+        var summary: AgentSessionSummary
+    }
+
+    private func loadSessionSummary(agentID: String, sessionID: String, fileURL: URL) throws -> AgentSessionSummary {
+        if let cached = try? readSummaryCache(agentID: agentID, sessionID: sessionID, fileURL: fileURL) {
+            return cached
+        }
+        return try refreshSummaryCache(agentID: agentID, sessionID: sessionID, fileURL: fileURL)
+    }
+
+    @discardableResult
+    private func refreshSummaryCache(agentID: String, sessionID: String, fileURL: URL) throws -> AgentSessionSummary {
+        let events = try readEvents(agentID: agentID, sessionID: sessionID)
+        let summary = summaryForSession(agentID: agentID, sessionID: sessionID, events: events)
+        try writeSummaryCache(summary, fileURL: fileURL)
+        return summary
+    }
+
+    private func readSummaryCache(agentID: String, sessionID: String, fileURL: URL) throws -> AgentSessionSummary? {
+        guard let cacheURL = sessionSummaryCacheURL(agentID: agentID, sessionID: sessionID),
+              fileManager.fileExists(atPath: cacheURL.path) else {
+            return nil
+        }
+        let data = try Data(contentsOf: cacheURL)
+        let cache = try decoder.decode(AgentSessionSummaryCache.self, from: data)
+        guard cache.schemaVersion == Self.summaryCacheSchemaVersion,
+              let fingerprint = try sourceFingerprint(fileURL: fileURL),
+              cache.sourceByteCount == fingerprint.byteCount,
+              cache.sourceModifiedAt == fingerprint.modifiedAt else {
+            return nil
+        }
+        return cache.summary
+    }
+
+    private func writeSummaryCache(_ summary: AgentSessionSummary, fileURL: URL) throws {
+        guard let cacheURL = sessionSummaryCacheURL(agentID: summary.agentId, sessionID: summary.id),
+              let fingerprint = try sourceFingerprint(fileURL: fileURL) else {
+            return
+        }
+        let cache = AgentSessionSummaryCache(
+            schemaVersion: Self.summaryCacheSchemaVersion,
+            sourceByteCount: fingerprint.byteCount,
+            sourceModifiedAt: fingerprint.modifiedAt,
+            summary: summary
+        )
+        let payload = try encoder.encode(cache)
+        try payload.write(to: cacheURL, options: .atomic)
+    }
+
+    private func removeSummaryCache(agentID: String, sessionID: String) {
+        guard let cacheURL = sessionSummaryCacheURL(agentID: agentID, sessionID: sessionID),
+              fileManager.fileExists(atPath: cacheURL.path) else {
+            return
+        }
+        try? fileManager.removeItem(at: cacheURL)
+    }
+
+    private func sessionSummaryCacheURL(agentID: String, sessionID: String) -> URL? {
+        resolvedAgentDirectoryURL(agentID: agentID)?
+            .appendingPathComponent("sessions", isDirectory: true)
+            .appendingPathComponent("\(sessionID).summary.json", isDirectory: false)
+    }
+
+    private func sourceFingerprint(fileURL: URL) throws -> (byteCount: Int, modifiedAt: TimeInterval)? {
+        let values = try fileURL.resourceValues(forKeys: [.fileSizeKey, .contentModificationDateKey])
+        guard let byteCount = values.fileSize,
+              let modifiedAt = values.contentModificationDate else {
+            return nil
+        }
+        return (byteCount, modifiedAt.timeIntervalSince1970)
+    }
+
+    private static func paginated(_ summaries: [AgentSessionSummary], limit: Int?, offset: Int) -> [AgentSessionSummary] {
+        let start = min(max(0, offset), summaries.count)
+        let tail = summaries[start...]
+        guard let limit else {
+            return Array(tail)
+        }
+        return Array(tail.prefix(max(0, limit)))
     }
 
     private func summaryForSession(agentID: String, sessionID: String, events: [AgentSessionEvent]) -> AgentSessionSummary {

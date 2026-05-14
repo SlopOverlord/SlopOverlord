@@ -234,8 +234,16 @@ struct AgentsAPIRouter: APIRouter {
             let agentId = request.pathParam("agentId") ?? ""
             let projectFilter = request.queryParam("projectId")?.trimmingCharacters(in: .whitespacesAndNewlines)
             let projectID = (projectFilter?.isEmpty == false) ? projectFilter : nil
+            let parsedLimit = Int(request.queryParam("limit") ?? "")
+            let limit = parsedLimit.map { max(0, min($0, 500)) }
+            let offset = max(0, Int(request.queryParam("offset") ?? "") ?? 0)
             do {
-                let sessions = try await service.listAgentSessions(agentID: agentId, projectID: projectID)
+                let sessions = try await service.listAgentSessions(
+                    agentID: agentId,
+                    projectID: projectID,
+                    limit: limit,
+                    offset: offset
+                )
                 return CoreRouter.encodable(status: HTTPStatus.ok, payload: sessions)
             } catch let error as CoreService.AgentSessionError {
                 return CoreRouter.agentSessionErrorResponse(error, fallback: ErrorCode.sessionListFailed)

@@ -7,7 +7,6 @@ import {
   fetchAgentConfig,
   fetchChannelPlugins,
   fetchChannelSessions,
-  fetchChannelSession,
   updateAgentConfig
 } from "../../../api";
 import { ChannelModelSelector } from "./ChannelModelSelector";
@@ -64,6 +63,17 @@ function formatCompactTime(dateValue: string) {
 }
 
 function extractSessionMessages(sessionDetail: any) {
+  const recentMessages = Array.isArray(sessionDetail?.recentMessages) ? sessionDetail.recentMessages : [];
+  if (recentMessages.length > 0) {
+    return recentMessages.map((msg: any) => ({
+      id: String(msg?.id || ""),
+      userId: msg?.isBot ? "bot" : String(msg?.userId || "user"),
+      content: String(msg?.content || "").replace(/\s+/g, " ").trim(),
+      createdAt: msg?.createdAt || "",
+      isBot: Boolean(msg?.isBot)
+    }));
+  }
+
   const events = Array.isArray(sessionDetail?.events) ? sessionDetail.events : [];
   return events
     .filter((e: any) => {
@@ -178,7 +188,7 @@ export function AgentChannelsTab({ agentId, agentDisplayName, onNavigateToChanne
     for (const session of activeSessions) {
       const channelId = String(session?.channelId || "").trim();
       addSuggestion(channelId, channelId, "active session");
-      const detail = sessionDetails[String(session?.sessionId || "")] || null;
+      const detail = sessionDetails[String(session?.sessionId || "")] || session;
       for (const msg of extractSessionMessages(detail)) {
         if (!msg.isBot) {
           addSuggestion(msg.userId, msg.userId, `user in ${channelId || "session"}`);
@@ -205,27 +215,6 @@ export function AgentChannelsTab({ agentId, agentDisplayName, onNavigateToChanne
       .slice(0, 12);
   }, [accessUsers, activeSessions, channelPlugins, newChannelId, nodes, sessionDetails]);
 
-  async function loadSessionDetails(sessions: any[]) {
-    if (sessions.length === 0) {
-      setSessionDetails({});
-      return;
-    }
-    const results = await Promise.all(
-      sessions.map((s) => {
-        const sid = String(s?.sessionId || "").trim();
-        return sid ? fetchChannelSession(sid).catch(() => null) : Promise.resolve(null);
-      })
-    );
-    const details: Record<string, any> = {};
-    for (let i = 0; i < sessions.length; i++) {
-      const sid = String(sessions[i]?.sessionId || "").trim();
-      if (sid && results[i]) {
-        details[sid] = results[i];
-      }
-    }
-    setSessionDetails(details);
-  }
-
   function updateStatusText(channelCount: number, sessionCount: number) {
     setStatusText(
       `${channelCount} channel${channelCount !== 1 ? "s" : ""} · ` +
@@ -240,7 +229,7 @@ export function AgentChannelsTab({ agentId, agentDisplayName, onNavigateToChanne
       setIsLoading(true);
       const [board, sessions, config, users, plugins] = await Promise.all([
         fetchActorsBoard(),
-        fetchChannelSessions({ status: "open", agentId }),
+        fetchChannelSessions({ status: "open", agentId, recentMessagesLimit: CHANNEL_MESSAGES_LIMIT }),
         fetchAgentConfig(agentId).catch(() => null),
         fetchAccessUsers().catch(() => null),
         fetchChannelPlugins().catch(() => null)
@@ -275,7 +264,7 @@ export function AgentChannelsTab({ agentId, agentDisplayName, onNavigateToChanne
         ]).length,
         nextSessions.length
       );
-      await loadSessionDetails(nextSessions);
+      setSessionDetails({});
       if (!cancelled) setIsLoading(false);
     }
 
@@ -300,7 +289,7 @@ export function AgentChannelsTab({ agentId, agentDisplayName, onNavigateToChanne
   async function refreshData() {
     const [board, sessions, config, users, plugins] = await Promise.all([
       fetchActorsBoard(),
-      fetchChannelSessions({ status: "open", agentId }),
+      fetchChannelSessions({ status: "open", agentId, recentMessagesLimit: CHANNEL_MESSAGES_LIMIT }),
       fetchAgentConfig(agentId).catch(() => null),
       fetchAccessUsers().catch(() => null),
       fetchChannelPlugins().catch(() => null)
@@ -324,7 +313,7 @@ export function AgentChannelsTab({ agentId, agentDisplayName, onNavigateToChanne
       ]).length,
       nextSessions.length
     );
-    await loadSessionDetails(nextSessions);
+    setSessionDetails({});
   }
 
   async function saveChannelSessionSettings(nextSettings: any) {
@@ -557,7 +546,7 @@ export function AgentChannelsTab({ agentId, agentDisplayName, onNavigateToChanne
               <div className="active-channels-grid">
                 {activeSessions.map((session) => {
                   const sessionId = String(session.sessionId || "");
-                  const detail = sessionDetails[sessionId] || null;
+                  const detail = sessionDetails[sessionId] || session;
                   const messages = extractSessionMessages(detail).slice(-CHANNEL_MESSAGES_LIMIT);
                   const messageCount = Number(session.messageCount || 0);
 

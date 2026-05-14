@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { fetchActorsBoard, fetchAgents, fetchProjects, fetchAgentSessions, fetchChannelSessions, fetchChannelSession } from "../api";
+import { fetchActorsBoard, fetchAgents, fetchProjects, fetchAgentSessions, fetchChannelSessions } from "../api";
 import { gatewayBindingChannelId } from "../shared/channelGatewayScope";
 import { Breadcrumbs } from "../components/Breadcrumbs/Breadcrumbs";
 import { AgentPetIcon } from "../features/agents/components/AgentPetSprite";
@@ -67,6 +67,17 @@ function formatCompactTime(dateValue) {
 }
 
 function extractSessionMessages(sessionDetail) {
+  const recentMessages = Array.isArray(sessionDetail?.recentMessages) ? sessionDetail.recentMessages : [];
+  if (recentMessages.length > 0) {
+    return recentMessages.map((msg) => ({
+      id: String(msg?.id || ""),
+      userId: msg?.isBot ? "bot" : String(msg?.userId || "user"),
+      content: String(msg?.content || "").replace(/\s+/g, " ").trim(),
+      createdAt: msg?.createdAt || "",
+      isBot: Boolean(msg?.isBot)
+    }));
+  }
+
   const events = Array.isArray(sessionDetail?.events) ? sessionDetail.events : [];
   return events
     .filter((e) => {
@@ -171,7 +182,7 @@ function ActiveChannelsSection({
       const fallbackAgentId = channelAgents.length === 1 ? String(channelAgents[0]?.id || "").trim() : "";
       const agentId = String(agentSession?.agentId || fallbackAgentId).trim();
       const sessionId = String(session?.sessionId || "");
-      const detail = channelSessionDetails?.[sessionId] || null;
+      const detail = channelSessionDetails?.[sessionId] || session;
       const messages = extractSessionMessages(detail).slice(-CHANNEL_MESSAGES_LIMIT);
 
       return {
@@ -520,7 +531,7 @@ export function RuntimeOverviewView({ workers, events, onNavigateToProject, onNa
         fetchAgents().catch(() => null),
         fetchProjects().catch(() => null),
         fetchActorsBoard().catch(() => null),
-        fetchChannelSessions({ status: "open" }).catch(() => null)
+        fetchChannelSessions({ status: "open", recentMessagesLimit: CHANNEL_MESSAGES_LIMIT }).catch(() => null)
       ]);
       if (cancelled) return;
       const loadedAgents = Array.isArray(agentsRes) ? agentsRes : [];
@@ -529,25 +540,7 @@ export function RuntimeOverviewView({ workers, events, onNavigateToProject, onNa
       setActorBoard(boardRes && Array.isArray(boardRes.nodes) ? boardRes : { nodes: [], links: [], teams: [] });
       const loadedChannelSessions = Array.isArray(channelSessionsRes) ? channelSessionsRes : [];
       setChannelSessions(loadedChannelSessions);
-
-      if (loadedChannelSessions.length > 0) {
-        const detailResults = await Promise.all(
-          loadedChannelSessions.map((cs) => {
-            const sid = String(cs?.sessionId || "").trim();
-            return sid ? fetchChannelSession(sid).catch(() => null) : Promise.resolve(null);
-          })
-        );
-        if (!cancelled) {
-          const details = {};
-          for (let i = 0; i < loadedChannelSessions.length; i++) {
-            const sid = String(loadedChannelSessions[i]?.sessionId || "").trim();
-            if (sid && detailResults[i]) {
-              details[sid] = detailResults[i];
-            }
-          }
-          setChannelSessionDetails(details);
-        }
-      }
+      setChannelSessionDetails({});
 
       // Load sessions for all agents concurrently
       if (loadedAgents.length > 0) {

@@ -235,12 +235,12 @@ struct SloppyTUIApp {
         agentID: String,
         projectID: String
     ) async -> AgentSessionSummary? {
-        let scoped = (try? await service.listAgentSessions(agentID: agentID, projectID: projectID)) ?? []
+        let scoped = (try? await service.listAgentSessions(agentID: agentID, projectID: projectID, limit: 1)) ?? []
         if let latest = scoped.first {
             return latest
         }
 
-        let all = (try? await service.listAgentSessions(agentID: agentID)) ?? []
+        let all = (try? await service.listAgentSessions(agentID: agentID, limit: 10)) ?? []
         return all.first { ($0.projectId ?? "").isEmpty }
     }
 

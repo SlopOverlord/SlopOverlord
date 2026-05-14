@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { fetchActorsBoard, fetchChannelSession, fetchChannelSessions, refreshProjectContext, subscribeProjectChangeStream } from "../../api";
+import { fetchActorsBoard, fetchChannelSessions, refreshProjectContext, subscribeProjectChangeStream } from "../../api";
 import { gatewayBindingChannelId, sessionChannelMatchesBinding } from "../../shared/channelGatewayScope";
 
 const CHANNEL_MESSAGES_LIMIT = 9;
@@ -40,6 +40,17 @@ function formatCompactTime(dateValue) {
 }
 
 function extractSessionMessages(sessionDetail) {
+  const recentMessages = Array.isArray(sessionDetail?.recentMessages) ? sessionDetail.recentMessages : [];
+  if (recentMessages.length > 0) {
+    return recentMessages.map((msg) => ({
+      id: String(msg?.id || ""),
+      userId: msg?.isBot ? "bot" : String(msg?.userId || "user"),
+      content: String(msg?.content || "").replace(/\s+/g, " ").trim(),
+      createdAt: msg?.createdAt || "",
+      isBot: Boolean(msg?.isBot)
+    }));
+  }
+
   const events = Array.isArray(sessionDetail?.events) ? sessionDetail.events : [];
   return events
     .filter((e) => {
@@ -172,7 +183,7 @@ export function ProjectChatTab({ project, onNavigateToChannelSession, onAddChann
     let cancelled = false;
     async function loadSessions() {
       setIsLoading(true);
-      const allSessions = await fetchChannelSessions({ status: "open" }).catch(() => null);
+      const allSessions = await fetchChannelSessions({ status: "open", recentMessagesLimit: CHANNEL_MESSAGES_LIMIT }).catch(() => null);
       if (cancelled) return;
 
       const sessions = (Array.isArray(allSessions) ? allSessions : []).filter((s) => {
@@ -188,22 +199,8 @@ export function ProjectChatTab({ project, onNavigateToChannelSession, onAddChann
         return false;
       });
       setChannelSessions(sessions);
-
-      const details = {};
-      const results = await Promise.all(
-        sessions.map((s) => {
-          const sid = normalizeId(s?.sessionId);
-          return sid ? fetchChannelSession(sid).catch(() => null) : Promise.resolve(null);
-        })
-      );
-      for (let i = 0; i < sessions.length; i++) {
-        const sid = normalizeId(sessions[i]?.sessionId);
-        if (sid && results[i]) {
-          details[sid] = results[i];
-        }
-      }
       if (!cancelled) {
-        setSessionDetails(details);
+        setSessionDetails({});
         setIsLoading(false);
       }
     }
@@ -228,7 +225,7 @@ export function ProjectChatTab({ project, onNavigateToChannelSession, onAddChann
     return channelSessions.map((session) => {
       const channelId = normalizeId(session?.channelId);
       const sessionId = normalizeId(session?.sessionId);
-      const detail = sessionDetails[sessionId] || null;
+      const detail = sessionDetails[sessionId] || session;
       const messages = extractSessionMessages(detail).slice(-CHANNEL_MESSAGES_LIMIT);
 
       return {

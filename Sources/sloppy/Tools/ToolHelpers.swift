@@ -237,6 +237,9 @@ func resolvedExecTimeoutMs(arguments: [String: JSONValue], guardrails: AgentTool
 func waitForProcessExitOrTimeout(process: Process, timeoutMs: Int) async -> Bool {
     let deadline = Date().addingTimeInterval(Double(max(1, timeoutMs)) / 1000.0)
     while process.isRunning {
+        if Task.isCancelled {
+            return true
+        }
         if Date() >= deadline {
             return true
         }

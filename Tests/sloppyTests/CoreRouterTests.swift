@@ -46,6 +46,93 @@ func bulletinsEndpoint() async {
 }
 
 @Test
+func sessionListEndpointsSupportPaginationAndRecentMessages() async throws {
+    let service = CoreService(config: .test)
+    let router = CoreRouter(service: service)
+    let decoder = JSONDecoder()
+    decoder.dateDecodingStrategy = .iso8601
+    let encoder = JSONEncoder()
+    encoder.dateEncodingStrategy = .iso8601
+
+    let agentID = "session-list-router"
+    _ = try await service.createAgent(
+        AgentCreateRequest(id: agentID, displayName: "Session List Router", role: "Testing")
+    )
+    let first = try await service.createAgentSession(
+        agentID: agentID,
+        request: AgentSessionCreateRequest(title: "First")
+    )
+    let second = try await service.createAgentSession(
+        agentID: agentID,
+        request: AgentSessionCreateRequest(title: "Second")
+    )
+    let third = try await service.createAgentSession(
+        agentID: agentID,
+        request: AgentSessionCreateRequest(title: "Third")
+    )
+
+    for (index, session) in [first, second, third].enumerated() {
+        let event = AgentSessionEvent(
+            agentId: agentID,
+            sessionId: session.id,
+            type: .message,
+            createdAt: Date().addingTimeInterval(TimeInterval(index + 1) * 60),
+            message: AgentSessionMessage(
+                role: .user,
+                segments: [AgentMessageSegment(kind: .text, text: "router \(index)")],
+                userId: "tester"
+            )
+        )
+        let appendBody = try encoder.encode(AgentSessionAppendEventsRequest(events: [event]))
+        let appendResponse = await router.handle(
+            method: "POST",
+            path: "/v1/agents/\(agentID)/sessions/\(session.id)/events",
+            body: appendBody
+        )
+        #expect(appendResponse.status == 200)
+    }
+
+    let agentResponse = await router.handle(
+        method: "GET",
+        path: "/v1/agents/\(agentID)/sessions?limit=1&offset=1",
+        body: nil
+    )
+    #expect(agentResponse.status == 200)
+    let agentSessions = try decoder.decode([AgentSessionSummary].self, from: agentResponse.body)
+    #expect(agentSessions.map(\.id) == [second.id])
+
+    let startedAt = Date()
+    _ = try await service.channelSessionStore.recordUserMessage(
+        channelId: "router-channel",
+        userId: "user-1",
+        content: "Alpha",
+        createdAt: startedAt
+    )
+    _ = try await service.channelSessionStore.recordAssistantMessage(
+        channelId: "router-channel",
+        content: "Beta",
+        createdAt: startedAt.addingTimeInterval(1)
+    )
+    _ = try await service.channelSessionStore.recordUserMessage(
+        channelId: "router-channel",
+        userId: "user-2",
+        content: "Gamma",
+        createdAt: startedAt.addingTimeInterval(2)
+    )
+
+    let channelResponse = await router.handle(
+        method: "GET",
+        path: "/v1/channel-sessions?status=open&recentMessagesLimit=2&limit=1&offset=0",
+        body: nil
+    )
+    #expect(channelResponse.status == 200)
+    let channelSessions = try decoder.decode([ChannelSessionSummary].self, from: channelResponse.body)
+    #expect(channelSessions.count == 1)
+    #expect(channelSessions.first?.channelId == "router-channel")
+    #expect(channelSessions.first?.recentMessages?.map(\.content) == ["Beta", "Gamma"])
+}
+
+@Test
 func workersEndpoint() async throws {
     let service = CoreService(config: .test)
     let router = CoreRouter(service: service)

@@ -268,3 +268,74 @@ func channelSessionStoreReturnsMessageHistoryForDateRangeOnly() async throws {
     #expect(history.map(\.content) == ["Today starts here", "Today assistant reply"])
     #expect(history.map(\.userId) == ["user-1", "assistant"])
 }
+
+@Test
+func channelSessionStoreCachesSummariesWithRecentMessages() async throws {
+    let workspaceRootURL = FileManager.default.temporaryDirectory
+        .appendingPathComponent("channel-session-cache-\(UUID().uuidString)", isDirectory: true)
+    defer { try? FileManager.default.removeItem(at: workspaceRootURL) }
+    let store = ChannelSessionFileStore(workspaceRootURL: workspaceRootURL)
+
+    let startedAt = Date(timeIntervalSince1970: 1_700_010_000)
+    let first = try await store.recordUserMessage(
+        channelId: "support",
+        userId: "user-1",
+        content: "First",
+        createdAt: startedAt
+    )
+    _ = try await store.recordAssistantMessage(
+        channelId: "support",
+        content: "Second",
+        createdAt: startedAt.addingTimeInterval(1)
+    )
+    _ = try await store.recordUserMessage(
+        channelId: "support",
+        userId: "user-2",
+        content: "Third",
+        createdAt: startedAt.addingTimeInterval(2)
+    )
+
+    let summaryURL = workspaceRootURL
+        .appendingPathComponent("channel-sessions", isDirectory: true)
+        .appendingPathComponent("\(first.sessionId).summary.json")
+    try? FileManager.default.removeItem(at: summaryURL)
+    #expect(!FileManager.default.fileExists(atPath: summaryURL.path))
+
+    let warmed = try await store.listSessions(status: .open, recentMessagesLimit: 2)
+    #expect(warmed.count == 1)
+    #expect(FileManager.default.fileExists(atPath: summaryURL.path))
+    #expect(warmed.first?.messageCount == 3)
+    #expect(warmed.first?.lastMessagePreview == "Third")
+    #expect(warmed.first?.recentMessages?.map(\.content) == ["Second", "Third"])
+    #expect(warmed.first?.recentMessages?.first?.isBot == true)
+
+    _ = try await store.recordAssistantMessage(
+        channelId: "support",
+        content: "Fourth",
+        createdAt: startedAt.addingTimeInterval(3)
+    )
+    let afterAppend = try await store.listSessions(status: .open, recentMessagesLimit: 1)
+    #expect(afterAppend.first?.messageCount == 4)
+    #expect(afterAppend.first?.lastMessagePreview == "Fourth")
+    #expect(afterAppend.first?.recentMessages?.map(\.content) == ["Fourth"])
+
+    try await store.deleteSession(sessionID: first.sessionId)
+    #expect(!FileManager.default.fileExists(atPath: summaryURL.path))
+}
+
+@Test
+func channelSessionStorePaginatesSummaries() async throws {
+    let workspaceRootURL = FileManager.default.temporaryDirectory
+        .appendingPathComponent("channel-session-pagination-\(UUID().uuidString)", isDirectory: true)
+    defer { try? FileManager.default.removeItem(at: workspaceRootURL) }
+    let store = ChannelSessionFileStore(workspaceRootURL: workspaceRootURL)
+
+    let startedAt = Date(timeIntervalSince1970: 1_700_020_000)
+    _ = try await store.recordUserMessage(channelId: "one", userId: "u", content: "One", createdAt: startedAt)
+    _ = try await store.recordUserMessage(channelId: "two", userId: "u", content: "Two", createdAt: startedAt.addingTimeInterval(10))
+    _ = try await store.recordUserMessage(channelId: "three", userId: "u", content: "Three", createdAt: startedAt.addingTimeInterval(20))
+
+    let page = try await store.listSessions(status: .open, limit: 1, offset: 1)
+    #expect(page.count == 1)
+    #expect(page.first?.channelId == "two")
+}

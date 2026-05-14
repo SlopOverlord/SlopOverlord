@@ -137,7 +137,10 @@ extension CoreService {
 
     public func listChannelSessions(
         status: ChannelSessionStatus? = nil,
-        agentID: String? = nil
+        agentID: String? = nil,
+        recentMessagesLimit: Int? = nil,
+        limit: Int? = nil,
+        offset: Int = 0
     ) async throws -> [ChannelSessionSummary] {
         await waitForStartup()
 
@@ -168,7 +171,10 @@ extension CoreService {
         }
         return try await channelSessionStore.listSessions(
             status: status,
-            channelIds: filteredChannelIDs
+            channelIds: filteredChannelIDs,
+            recentMessagesLimit: recentMessagesLimit,
+            limit: limit,
+            offset: offset
         )
     }
 

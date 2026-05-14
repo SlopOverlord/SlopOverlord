@@ -94,10 +94,19 @@ public actor RuntimeSystem {
         var session: LanguageModelSession
     }
 
+    private struct ActiveResponseTask {
+        var id: UUID
+        var task: Task<Void, Never>
+    }
+
     /// Persistent LLM sessions keyed by channel ID. Each session accumulates full
     /// transcript (prompts, tool calls, tool outputs, responses) so the model sees
     /// complete history without rebuilding context on every turn.
     private var sessionsByChannel: [String: CachedLanguageModelSession] = [:]
+
+    /// Active inline model responses keyed by channel ID. Interrupts cancel these
+    /// tasks directly instead of waiting for the next cooperative stream chunk.
+    private var activeResponseTasks: [String: ActiveResponseTask] = [:]
 
     /// Bootstrap system prompt content per channel, kept to recreate sessions after
     /// context overflow or model hot-swap.
@@ -197,15 +206,28 @@ public actor RuntimeSystem {
 
         switch ingest.decision.action {
         case .respond:
-            await respondInline(
-                channelId: channelId,
-                userMessage: request.content,
-                model: request.model,
-                reasoningEffort: request.reasoningEffort,
-                onResponseChunk: onResponseChunk,
-                toolInvoker: toolInvoker,
-                observationHandler: observationHandler
-            )
+            let taskID = UUID()
+            let responseTask = Task { [weak self] in
+                guard let self else { return }
+                await self.respondInline(
+                    channelId: channelId,
+                    userMessage: request.content,
+                    model: request.model,
+                    reasoningEffort: request.reasoningEffort,
+                    onResponseChunk: onResponseChunk,
+                    toolInvoker: toolInvoker,
+                    observationHandler: observationHandler
+                )
+            }
+            activeResponseTasks[channelId] = ActiveResponseTask(id: taskID, task: responseTask)
+            await withTaskCancellationHandler {
+                await responseTask.value
+            } onCancel: {
+                responseTask.cancel()
+            }
+            if activeResponseTasks[channelId]?.id == taskID {
+                activeResponseTasks.removeValue(forKey: channelId)
+            }
 
         case .spawnBranch:
             _ = await executeBranch(
@@ -303,6 +325,8 @@ public actor RuntimeSystem {
         let tracker = StreamActivityTracker()
 
         do {
+            try Task.checkCancellation()
+
             let session = try await getOrCreateSession(
                 channelId: channelId,
                 activeModel: activeModel,
@@ -582,6 +606,26 @@ public actor RuntimeSystem {
                 throw error
             }
 
+            if Task.isCancelled {
+                sessionsByChannel.removeValue(forKey: channelId)
+                let latest = await tracker.latestContent
+                let streamChunks = await tracker.chunks
+                logger.info(
+                    "Model stream task cancelled",
+                    metadata: modelCallMetadata(
+                        channelId: channelId,
+                        model: activeModel,
+                        reasoningEffort: reasoningEffort,
+                        promptChars: modelUserMessage.count,
+                        mode: streamMode,
+                        durationMs: elapsedMilliseconds(since: streamStartedAt),
+                        outputChars: latest.count,
+                        streamChunks: streamChunks
+                    )
+                )
+                return
+            }
+
             let cancelledByConsumer = await tracker.wasCancelledByConsumer
             if cancelledByConsumer {
                 let latest = await tracker.latestContent
@@ -725,6 +769,18 @@ public actor RuntimeSystem {
             }
 
             await channels.appendSystemMessage(channelId: channelId, content: latest)
+        } catch is CancellationError {
+            sessionsByChannel.removeValue(forKey: channelId)
+            logger.info(
+                "Model response cancelled",
+                metadata: modelCallMetadata(
+                    channelId: channelId,
+                    model: activeModel,
+                    reasoningEffort: reasoningEffort,
+                    promptChars: userMessage.count,
+                    mode: "cancelled"
+                )
+            )
         } catch {
             sessionsByChannel.removeValue(forKey: channelId)
             let text = "Model provider error: \(error)"
@@ -1611,21 +1667,28 @@ public actor RuntimeSystem {
         guard let snapshot = await channels.snapshot(channelId: channelId) else {
             return 0
         }
-        var cancelled = 0
+        var cancelledResponses = 0
+        if let activeResponse = activeResponseTasks.removeValue(forKey: channelId) {
+            activeResponse.task.cancel()
+            sessionsByChannel.removeValue(forKey: channelId)
+            cancelledResponses = 1
+        }
+
+        var cancelledWorkers = 0
         for workerId in snapshot.activeWorkerIds {
             let ok = await workers.cancel(workerId: workerId, reason: reason)
             if ok {
                 await channels.detachWorker(channelId: channelId, workerId: workerId)
-                cancelled += 1
+                cancelledWorkers += 1
             }
         }
-        if cancelled > 0 {
+        if cancelledWorkers > 0 {
             await channels.appendSystemMessage(
                 channelId: channelId,
-                content: "Channel processing aborted. \(cancelled) worker(s) cancelled."
+                content: "Channel processing aborted. \(cancelledWorkers) worker(s) cancelled."
             )
         }
-        return cancelled
+        return cancelledResponses + cancelledWorkers
     }
 
     /// Returns memory entries tracked by runtime memory store.

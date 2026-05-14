@@ -36,6 +36,7 @@ struct ProjectFileIndex: Codable, Equatable, Sendable {
     static func build(
         projectId: String,
         rootURL: URL,
+        additionalRootURLs: [URL] = [],
         limit: Int = defaultLimit,
         fileManager: FileManager = .default,
         now: Date = Date()
@@ -45,7 +46,13 @@ struct ProjectFileIndex: Codable, Equatable, Sendable {
             limit: max(1, limit)
         )
         let root = rootURL.standardizedFileURL
-        let entries = builder.entries(rootURL: root)
+        var entries = builder.entries(rootURL: root)
+        for additionalRoot in additionalRootURLs.map(\.standardizedFileURL) {
+            guard additionalRoot.path != root.path else {
+                continue
+            }
+            entries += builder.entries(rootURL: additionalRoot, pathPrefix: additionalRoot.path)
+        }
         return ProjectFileIndex(
             projectId: projectId,
             rootPath: root.path,
@@ -140,6 +147,13 @@ struct ProjectFileIndex: Codable, Equatable, Sendable {
 
     private static func normalizedQuery(_ query: String) -> String {
         let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.hasPrefix("/"), trimmed != "/" {
+            let stripped = trimmed.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+            guard !stripped.isEmpty else {
+                return ""
+            }
+            return "/" + stripped + (trimmed.hasSuffix("/") ? "/" : "")
+        }
         let stripped = trimmed.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
         guard !stripped.isEmpty else {
             return ""
@@ -154,13 +168,14 @@ struct ProjectFileIndex: Codable, Equatable, Sendable {
     ) -> (Int, Int, Int, String)? {
         let path = entry.path
         let lowerPath = path.lowercased()
+        let lowerPathWithoutLeadingSlash = lowerPath.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
         let basename = (path as NSString).lastPathComponent
         let lowerBasename = basename.lowercased()
 
         if lowerPath == lowerQuery {
             return (0, typeRank(entry.type), path.count, path)
         }
-        if lowerPath.hasPrefix(lowerQuery) {
+        if lowerPath.hasPrefix(lowerQuery) || lowerPathWithoutLeadingSlash.hasPrefix(lowerQuery) {
             return (1, typeRank(entry.type), path.count, path)
         }
         if lowerBasename.hasPrefix(lowerQuery) {
@@ -183,12 +198,13 @@ struct ProjectFileIndex: Codable, Equatable, Sendable {
         lowerDirectoryPath: String
     ) -> (Int, Int, Int, String)? {
         let lowerPath = entry.path.lowercased()
+        let lowerPathWithoutLeadingSlash = lowerPath.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
         let prefix = lowerDirectoryPath + "/"
 
         if lowerPath == lowerDirectoryPath, entry.type == .directory {
             return (0, 0, 0, entry.path)
         }
-        if lowerPath.hasPrefix(prefix) {
+        if lowerPath.hasPrefix(prefix) || lowerPathWithoutLeadingSlash.hasPrefix(prefix) {
             let suffix = String(entry.path.dropFirst(directoryPath.count + 1))
             let depth = suffix.split(separator: "/").count
             return (1, depth, typeRank(entry.type), entry.path)
@@ -335,9 +351,9 @@ private struct ProjectFileIndexBuilder {
     var limit: Int
     var truncated = false
 
-    mutating func entries(rootURL: URL) -> [ProjectFileIndexEntry] {
+    mutating func entries(rootURL: URL, pathPrefix: String = "") -> [ProjectFileIndexEntry] {
         var result: [ProjectFileIndexEntry] = []
-        walk(directoryURL: rootURL, relativeDirectory: "", result: &result)
+        walk(directoryURL: rootURL, relativeDirectory: pathPrefix, result: &result)
         return result
     }
 

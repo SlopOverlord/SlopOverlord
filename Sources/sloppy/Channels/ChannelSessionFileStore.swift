@@ -17,6 +17,8 @@ actor ChannelSessionFileStore {
     private let sessionsRootURL: URL
     private let encoder: JSONEncoder
     private let decoder: JSONDecoder
+    private static let summaryCacheSchemaVersion = 1
+    private static let cachedRecentMessageLimit = 50
 
     init(workspaceRootURL: URL, fileManager: FileManager = .default) {
         self.fileManager = fileManager
@@ -41,14 +43,20 @@ actor ChannelSessionFileStore {
 
     func listSessions(
         status: ChannelSessionStatus? = nil,
-        channelIds: Set<String>? = nil
+        channelIds: Set<String>? = nil,
+        recentMessagesLimit: Int? = nil,
+        limit: Int? = nil,
+        offset: Int = 0
     ) throws -> [ChannelSessionSummary] {
         let files = try sessionFiles()
         var summaries: [ChannelSessionSummary] = []
         summaries.reserveCapacity(files.count)
 
         for fileURL in files {
-            guard let summary = try? loadSessionSummary(fileURL: fileURL) else {
+            guard let summary = try? loadSessionSummary(
+                fileURL: fileURL,
+                recentMessagesLimit: recentMessagesLimit
+            ) else {
                 continue
             }
             if let status, summary.status != status {
@@ -68,12 +76,13 @@ actor ChannelSessionFileStore {
             summaries.append(summary)
         }
 
-        return summaries.sorted { left, right in
+        let sorted = summaries.sorted { left, right in
             if left.updatedAt == right.updatedAt {
                 return left.createdAt > right.createdAt
             }
             return left.updatedAt > right.updatedAt
         }
+        return Self.paginated(sorted, limit: limit, offset: offset)
     }
 
     func deleteSession(sessionID: String) throws {
@@ -81,6 +90,7 @@ actor ChannelSessionFileStore {
         let fileURL = try existingSessionFileURL(sessionID: normalizedSessionID)
         do {
             try fileManager.removeItem(at: fileURL)
+            removeSummaryCache(sessionID: normalizedSessionID)
         } catch {
             throw StoreError.storageFailure
         }
@@ -495,14 +505,153 @@ actor ChannelSessionFileStore {
         sessionsRootURL.appendingPathComponent("\(sessionId).jsonl")
     }
 
-    private func loadSessionSummary(fileURL: URL) throws -> ChannelSessionSummary {
+    private func loadSessionSummary(fileURL: URL, recentMessagesLimit: Int? = nil) throws -> ChannelSessionSummary {
+        if let cached = try? readSummaryCache(fileURL: fileURL, recentMessagesLimit: recentMessagesLimit) {
+            return cached
+        }
+        return try refreshSummaryCache(fileURL: fileURL, recentMessagesLimit: recentMessagesLimit)
+    }
+
+    @discardableResult
+    private func refreshSummaryCache(fileURL: URL, recentMessagesLimit: Int? = nil) throws -> ChannelSessionSummary {
         let events = try readEvents(fileURL: fileURL)
         let sessionID = fileURL.deletingPathExtension().lastPathComponent
-        return summaryForSession(
+        let summary = summaryForSession(
             sessionID: sessionID,
             events: events,
             fallbackChannelId: legacyChannelID(fromSessionID: sessionID)
         )
+        let cachedRecentMessages = recentMessages(from: events, limit: Self.cachedRecentMessageLimit)
+        try writeSummaryCache(summary, recentMessages: cachedRecentMessages, fileURL: fileURL)
+        return summaryWithRecentMessages(
+            summary,
+            cachedRecentMessages: cachedRecentMessages,
+            limit: recentMessagesLimit
+        )
+    }
+
+    private struct ChannelSessionSummaryCache: Codable {
+        var schemaVersion: Int
+        var sourceByteCount: Int
+        var sourceModifiedAt: TimeInterval
+        var summary: ChannelSessionSummary
+        var recentMessages: [ChannelSessionMessagePreview]
+    }
+
+    private func readSummaryCache(fileURL: URL, recentMessagesLimit: Int?) throws -> ChannelSessionSummary? {
+        let sessionID = fileURL.deletingPathExtension().lastPathComponent
+        let cacheURL = sessionSummaryCacheURL(sessionID: sessionID)
+        guard fileManager.fileExists(atPath: cacheURL.path) else {
+            return nil
+        }
+        let data = try Data(contentsOf: cacheURL)
+        let cache = try decoder.decode(ChannelSessionSummaryCache.self, from: data)
+        guard cache.schemaVersion == Self.summaryCacheSchemaVersion,
+              let fingerprint = try sourceFingerprint(fileURL: fileURL),
+              cache.sourceByteCount == fingerprint.byteCount,
+              cache.sourceModifiedAt == fingerprint.modifiedAt else {
+            return nil
+        }
+        return summaryWithRecentMessages(
+            cache.summary,
+            cachedRecentMessages: cache.recentMessages,
+            limit: recentMessagesLimit
+        )
+    }
+
+    private func writeSummaryCache(
+        _ summary: ChannelSessionSummary,
+        recentMessages: [ChannelSessionMessagePreview],
+        fileURL: URL
+    ) throws {
+        guard let fingerprint = try sourceFingerprint(fileURL: fileURL) else {
+            return
+        }
+        var summaryForCache = summary
+        summaryForCache.recentMessages = nil
+        let cache = ChannelSessionSummaryCache(
+            schemaVersion: Self.summaryCacheSchemaVersion,
+            sourceByteCount: fingerprint.byteCount,
+            sourceModifiedAt: fingerprint.modifiedAt,
+            summary: summaryForCache,
+            recentMessages: recentMessages
+        )
+        let payload = try encoder.encode(cache)
+        let sessionID = fileURL.deletingPathExtension().lastPathComponent
+        try payload.write(to: sessionSummaryCacheURL(sessionID: sessionID), options: .atomic)
+    }
+
+    private func removeSummaryCache(sessionID: String) {
+        let cacheURL = sessionSummaryCacheURL(sessionID: sessionID)
+        guard fileManager.fileExists(atPath: cacheURL.path) else {
+            return
+        }
+        try? fileManager.removeItem(at: cacheURL)
+    }
+
+    private func sessionSummaryCacheURL(sessionID: String) -> URL {
+        sessionsRootURL.appendingPathComponent("\(sessionID).summary.json")
+    }
+
+    private func sourceFingerprint(fileURL: URL) throws -> (byteCount: Int, modifiedAt: TimeInterval)? {
+        let values = try fileURL.resourceValues(forKeys: [.fileSizeKey, .contentModificationDateKey])
+        guard let byteCount = values.fileSize,
+              let modifiedAt = values.contentModificationDate else {
+            return nil
+        }
+        return (byteCount, modifiedAt.timeIntervalSince1970)
+    }
+
+    private func summaryWithRecentMessages(
+        _ summary: ChannelSessionSummary,
+        cachedRecentMessages: [ChannelSessionMessagePreview],
+        limit: Int?
+    ) -> ChannelSessionSummary {
+        guard let limit, limit > 0 else {
+            var copy = summary
+            copy.recentMessages = nil
+            return copy
+        }
+        var copy = summary
+        copy.recentMessages = Array(cachedRecentMessages.suffix(min(limit, cachedRecentMessages.count)))
+        return copy
+    }
+
+    private func recentMessages(from events: [ChannelSessionEvent], limit: Int) -> [ChannelSessionMessagePreview] {
+        let messages = events
+            .sorted { $0.createdAt < $1.createdAt }
+            .compactMap { event -> ChannelSessionMessagePreview? in
+                switch event.type {
+                case .userMessage:
+                    return ChannelSessionMessagePreview(
+                        id: event.id,
+                        userId: event.userId,
+                        content: event.content,
+                        createdAt: event.createdAt,
+                        isBot: false
+                    )
+                case .assistantMessage:
+                    return ChannelSessionMessagePreview(
+                        id: event.id,
+                        userId: "bot",
+                        content: event.content,
+                        createdAt: event.createdAt,
+                        isBot: true
+                    )
+                default:
+                    return nil
+                }
+            }
+        return Array(messages.suffix(max(0, limit)))
+    }
+
+    private static func paginated(_ summaries: [ChannelSessionSummary], limit: Int?, offset: Int) -> [ChannelSessionSummary] {
+        let start = min(max(0, offset), summaries.count)
+        let tail = summaries[start...]
+        guard let limit else {
+            return Array(tail)
+        }
+        return Array(tail.prefix(max(0, limit)))
     }
 
     private func summaryForSession(
@@ -707,6 +856,28 @@ public enum ChannelSessionStatus: String, Codable, Sendable, Equatable {
     case closed = "closed"
 }
 
+public struct ChannelSessionMessagePreview: Codable, Sendable, Equatable {
+    public var id: String
+    public var userId: String
+    public var content: String
+    public var createdAt: Date
+    public var isBot: Bool
+
+    public init(
+        id: String,
+        userId: String,
+        content: String,
+        createdAt: Date,
+        isBot: Bool
+    ) {
+        self.id = id
+        self.userId = userId
+        self.content = content
+        self.createdAt = createdAt
+        self.isBot = isBot
+    }
+}
+
 public struct ChannelSessionSummary: Codable, Sendable, Equatable {
     public var channelId: String
     public var sessionId: String
@@ -716,6 +887,7 @@ public struct ChannelSessionSummary: Codable, Sendable, Equatable {
     public var closedAt: Date?
     public var status: ChannelSessionStatus
     public var lastMessagePreview: String?
+    public var recentMessages: [ChannelSessionMessagePreview]?
 
     public init(
         channelId: String,
@@ -725,7 +897,8 @@ public struct ChannelSessionSummary: Codable, Sendable, Equatable {
         updatedAt: Date,
         closedAt: Date? = nil,
         status: ChannelSessionStatus = .open,
-        lastMessagePreview: String? = nil
+        lastMessagePreview: String? = nil,
+        recentMessages: [ChannelSessionMessagePreview]? = nil
     ) {
         self.channelId = channelId
         self.sessionId = sessionId
@@ -735,6 +908,7 @@ public struct ChannelSessionSummary: Codable, Sendable, Equatable {
         self.closedAt = closedAt
         self.status = status
         self.lastMessagePreview = lastMessagePreview
+        self.recentMessages = recentMessages
     }
 }
 

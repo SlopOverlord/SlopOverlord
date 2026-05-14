@@ -949,6 +949,19 @@ private func collectEvents(
     return await collector.all()
 }
 
+private func waitUntil(
+    timeoutNanoseconds: UInt64,
+    condition: @escaping @Sendable () async -> Bool
+) async {
+    let deadline = Date().addingTimeInterval(Double(timeoutNanoseconds) / 1_000_000_000.0)
+    while Date() < deadline {
+        if await condition() {
+            return
+        }
+        try? await Task.sleep(nanoseconds: 10_000_000)
+    }
+}
+
 // MARK: - Persistent session tests
 
 @Test
@@ -989,6 +1002,28 @@ func persistentSessionInvalidatedOnModelProviderUpdate() async {
 }
 
 @Test
+func abortChannelCancelsActiveInlineResponseTask() async {
+    let provider = CancellableStreamModelProvider()
+    let system = RuntimeSystem(modelProvider: provider, defaultModel: "mock-model")
+    let postTask = Task {
+        await system.postMessage(
+            channelId: "cancel-inline-channel",
+            request: ChannelMessageRequest(userId: "u1", content: "please wait")
+        )
+    }
+
+    await waitUntil(timeoutNanoseconds: 1_000_000_000) {
+        await provider.hasStarted()
+    }
+    let cancelled = await system.abortChannel(channelId: "cancel-inline-channel", reason: "test interrupt")
+    _ = await postTask.value
+
+    #expect(cancelled == 1)
+    let snapshot = await system.channelState(channelId: "cancel-inline-channel")
+    #expect(snapshot?.messages.contains(where: { $0.userId == "system" && $0.content == "late response" }) == false)
+}
+
+@Test
 func persistentSessionContextOverflowCreatesNewSession() async {
     let provider = ContextOverflowModelProvider(recoveryResponse: "Recovered response.")
     let system = RuntimeSystem(modelProvider: provider, defaultModel: "mock-model")
@@ -1002,6 +1037,85 @@ func persistentSessionContextOverflowCreatesNewSession() async {
     let lastSystemMessage = snapshot?.messages.last(where: { $0.userId == "system" })?.content ?? ""
     #expect(lastSystemMessage == "Recovered response.")
     #expect(await provider.currentCallCount() == 2)
+}
+
+// MARK: - CancellableStreamModelProvider
+
+private actor CancellableStreamState {
+    private var started = false
+
+    func markStarted() {
+        started = true
+    }
+
+    func hasStarted() -> Bool {
+        started
+    }
+}
+
+private actor CancellableStreamModelProvider: ModelProvider {
+    let id: String = "cancellable-stream"
+    nonisolated let supportedModels: [String] = ["mock-model"]
+    private let state = CancellableStreamState()
+
+    func createLanguageModel(for modelName: String) async throws -> any LanguageModel {
+        CancellableStreamLanguageModel(state: state)
+    }
+
+    nonisolated func generationOptions(for modelName: String, maxTokens: Int, reasoningEffort: ReasoningEffort?) -> GenerationOptions {
+        GenerationOptions(maximumResponseTokens: maxTokens)
+    }
+
+    func hasStarted() async -> Bool {
+        await state.hasStarted()
+    }
+}
+
+private struct CancellableStreamLanguageModel: LanguageModel {
+    typealias UnavailableReason = Never
+    let state: CancellableStreamState
+
+    func respond<Content>(
+        within session: LanguageModelSession,
+        to prompt: Prompt,
+        generating type: Content.Type,
+        includeSchemaInPrompt: Bool,
+        options: GenerationOptions
+    ) async throws -> LanguageModelSession.Response<Content> where Content: Generable {
+        guard type == String.self else { fatalError("only String supported") }
+        try await Task.sleep(nanoseconds: 5_000_000_000)
+        return LanguageModelSession.Response(
+            content: "late response" as! Content,
+            rawContent: GeneratedContent("late response"),
+            transcriptEntries: []
+        )
+    }
+
+    func streamResponse<Content>(
+        within session: LanguageModelSession,
+        to prompt: Prompt,
+        generating type: Content.Type,
+        includeSchemaInPrompt: Bool,
+        options: GenerationOptions
+    ) -> sending LanguageModelSession.ResponseStream<Content> where Content: Generable {
+        guard type == String.self else { fatalError("only String supported") }
+        let state = state
+        let stream = AsyncThrowingStream<LanguageModelSession.ResponseStream<Content>.Snapshot, any Error> { continuation in
+            let task = Task {
+                await state.markStarted()
+                do {
+                    try await Task.sleep(nanoseconds: 5_000_000_000)
+                    let text = "late response"
+                    continuation.yield(.init(content: text as! Content.PartiallyGenerated, rawContent: GeneratedContent(text)))
+                    continuation.finish()
+                } catch {
+                    continuation.finish(throwing: error)
+                }
+            }
+            continuation.onTermination = { _ in task.cancel() }
+        }
+        return LanguageModelSession.ResponseStream(stream: stream)
+    }
 }
 
 // MARK: - ContextOverflowModelProvider

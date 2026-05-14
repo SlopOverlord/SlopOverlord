@@ -19,6 +19,24 @@ func composerHighlightsSlashCommandsAndAtPaths() {
 }
 
 @Test
+func composerContinuesAtPathHighlightAcrossWrappedLines() {
+    let lines = [
+        "\u{001B}[38;2;82;211;194m────────\u{001B}[39m",
+        "@/Users/vlad-prusakov/arcadia/mobile/yandex360/core/kmp/yx360-promozavr/promozavr/src/commonMain",
+        "/kotlin/ru/yandex/disk/promozavr/PromozavrFlow.kt",
+        "\u{001B}[38;2;82;211;194m────────\u{001B}[39m",
+    ]
+
+    let highlighted = SloppyTUITheme.highlightedComposerLines(lines)
+
+    #expect(highlighted[1].contains("\u{001B}[38;2;250;204;21m"))
+    #expect(highlighted[2].contains("\u{001B}[38;2;250;204;21m"))
+    #expect(!highlighted[2].contains("\u{001B}[38;2;103;232;249m"))
+    #expect(stripANSI(highlighted[1]) == lines[1])
+    #expect(stripANSI(highlighted[2]) == lines[2])
+}
+
+@Test
 func composerHighlightsPasteMarkersAndTaskReferences() {
     let lines = [
         "\u{001B}[38;2;82;211;194m────────\u{001B}[39m",

@@ -79,8 +79,29 @@ struct FilesGrepTool: CoreTool {
         }
 
         let pathValue = arguments["path"]?.asString?.trimmingCharacters(in: .whitespacesAndNewlines) ?? "."
-        guard let rootURL = context.resolveReadablePath(pathValue) else {
+        let searchesDefaultRoots = pathValue.isEmpty || pathValue == "."
+        let rootURLs: [URL]
+        if searchesDefaultRoots {
+            rootURLs = defaultSearchRoots(context: context)
+        } else if let rootURL = context.resolveReadablePath(pathValue) {
+            rootURLs = [rootURL]
+        } else {
+            rootURLs = []
+        }
+        guard !rootURLs.isEmpty else {
             return toolFailure(tool: name, code: "path_not_allowed", message: "Search path is outside allowed roots.", retryable: false)
+        }
+        if !searchesDefaultRoots, let rootURL = rootURLs.first {
+            var isDirectory: ObjCBool = false
+            guard FileManager.default.fileExists(atPath: rootURL.path, isDirectory: &isDirectory) else {
+                return toolFailure(
+                    tool: name,
+                    code: "not_found",
+                    message: "No file or directory at \(rootURL.path).",
+                    retryable: false,
+                    hint: "Confirm the path spelling and that it exists under the workspace."
+                )
+            }
         }
 
         let regexEnabled = arguments["regex"]?.asBool ?? false
@@ -98,62 +119,22 @@ struct FilesGrepTool: CoreTool {
             return toolFailure(tool: name, code: "invalid_arguments", message: "Invalid regular expression.", retryable: false)
         }
 
-        let fm = FileManager.default
-        var isDirectory: ObjCBool = false
-        guard fm.fileExists(atPath: rootURL.path, isDirectory: &isDirectory) else {
-            return toolFailure(
-                tool: name,
-                code: "not_found",
-                message: "No file or directory at \(rootURL.path).",
-                retryable: false,
-                hint: "Confirm the path spelling and that it exists under the workspace."
-            )
-        }
-
-        let output: GrepSearchOutput
-        if let rgURL = executableResolver("rg") {
-            output = await runRipgrep(
-                executableURL: rgURL,
-                rootURL: rootURL,
-                isDirectory: isDirectory.boolValue,
-                context: context,
-                query: query,
-                regexEnabled: regexEnabled,
-                caseSensitive: caseSensitive,
-                includeHidden: includeHidden,
-                maxMatches: maxMatches,
-                maxFileBytes: maxFileBytes
-            )
-        } else if let grepURL = executableResolver("grep") {
-            output = await runGrep(
-                executableURL: grepURL,
-                rootURL: rootURL,
-                isDirectory: isDirectory.boolValue,
-                context: context,
-                query: query,
-                matcher: matcher,
-                regexEnabled: regexEnabled,
-                caseSensitive: caseSensitive,
-                includeHidden: includeHidden,
-                maxMatches: maxMatches,
-                maxFiles: maxFiles,
-                maxFileBytes: maxFileBytes
-            )
-        } else {
-            output = runNativeSearch(
-                rootURL: rootURL,
-                isDirectory: isDirectory.boolValue,
-                context: context,
-                matcher: matcher,
-                includeHidden: includeHidden,
-                maxMatches: maxMatches,
-                maxFiles: maxFiles,
-                maxFileBytes: maxFileBytes
-            )
-        }
+        let output = await runSearch(
+            rootURLs: rootURLs,
+            context: context,
+            query: query,
+            matcher: matcher,
+            regexEnabled: regexEnabled,
+            caseSensitive: caseSensitive,
+            includeHidden: includeHidden,
+            maxMatches: maxMatches,
+            maxFiles: maxFiles,
+            maxFileBytes: maxFileBytes
+        )
 
         return toolSuccess(tool: name, data: .object([
-            "path": .string(rootURL.path),
+            "path": .string(rootURLs.first?.path ?? "."),
+            "paths": .array(rootURLs.map { .string($0.path) }),
             "query": .string(query),
             "backend": .string(output.backend),
             "regex": .bool(regexEnabled),
@@ -167,6 +148,116 @@ struct FilesGrepTool: CoreTool {
             "truncated": .bool(output.truncated),
             "matches": .array(output.matches),
         ]))
+    }
+
+    private func defaultSearchRoots(context: ToolContext) -> [URL] {
+        var roots: [URL] = [context.currentDirectoryURL]
+        for rawRoot in context.policy.guardrails.allowedWriteRoots {
+            let root = rawRoot.hasPrefix("/")
+                ? URL(fileURLWithPath: rawRoot, isDirectory: true)
+                : context.workspaceRootURL.appendingPathComponent(rawRoot, isDirectory: true)
+            roots.append(root)
+        }
+
+        var seen = Set<String>()
+        return roots.compactMap { root in
+            let resolved = root.resolvingSymlinksInPath().standardizedFileURL
+            guard seen.insert(resolved.path).inserted else {
+                return nil
+            }
+            var isDirectory: ObjCBool = false
+            guard FileManager.default.fileExists(atPath: resolved.path, isDirectory: &isDirectory) else {
+                return nil
+            }
+            return resolved
+        }
+    }
+
+    private func runSearch(
+        rootURLs: [URL],
+        context: ToolContext,
+        query: String,
+        matcher: LineMatcher,
+        regexEnabled: Bool,
+        caseSensitive: Bool,
+        includeHidden: Bool,
+        maxMatches: Int,
+        maxFiles: Int,
+        maxFileBytes: Int
+    ) async -> GrepSearchOutput {
+        var backend: String?
+        var matches: [JSONValue] = []
+        var stats = GrepStats()
+        var truncated = false
+
+        for rootURL in rootURLs {
+            guard matches.count < maxMatches, stats.filesScanned < maxFiles else {
+                truncated = true
+                break
+            }
+            var isDirectory: ObjCBool = false
+            guard FileManager.default.fileExists(atPath: rootURL.path, isDirectory: &isDirectory) else {
+                stats.filesSkipped += 1
+                continue
+            }
+
+            let remainingMatches = max(1, maxMatches - matches.count)
+            let remainingFiles = max(1, maxFiles - stats.filesScanned)
+            let output: GrepSearchOutput
+            if let rgURL = executableResolver("rg") {
+                output = await runRipgrep(
+                    executableURL: rgURL,
+                    rootURL: rootURL,
+                    isDirectory: isDirectory.boolValue,
+                    context: context,
+                    query: query,
+                    regexEnabled: regexEnabled,
+                    caseSensitive: caseSensitive,
+                    includeHidden: includeHidden,
+                    maxMatches: remainingMatches,
+                    maxFileBytes: maxFileBytes
+                )
+            } else if let grepURL = executableResolver("grep") {
+                output = await runGrep(
+                    executableURL: grepURL,
+                    rootURL: rootURL,
+                    isDirectory: isDirectory.boolValue,
+                    context: context,
+                    query: query,
+                    matcher: matcher,
+                    regexEnabled: regexEnabled,
+                    caseSensitive: caseSensitive,
+                    includeHidden: includeHidden,
+                    maxMatches: remainingMatches,
+                    maxFiles: remainingFiles,
+                    maxFileBytes: maxFileBytes
+                )
+            } else {
+                output = runNativeSearch(
+                    rootURL: rootURL,
+                    isDirectory: isDirectory.boolValue,
+                    context: context,
+                    matcher: matcher,
+                    includeHidden: includeHidden,
+                    maxMatches: remainingMatches,
+                    maxFiles: remainingFiles,
+                    maxFileBytes: maxFileBytes
+                )
+            }
+
+            backend = backend ?? output.backend
+            matches += output.matches
+            stats.filesScanned += output.stats.filesScanned
+            stats.filesSkipped += output.stats.filesSkipped
+            truncated = truncated || output.truncated
+        }
+
+        return GrepSearchOutput(
+            backend: backend ?? "swift",
+            matches: Array(matches.prefix(maxMatches)),
+            stats: stats,
+            truncated: truncated || matches.count > maxMatches
+        )
     }
 
     private func runNativeSearch(

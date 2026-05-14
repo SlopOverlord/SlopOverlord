@@ -77,6 +77,25 @@ func projectFileIndexSearchFindsRecursivePathsAndRanksBasenamePrefix() throws {
 }
 
 @Test
+func projectFileIndexBuildsAdditionalRootsAsAbsolutePaths() throws {
+    let root = try temporaryIndexRoot()
+    let extra = try temporaryIndexRoot()
+    defer {
+        try? FileManager.default.removeItem(at: root)
+        try? FileManager.default.removeItem(at: extra)
+    }
+
+    try Data("root".utf8).write(to: root.appendingPathComponent("README.md"))
+    try Data("extra".utf8).write(to: extra.appendingPathComponent("Notes.md"))
+
+    let index = ProjectFileIndex.build(projectId: "p1", rootURL: root, additionalRootURLs: [extra])
+
+    #expect(index.entries.contains(ProjectFileIndexEntry(path: "README.md", type: .file)))
+    #expect(index.entries.contains(ProjectFileIndexEntry(path: extra.appendingPathComponent("Notes.md").path, type: .file)))
+    #expect(index.search("Notes", limit: 10).contains(ProjectFileIndexEntry(path: extra.appendingPathComponent("Notes.md").path, type: .file)))
+}
+
+@Test
 func projectFileIndexSearchDirectoryQueryReturnsDirectoryAndDescendants() throws {
     let index = ProjectFileIndex(
         projectId: "p1",
