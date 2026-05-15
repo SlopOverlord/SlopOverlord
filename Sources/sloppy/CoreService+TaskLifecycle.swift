@@ -867,6 +867,7 @@ extension CoreService {
                 agentID: agentID,
                 request: AgentSessionCreateRequest(title: sessionTitle, parentSessionId: parentSessionID)
             )
+            await appendSubagentSessionTaskCommentIfNeeded(agentID: agentID, taskID: taskID, session: session)
         } catch {
             logger.warning(
                 "task.worker.session_create_failed",
@@ -935,11 +936,51 @@ extension CoreService {
         }
 
         let detail = try? getAgentSession(agentID: agentID, sessionID: session.id)
-        let text = delegatedTaskResultText(from: detail?.events ?? response.appendedEvents)
+        var resultEvents = detail?.events ?? response.appendedEvents
+        if latestDelegateFinishSummary(from: resultEvents) == nil,
+           let syntheticFinish = syntheticDelegateFinishEvent(
+               agentID: agentID,
+               sessionID: session.id,
+               from: resultEvents
+           ) {
+            _ = try? await appendAgentSessionEvents(
+                agentID: agentID,
+                sessionID: session.id,
+                request: AgentSessionAppendEventsRequest(events: [syntheticFinish])
+            )
+            resultEvents.append(syntheticFinish)
+        }
+        let text = delegatedTaskResultText(from: resultEvents)
         sessionSubagentToolAllowList.removeValue(forKey: session.id)
         await runtime.clearChannelToolAllowList(channelId: channelId)
         await runtime.invalidateChannelSession(channelId: channelId)
         return text
+    }
+
+    func appendSubagentSessionTaskCommentIfNeeded(
+        agentID: String,
+        taskID: String,
+        session: AgentSessionSummary
+    ) async {
+        let projects = await store.listProjects()
+        guard let project = projects.first(where: { project in
+            project.tasks.contains(where: { $0.id == taskID })
+        }) else {
+            return
+        }
+
+        let sessionURL = "/agents/\(dashboardPathComponent(agentID))/chat/\(dashboardPathComponent(session.id))"
+        let sessionName = session.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            ? session.id
+            : session.title
+        _ = await addTaskComment(
+            projectID: project.id,
+            taskID: taskID,
+            request: TaskCommentCreateRequest(
+                content: "Task delegated to subagent session [\(sessionName)](\(sessionURL)).",
+                authorActorId: "system"
+            )
+        )
     }
 
     func subagentToolContext(
@@ -996,7 +1037,8 @@ extension CoreService {
 
     func delegatedTaskResultText(from events: [AgentSessionEvent]) -> String {
         latestDelegateFinishSummary(from: events)
-            ?? "[blocked] Delegated subagent did not call `agent_delegate.finish`.\nError: The subagent ended without a structured delegated-task result."
+            ?? syntheticDelegateFinishSummary(from: events)
+            ?? "[failed] Delegated subagent ended before calling `agent_delegate.finish`.\nError: The subagent ended without a structured delegated-task result."
     }
 
     private func latestDelegateFinishSummary(from events: [AgentSessionEvent]) -> String? {
@@ -1022,6 +1064,64 @@ extension CoreService {
             return "[\(status)] \(summary)"
         }
         return nil
+    }
+
+    private func syntheticDelegateFinishSummary(from events: [AgentSessionEvent]) -> String? {
+        guard let outcome = syntheticDelegateFinishOutcome(from: events) else {
+            return nil
+        }
+        return "[failed] \(outcome.summary)\nError: \(outcome.error)"
+    }
+
+    private func syntheticDelegateFinishEvent(
+        agentID: String,
+        sessionID: String,
+        from events: [AgentSessionEvent]
+    ) -> AgentSessionEvent? {
+        guard let outcome = syntheticDelegateFinishOutcome(from: events) else {
+            return nil
+        }
+        return AgentSessionEvent(
+            agentId: agentID,
+            sessionId: sessionID,
+            type: .toolResult,
+            toolResult: AgentToolResultEvent(
+                tool: "agent_delegate.finish",
+                ok: true,
+                data: .object([
+                    "finished": .bool(true),
+                    "status": .string("failed"),
+                    "summary": .string(outcome.summary),
+                    "error": .string(outcome.error),
+                    "synthetic": .bool(true),
+                ])
+            )
+        )
+    }
+
+    private func syntheticDelegateFinishOutcome(from events: [AgentSessionEvent]) -> (summary: String, error: String)? {
+        guard let status = events.reversed().compactMap(\.runStatus).first(where: {
+            $0.stage == .done || $0.stage == .interrupted
+        }) else {
+            return nil
+        }
+
+        let details = status.details?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let error: String
+        if let details, !details.isEmpty {
+            error = details
+        } else {
+            error = "The subagent ended without a structured delegated-task result."
+        }
+
+        switch status.stage {
+        case .interrupted:
+            return ("Delegated subagent ended before calling `agent_delegate.finish`.", error)
+        case .done:
+            return ("Delegated subagent completed without calling `agent_delegate.finish`.", error)
+        default:
+            return nil
+        }
     }
 
     private func appendingUniqueRoots(_ additions: [String], to existing: [String]) -> [String] {

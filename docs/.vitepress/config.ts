@@ -14,6 +14,7 @@ export default defineConfig({
   cleanUrls: true,
   lastUpdated: true,
   appearance: false,
+  srcExclude: ["product/**/*.md"],
   ignoreDeadLinks: false,
   head: [
     ["link", { rel: "preconnect", href: "https://fonts.googleapis.com" }],

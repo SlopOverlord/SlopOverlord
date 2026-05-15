@@ -370,6 +370,11 @@ func fireAndForgetWorkerPersistsObjectiveArtifact() async throws {
     commentsDecoder.dateDecodingStrategy = .iso8601
     let comments = try commentsDecoder.decode([TaskComment].self, from: commentsResponse.body)
     #expect(comments.contains(where: { $0.authorActorId == "system" && !$0.content.isEmpty }))
+    #expect(comments.contains(where: {
+        $0.authorActorId == "system" &&
+            $0.content.contains("Task delegated to subagent session") &&
+            $0.content.contains("](/agents/builder/chat/session-")
+    }))
 }
 
 @Test

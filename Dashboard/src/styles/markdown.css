@@ -1,8 +1,11 @@
 /* Markdown & Code Blocks */
 .markdown-body {
+  min-width: 0;
+  max-width: 100%;
   line-height: 1.6;
   font-family: inherit;
   color: var(--text);
+  overflow-wrap: anywhere;
 }
 
 .markdown-body p {
@@ -47,13 +50,17 @@
 .markdown-body pre {
   margin: 16px 0;
   padding: 0;
-  overflow: hidden;
+  max-width: 100%;
+  overflow-x: auto;
+  overflow-y: hidden;
+  box-sizing: border-box;
   background: var(--surface-2) !important;
   border: 1px solid var(--line-strong);
   box-shadow: 4px 4px 0px rgba(204, 255, 0, 0.1);
 }
 
 .markdown-body code {
+  max-width: 100%;
   padding: 0.2em 0.4em;
   margin: 0;
   font-size: 85%;
@@ -68,6 +75,7 @@
   font-size: 100%;
   word-break: normal;
   white-space: pre;
+  overflow-wrap: normal;
   background: transparent;
   border: 0;
 }
@@ -114,6 +122,8 @@
 
 /* Syntax Highlighter Overrides */
 .markdown-body div[class*="language-"] {
+  max-width: 100%;
+  overflow-x: auto !important;
   border-radius: 0 !important;
   font-family: "Fira Code", monospace !important;
   font-size: 0.9rem !important;

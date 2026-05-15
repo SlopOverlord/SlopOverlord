@@ -122,8 +122,8 @@ struct AgentsDelegateTaskToolTests {
         #expect(result.error?.code == "invalid_arguments")
     }
 
-    @Test("Delegated task result requires finish tool")
-    func delegatedTaskResultRequiresFinishTool() async {
+    @Test("Delegated task result synthesizes failure when finish tool is missing")
+    func delegatedTaskResultSynthesizesFailureWhenFinishToolIsMissing() async {
         let service = CoreService(config: .test, persistenceBuilder: InMemoryCorePersistenceBuilder())
         let events = [
             AgentSessionEvent(
@@ -138,8 +138,28 @@ struct AgentsDelegateTaskToolTests {
         ]
 
         let text = await service.delegatedTaskResultText(from: events)
-        #expect(text.contains("[blocked]"))
+        #expect(text.contains("[failed]"))
         #expect(text.contains("agent_delegate.finish"))
+    }
+
+    @Test("Delegated task result uses interrupted run status as synthetic finish error")
+    func delegatedTaskResultUsesInterruptedRunStatusAsSyntheticFinishError() async {
+        let service = CoreService(config: .test, persistenceBuilder: InMemoryCorePersistenceBuilder())
+        let events = [
+            AgentSessionEvent(
+                agentId: "test-agent",
+                sessionId: "session-child",
+                type: .runStatus,
+                runStatus: AgentRunStatusEvent(
+                    stage: .interrupted,
+                    label: "Incomplete",
+                    details: "Agent reached the tool turn limit before producing a final answer."
+                )
+            )
+        ]
+
+        let text = await service.delegatedTaskResultText(from: events)
+        #expect(text == "[failed] Delegated subagent ended before calling `agent_delegate.finish`.\nError: Agent reached the tool turn limit before producing a final answer.")
     }
 
     @Test("Delegated task result uses finish tool summary")

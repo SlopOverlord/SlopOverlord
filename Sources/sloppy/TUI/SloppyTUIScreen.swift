@@ -141,6 +141,7 @@ final class SloppyTUIScreen: @preconcurrency Component, @unchecked Sendable {
         SloppyTUISlashCommand("model", "Switch agent model"),
         SloppyTUISlashCommand("keybindings", "Show TUI quick reference"),
         SloppyTUISlashCommand("shortcuts", "Show TUI quick reference"),
+        SloppyTUISlashCommand("scrollback", "Configure timeline scrollback rendering"),
         SloppyTUISlashCommand("context", "Attach changes or git diff", argument: "changes|diff"),
         SloppyTUISlashCommand("tasks", "Show project tasks"),
         SloppyTUISlashCommand("mcps", "Show MCP server statuses"),
@@ -180,6 +181,7 @@ final class SloppyTUIScreen: @preconcurrency Component, @unchecked Sendable {
         "model",
         "keybindings",
         "shortcuts",
+        "scrollback",
         "context",
         "tasks",
         "mcps",
@@ -226,6 +228,7 @@ final class SloppyTUIScreen: @preconcurrency Component, @unchecked Sendable {
     private var selectedModel = "default"
     private var selectedModelContextWindowTokens = 0
     private var reasoningEffort: ReasoningEffort?
+    private var effortSliderSelectionIndex: Int?
     private var skillSlashCommands: [SloppyTUISlashCommand] = []
     private var skillSlashCommandNames: Set<String> = []
     private var commandPaletteSelection = 0
@@ -318,6 +321,9 @@ final class SloppyTUIScreen: @preconcurrency Component, @unchecked Sendable {
         }
         editor.onChange = { [weak self] value in
             self?.persistDraft(value)
+            if !Self.isReasoningEffortSelectorText(value) {
+                self?.effortSliderSelectionIndex = nil
+            }
             self?.projectFileSearchSelection = 0
             self?.projectFileSearchCache = nil
             self?.projectTaskSearchSelection = 0
@@ -391,6 +397,9 @@ final class SloppyTUIScreen: @preconcurrency Component, @unchecked Sendable {
             return
         }
         if handleActivePicker(input: input) {
+            return
+        }
+        if handleReasoningEffortSelector(input: input) {
             return
         }
         if handleCommandPalette(input: input) {
@@ -494,6 +503,12 @@ final class SloppyTUIScreen: @preconcurrency Component, @unchecked Sendable {
 
         if let picker = activePicker {
             composer.insert(contentsOf: SloppyTUITheme.pickerLines(width: width, picker: picker, maxVisible: 9), at: 0)
+        } else if reasoningEffortSelectorVisible {
+            composer.insert(contentsOf: SloppyTUITheme.reasoningEffortSliderLines(
+                width: width,
+                efforts: SloppyTUIReasoningEffortSelector.options,
+                selectedIndex: currentEffortSliderIndex
+            ), at: 0)
         } else if let palette = commandPaletteLines(width: width) {
             composer.insert(contentsOf: palette, at: 0)
         } else if let picker = projectTaskSearchPicker() {
@@ -657,6 +672,39 @@ final class SloppyTUIScreen: @preconcurrency Component, @unchecked Sendable {
         case .escape:
             editor.setText("")
             commandPaletteSelection = 0
+            requestRender()
+            return true
+        default:
+            return false
+        }
+    }
+
+    private func handleReasoningEffortSelector(input: TerminalInput) -> Bool {
+        guard reasoningEffortSelectorVisible else { return false }
+        guard case let .key(key, _) = input else { return false }
+
+        switch key {
+        case .arrowLeft, .arrowDown:
+            effortSliderSelectionIndex = SloppyTUIReasoningEffortSelector.movedIndex(
+                from: currentEffortSliderIndex,
+                delta: -1
+            )
+            requestRender()
+            return true
+        case .arrowRight, .arrowUp:
+            effortSliderSelectionIndex = SloppyTUIReasoningEffortSelector.movedIndex(
+                from: currentEffortSliderIndex,
+                delta: 1
+            )
+            requestRender()
+            return true
+        case .enter, .tab:
+            applyReasoningEffortSelection()
+            return true
+        case .escape:
+            effortSliderSelectionIndex = nil
+            editor.setText("")
+            persistDraft("")
             requestRender()
             return true
         default:
@@ -845,7 +893,7 @@ final class SloppyTUIScreen: @preconcurrency Component, @unchecked Sendable {
     }
 
     private func handleTimelineScroll(_ input: TerminalInput) -> Bool {
-        guard !usesNativeTimelineScroll else {
+        guard usesViewportTimelineScroll else {
             return false
         }
         guard case let .key(key, modifiers) = input else {
@@ -887,8 +935,10 @@ final class SloppyTUIScreen: @preconcurrency Component, @unchecked Sendable {
         requestRender()
     }
 
-    private var usesNativeTimelineScroll: Bool {
-        true
+    private var usesViewportTimelineScroll: Bool {
+        let width = terminal?.columns ?? 80
+        let totalLineCount = currentTimelineLineCount(width: width)
+        return resolvedTimelineScrollBehavior(totalLineCount: totalLineCount).usesViewport
     }
 
     private var commandPaletteVisible: Bool {
@@ -896,6 +946,20 @@ final class SloppyTUIScreen: @preconcurrency Component, @unchecked Sendable {
         guard value.hasPrefix("/") else { return false }
         guard !value.contains(" ") else { return false }
         return !value.contains("\n")
+    }
+
+    private var reasoningEffortSelectorVisible: Bool {
+        Self.isReasoningEffortSelectorText(editor.getText())
+    }
+
+    private var currentEffortSliderIndex: Int {
+        effortSliderSelectionIndex ?? SloppyTUIReasoningEffortSelector.index(for: reasoningEffort)
+    }
+
+    private static func isReasoningEffortSelectorText(_ value: String) -> Bool {
+        guard !value.contains("\n") else { return false }
+        let lowercased = value.lowercased()
+        return lowercased.trimmingCharacters(in: .whitespaces) == "/effort"
     }
 
     private var allSlashCommands: [SloppyTUISlashCommand] {
@@ -1254,6 +1318,10 @@ final class SloppyTUIScreen: @preconcurrency Component, @unchecked Sendable {
     private func applyCommandPaletteSelection(_ command: SloppyTUISlashCommand) {
         commandPaletteSelection = 0
         let raw = "/\(command.name)"
+        if command.name.lowercased() == "effort" {
+            showReasoningEffortSelector()
+            return
+        }
         if command.requiresArgument {
             editor.setText(raw + " ")
             requestRender()
@@ -1266,6 +1334,21 @@ final class SloppyTUIScreen: @preconcurrency Component, @unchecked Sendable {
         Task { @MainActor in
             await self.handleCommand(raw)
         }
+    }
+
+    private func showReasoningEffortSelector() {
+        effortSliderSelectionIndex = SloppyTUIReasoningEffortSelector.index(for: reasoningEffort)
+        editor.setText("/effort")
+        requestRender()
+    }
+
+    private func applyReasoningEffortSelection() {
+        let effort = SloppyTUIReasoningEffortSelector.effort(at: currentEffortSliderIndex)
+        reasoningEffort = effort
+        effortSliderSelectionIndex = nil
+        editor.setText("")
+        persistDraft("")
+        appendLocalCard("Reasoning effort set to `\(effort.rawValue)`.", autoDismissAfter: 6)
     }
 
     private func providerLabel(from model: String) -> String {
@@ -1472,6 +1555,8 @@ final class SloppyTUIScreen: @preconcurrency Component, @unchecked Sendable {
             showHelp()
         case "keybindings", "shortcuts":
             showQuickReference()
+        case "scrollback":
+            configureScrollback(args)
         case "status":
             await showStatus()
         case "pet":
@@ -1581,7 +1666,7 @@ final class SloppyTUIScreen: @preconcurrency Component, @unchecked Sendable {
         Use `/subagents` to pick a specific child session.
 
         ## History scroll
-        Scroll with the terminal's normal mouse or trackpad scrollback. Opening a session renders the whole transcript into scrollback instead of clipping it to the current viewport.
+        `/scrollback` controls timeline rendering. `auto` keeps native scrollback for modest histories and switches to the fast viewport when a chat gets large.
 
         ## Tips
         - Esc interrupts the current run after picker overlays are closed.
@@ -1983,8 +2068,7 @@ final class SloppyTUIScreen: @preconcurrency Component, @unchecked Sendable {
     private func setReasoningEffort(_ raw: String?) {
         let value = raw?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() ?? ""
         guard !value.isEmpty else {
-            let current = reasoningEffort?.rawValue ?? "default"
-            appendLocalCard("Current reasoning effort: `\(current)`. Use `/effort low`, `/effort medium`, `/effort high`, or `/effort default`.")
+            showReasoningEffortSelector()
             return
         }
         if value == "default" || value == "none" || value == "off" {
@@ -1993,7 +2077,7 @@ final class SloppyTUIScreen: @preconcurrency Component, @unchecked Sendable {
             return
         }
         guard let effort = ReasoningEffort(rawValue: value) else {
-            appendLocalCard("Unknown effort `\(value)`. Use low, medium, high, or default.")
+            appendLocalCard("Unknown effort `\(value)`. Use low, medium, high, default, or run `/effort` to pick interactively.")
             return
         }
         reasoningEffort = effort
@@ -2053,7 +2137,58 @@ final class SloppyTUIScreen: @preconcurrency Component, @unchecked Sendable {
         - model: `\(model)`
         - provider: `\(providerLabel(from: model))`
         - pet: \(petStatusSummary())
+        - scrollback: \(scrollbackStatusSummary())
         """, autoDismissAfter: 20)
+    }
+
+    private func configureScrollback(_ args: [String]) {
+        switch SloppyTUIScrollbackCommand.parse(args) {
+        case .status:
+            showScrollbackStatus()
+        case .update(let mode, let lineLimit):
+            state.scrollbackMode = mode
+            if let lineLimit {
+                state.scrollbackLineLimit = SloppyTUIScrollbackPolicy.normalizedLineLimit(lineLimit)
+            }
+            timelineScrollOffset = 0
+            stateStore.save(state)
+            appendLocalCard("""
+            ## Scrollback
+            - mode: `\(state.scrollbackMode.rawValue)`
+            - line limit: `\(state.scrollbackLineLimit)`
+            - behavior: \(scrollbackBehaviorDescription())
+            """, autoDismissAfter: 12)
+            refreshStaticChrome()
+        case .failure(let message):
+            appendLocalCard(message, autoDismissAfter: 10)
+        }
+    }
+
+    private func showScrollbackStatus() {
+        appendLocalCard("""
+        ## Scrollback
+        - mode: `\(state.scrollbackMode.rawValue)`
+        - line limit: `\(state.scrollbackLineLimit)`
+        - behavior: \(scrollbackBehaviorDescription())
+        \(SloppyTUIScrollbackCommand.usage)
+        """, autoDismissAfter: 16)
+    }
+
+    private func scrollbackStatusSummary() -> String {
+        "`\(state.scrollbackMode.rawValue)` limit \(state.scrollbackLineLimit)"
+    }
+
+    private func scrollbackBehaviorDescription() -> String {
+        switch state.scrollbackMode {
+        case .auto:
+            return "native scrollback until the timeline exceeds the limit, then fast viewport scrolling"
+        case .viewport:
+            return "fast internal viewport scrolling"
+        case .limited:
+            return "native scrollback capped to the most recent limit lines"
+        case .full:
+            return "full native scrollback without a render cap"
+        }
     }
 
     private func showPetStatus(toggle: Bool) {
@@ -2587,6 +2722,8 @@ final class SloppyTUIScreen: @preconcurrency Component, @unchecked Sendable {
 
     private func attachContext(_ mode: String?) async {
         switch mode?.lowercased() {
+        case nil, "":
+            await showContextUsage()
         case "changes":
             guard let lastChangeBatch else {
                 appendLocalCard("No workspace change batch yet.")
@@ -2608,8 +2745,56 @@ final class SloppyTUIScreen: @preconcurrency Component, @unchecked Sendable {
                 appendLocalCard("Could not read git diff: \(String(describing: error))")
             }
         default:
-            appendLocalCard("Use `/context changes` or `/context diff`.")
+            appendLocalCard("Use `/context`, `/context changes`, or `/context diff`.")
         }
+    }
+
+    private func showContextUsage() async {
+        await refreshTokenUsage(includeCost: false)
+        let config = try? await runtime.service.getAgentConfig(agentID: agent.id)
+        let model = config?.selectedModel ?? selectedModel
+        selectedModel = model
+        let models = config?.availableModels ?? []
+        let option = models.first { $0.id == model } ?? CoreService.providerModelOption(for: model)
+        let contextWindow = max(
+            contextWindowTokens(for: model, in: models),
+            CoreService.parseContextWindowString(option.contextWindow ?? "")
+        )
+        if contextWindow > 0 {
+            selectedModelContextWindowTokens = contextWindow
+            refreshStaticChrome()
+        }
+
+        let usage = await runtime.service.listTokenUsage(channelId: currentSessionChannelID())
+        let summary = SloppyTUIContextUsageSummary(
+            modelTitle: option.title,
+            modelID: model,
+            contextWindowLabel: option.contextWindow ?? (contextWindow > 0 ? formatContextWindowLabel(contextWindow) : "unknown"),
+            promptTokens: usage.totalPromptTokens,
+            completionTokens: usage.totalCompletionTokens,
+            totalTokens: usage.totalTokens,
+            contextWindowTokens: contextWindow,
+            pendingContextAttached: pendingContext?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false,
+            pendingUploadCount: pendingUploads.count
+        )
+        appendLocalCard(SloppyTUITheme.contextUsageMarkdown(summary), autoDismissAfter: 20)
+    }
+
+    private func formatContextWindowLabel(_ tokens: Int) -> String {
+        let value = max(0, tokens)
+        if value >= 1_000_000 {
+            let millions = Double(value) / 1_000_000
+            return millions.truncatingRemainder(dividingBy: 1) == 0
+                ? "\(Int(millions))M"
+                : String(format: "%.1fM", millions)
+        }
+        if value >= 1_000 {
+            let thousands = Double(value) / 1_000
+            return thousands.truncatingRemainder(dividingBy: 1) == 0
+                ? "\(Int(thousands))K"
+                : String(format: "%.1fK", thousands)
+        }
+        return "\(value)"
     }
 
     private func reloadProjectForTaskAutocompleteIfNeeded() {
@@ -3377,6 +3562,15 @@ final class SloppyTUIScreen: @preconcurrency Component, @unchecked Sendable {
     }
 
     private func renderTimelineBlocks(width: Int, height: Int) -> [String] {
+        let segments = timelineSegments(width: width)
+        if segments.isEmpty {
+            return timeline.render(width: width)
+        }
+
+        return visibleTimelineLines(segments, height: height)
+    }
+
+    private func timelineSegments(width: Int) -> [[String]] {
         let sessionTimeline = cachedSessionTimelineLines(width: width)
         let dynamicBlocks = liveAssistantBlocks() + queuedMessageBlocks() + localCards.map(\.block)
         let dynamicLines = renderTimelineLines(dynamicBlocks, width: width)
@@ -3406,11 +3600,15 @@ final class SloppyTUIScreen: @preconcurrency Component, @unchecked Sendable {
             ])
         }
 
-        if segments.isEmpty {
-            return timeline.render(width: width)
-        }
+        return segments
+    }
 
-        return visibleTimelineLines(segments, height: height)
+    private func currentTimelineLineCount(width: Int) -> Int {
+        let segments = timelineSegments(width: width)
+        guard !segments.isEmpty else {
+            return timeline.render(width: width).count
+        }
+        return segments.reduce(0) { $0 + $1.count }
     }
 
     private func cachedSessionTimelineLines(width: Int) -> (lines: [String], containsToolTranscriptBlock: Bool) {
@@ -3642,12 +3840,16 @@ final class SloppyTUIScreen: @preconcurrency Component, @unchecked Sendable {
 
     private func visibleTimelineLines(_ segments: [[String]], height: Int) -> [String] {
         lastTimelineViewportHeight = max(1, height)
-        guard !usesNativeTimelineScroll else {
+        let lineCount = segments.reduce(0) { $0 + $1.count }
+        let behavior = resolvedTimelineScrollBehavior(totalLineCount: lineCount)
+        switch behavior {
+        case .native:
             timelineScrollOffset = 0
-            return segments.flatMap { $0 }
+            let range = SloppyTUIScrollbackPolicy.nativeLineRange(behavior: behavior, totalLineCount: lineCount) ?? 0..<lineCount
+            return slicedTimelineLines(segments, start: range.lowerBound, end: range.upperBound)
+        case .viewport:
+            return clippedTimelineLines(segments, height: height)
         }
-
-        return clippedTimelineLines(segments, height: height)
     }
 
     private func clippedTimelineLines(_ segments: [[String]], height: Int) -> [String] {
@@ -3661,8 +3863,12 @@ final class SloppyTUIScreen: @preconcurrency Component, @unchecked Sendable {
         timelineScrollOffset = min(max(0, timelineScrollOffset), maxOffset)
         let end = lineCount - timelineScrollOffset
         let start = max(0, end - height)
+        return slicedTimelineLines(segments, start: start, end: end)
+    }
+
+    private func slicedTimelineLines(_ segments: [[String]], start: Int, end: Int) -> [String] {
         var visible: [String] = []
-        visible.reserveCapacity(height)
+        visible.reserveCapacity(max(0, end - start))
         var segmentStart = 0
         for segment in segments {
             let segmentEnd = segmentStart + segment.count
@@ -3680,6 +3886,14 @@ final class SloppyTUIScreen: @preconcurrency Component, @unchecked Sendable {
             }
         }
         return visible
+    }
+
+    private func resolvedTimelineScrollBehavior(totalLineCount: Int) -> SloppyTUITimelineScrollBehavior {
+        SloppyTUIScrollbackPolicy.behavior(
+            mode: state.scrollbackMode,
+            lineLimit: state.scrollbackLineLimit,
+            totalLineCount: totalLineCount
+        )
     }
 
     private func renderMarkdown(_ text: String, width: Int) -> [String] {

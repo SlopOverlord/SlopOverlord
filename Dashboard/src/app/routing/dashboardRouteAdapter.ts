@@ -40,7 +40,7 @@ export interface DashboardRoute {
   agentInitialChatSessionId: string | null;
   sessionAgentId: string | null;
   sessionId: string | null;
-  /** Project-scoped agent chat (sidebar rail). */
+  /** Project-scoped agent chat in /projects/:projectId/chat. */
   chatProjectId: string | null;
   chatAgentId: string | null;
   chatSessionId: string | null;
@@ -82,7 +82,7 @@ export function normalizeProjectTab(value: string): ProjectTab {
 }
 
 export function parseRouteFromPath(pathname: string): DashboardRoute {
-  const [sectionRaw = "", sectionArgRaw = "", sectionArg2Raw = "", sectionArg3Raw = ""] = pathname
+  const [sectionRaw = "", sectionArgRaw = "", sectionArg2Raw = "", sectionArg3Raw = "", sectionArg4Raw = ""] = pathname
     .split("/")
     .map((part) => part.trim())
     .filter(Boolean);
@@ -111,13 +111,14 @@ export function parseRouteFromPath(pathname: string): DashboardRoute {
   const sectionArg = decodePathSegment(sectionArgRaw);
   const sectionArg2 = decodePathSegment(sectionArg2Raw);
   const sectionArg3 = decodePathSegment(sectionArg3Raw);
+  const sectionArg4 = decodePathSegment(sectionArg4Raw);
 
   if (section === "chats") {
     return {
-      section: "chats",
+      section: "projects",
       configSection: null,
-      projectId: null,
-      projectTab: null,
+      projectId: sectionArg || null,
+      projectTab: sectionArg ? "chat" : null,
       projectTaskReference: null,
       agentId: null,
       agentTab: null,
@@ -157,6 +158,9 @@ export function parseRouteFromPath(pathname: string): DashboardRoute {
   const projectId = section === "projects" && sectionArg ? sectionArg : null;
   const projectTab = section === "projects" && projectId ? normalizeProjectTab(sectionArg2Lower) : null;
   const projectTaskReference = section === "projects" && (projectTab === "tasks" || projectTab === "review") ? sectionArg3 || null : null;
+  const chatProjectId = section === "projects" && projectTab === "chat" && projectId ? projectId : null;
+  const chatAgentId = chatProjectId ? sectionArg3 || null : null;
+  const chatSessionId = chatProjectId && chatAgentId ? sectionArg4 || null : null;
   const agentId = section === "agents" && sectionArg ? sectionArg : null;
   const agentTab = section === "agents" && agentId ? normalizeAgentTab(sectionArg2Lower) : null;
   const agentInitialChatSessionId = section === "agents" && agentTab === "chat" && sectionArg3 ? sectionArg3 : null;
@@ -177,9 +181,9 @@ export function parseRouteFromPath(pathname: string): DashboardRoute {
     agentInitialChatSessionId,
     sessionAgentId,
     sessionId,
-    chatProjectId: null,
-    chatAgentId: null,
-    chatSessionId: null
+    chatProjectId,
+    chatAgentId,
+    chatSessionId
   };
 }
 
@@ -213,6 +217,12 @@ export function buildPathFromRoute(route: DashboardRoute) {
       nextPathname = `/projects/${encodeURIComponent(route.projectId)}`;
       if (route.projectTab && route.projectTab !== DEFAULT_PROJECT_TAB) {
         nextPathname = `${nextPathname}/${route.projectTab}`;
+        if (route.projectTab === "chat" && route.chatAgentId) {
+          nextPathname = `${nextPathname}/${encodeURIComponent(route.chatAgentId)}`;
+          if (route.chatSessionId) {
+            nextPathname = `${nextPathname}/${encodeURIComponent(route.chatSessionId)}`;
+          }
+        }
       }
     }
   }

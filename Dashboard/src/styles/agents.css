@@ -853,6 +853,7 @@ body.agent-chat-no-page-scroll .page {
 .agent-chat-sidebar {
   display: flex;
   flex-direction: column;
+  min-width: 0;
   border-right: 1px solid var(--line);
   background: var(--surface);
   overflow: hidden;
@@ -1216,6 +1217,7 @@ body.agent-chat-no-page-scroll .page {
 .agent-chat-main-area {
   display: flex;
   flex-direction: column;
+  min-width: 0;
   min-height: 0;
   overflow: hidden;
 }
@@ -1225,6 +1227,7 @@ body.agent-chat-no-page-scroll .page {
   justify-content: space-between;
   align-items: center;
   gap: 10px;
+  min-width: 0;
   padding: 12px 16px;
   border-bottom: 1px solid var(--line);
   background: var(--surface);
@@ -1234,6 +1237,7 @@ body.agent-chat-no-page-scroll .page {
   display: flex;
   align-items: center;
   gap: 8px;
+  flex: 1 1 auto;
   font-weight: 600;
   font-size: 0.9rem;
   color: var(--text);
@@ -1656,6 +1660,7 @@ body.agent-chat-no-page-scroll .page {
 .agent-chat-workspace {
   position: relative;
   flex: 1;
+  min-width: 0;
   min-height: 0;
   display: block;
   overflow: hidden;
@@ -1666,6 +1671,7 @@ body.agent-chat-no-page-scroll .page {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
   height: 100%;
+  min-width: 0;
   min-height: 0;
 }
 
@@ -1674,6 +1680,7 @@ body.agent-chat-no-page-scroll .page {
 }
 
 .agent-chat-thread {
+  min-width: 0;
   min-height: 0;
   display: flex;
   flex-direction: column;
@@ -1729,9 +1736,17 @@ body.agent-chat-no-page-scroll .page {
   gap: 18px;
   align-content: start;
   flex: 1;
+  min-width: 0;
   min-height: 0;
   overflow: auto;
+  overflow-x: hidden;
   overscroll-behavior: contain;
+}
+
+.agent-chat-events > * {
+  min-width: 0;
+  max-width: 100%;
+  box-sizing: border-box;
 }
 
 .agent-chat-subagent-panel .agent-chat-events {
@@ -1774,6 +1789,7 @@ body.agent-chat-no-page-scroll .page {
 
 .agent-chat-compose-sticky-wrap {
   flex-shrink: 0;
+  min-width: 0;
 }
 
 .agent-chat-tool-approval-banner {
@@ -1781,6 +1797,7 @@ body.agent-chat-no-page-scroll .page {
   grid-template-columns: auto minmax(0, 1fr) auto;
   gap: 12px;
   align-items: start;
+  min-width: 0;
   margin-bottom: 8px;
   padding: 10px 12px;
   border: 1px solid rgba(245, 180, 80, 0.55);
@@ -1984,12 +2001,15 @@ body.agent-chat-no-page-scroll .page {
 .agent-chat-compose-shell {
   display: grid;
   gap: 8px;
+  min-width: 0;
 }
 
 .agent-chat-message {
   display: grid;
   gap: 8px;
+  min-width: 0;
   max-width: min(760px, 94%);
+  box-sizing: border-box;
 }
 
 .agent-chat-message.user {
@@ -2005,6 +2025,7 @@ body.agent-chat-no-page-scroll .page {
 .agent-chat-message.assistant {
   margin-right: auto;
   padding: 0;
+  width: min(760px, 94%);
 }
 
 .agent-chat-stream-indicator {
@@ -2042,6 +2063,7 @@ body.agent-chat-no-page-scroll .page {
 .agent-chat-message.system {
   margin-right: auto;
   padding: 0;
+  width: min(760px, 94%);
 }
 
 .agent-chat-message-head {
@@ -2051,6 +2073,7 @@ body.agent-chat-no-page-scroll .page {
 .agent-chat-message-body {
   display: grid;
   gap: 6px;
+  min-width: 0;
 }
 
 .agent-chat-message-body.user {
@@ -2061,12 +2084,14 @@ body.agent-chat-no-page-scroll .page {
 
 .agent-chat-tech-entry {
   width: 100%;
+  min-width: 0;
   display: grid;
   gap: 8px;
 }
 
 .agent-chat-tech-group {
   width: 100%;
+  min-width: 0;
   display: grid;
   gap: 4px;
 }
@@ -2074,6 +2099,7 @@ body.agent-chat-no-page-scroll .page {
 .agent-chat-tech-group-body {
   display: grid;
   gap: 4px;
+  min-width: 0;
   padding-left: 12px;
   border-left: 1px solid var(--line);
   margin-left: 4px;
@@ -2086,6 +2112,7 @@ body.agent-chat-no-page-scroll .page {
   display: inline-flex;
   align-items: center;
   gap: 4px;
+  max-width: 100%;
   color: var(--muted);
   font-size: 0.82rem;
   line-height: 1.15;
@@ -2094,6 +2121,9 @@ body.agent-chat-no-page-scroll .page {
 
 .agent-chat-tech-trigger-label {
   position: relative;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .agent-chat-tech-trigger-time {
@@ -2148,15 +2178,19 @@ body.agent-chat-no-page-scroll .page {
 
 .agent-chat-technical {
   width: 100%;
+  min-width: 0;
   max-width: none;
 }
 
 .agent-chat-approval-card {
   display: grid;
-  grid-template-columns: auto 1fr;
+  grid-template-columns: auto minmax(0, 1fr);
   gap: 10px;
   align-items: start;
   width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  box-sizing: border-box;
   padding: 12px 14px;
   border: 1px solid rgba(245, 180, 80, 0.55);
   background: rgba(245, 180, 80, 0.1);
@@ -2189,11 +2223,18 @@ body.agent-chat-no-page-scroll .page {
   padding: 10px 12px;
   display: grid;
   gap: 10px;
+  min-width: 0;
+  max-width: 100%;
+  box-sizing: border-box;
+  overflow: hidden;
   animation: agent-chat-technical-expand 0.2s ease-out;
 }
 
 .agent-build-progress {
   width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  box-sizing: border-box;
   padding: 12px 14px;
   border: 1px solid #31384a;
   background: var(--surface-2);
@@ -2317,6 +2358,9 @@ body.agent-chat-no-page-scroll .page {
   border: 1px solid #2f3547;
   background: #222735;
   border-radius: 0;
+  min-width: 0;
+  max-width: 100%;
+  box-sizing: border-box;
   overflow: hidden;
 }
 
@@ -2342,6 +2386,7 @@ body.agent-chat-no-page-scroll .page {
   display: inline-flex;
   align-items: center;
   gap: 8px;
+  flex: 1 1 auto;
   min-width: 0;
 }
 
@@ -2382,6 +2427,7 @@ body.agent-chat-no-page-scroll .page {
   padding: 10px 12px;
   display: grid;
   gap: 10px;
+  min-width: 0;
 }
 
 .agent-chat-expandable-text {
@@ -2396,6 +2442,9 @@ body.agent-chat-no-page-scroll .page {
   margin: 0;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
+  max-width: 100%;
+  overflow-x: auto;
+  box-sizing: border-box;
   color: var(--warn);
   font-size: 0.75rem;
   line-height: 1.35;
@@ -2490,6 +2539,9 @@ body.agent-chat-no-page-scroll .page {
 }
 
 .agent-chat-attachment {
+  min-width: 0;
+  max-width: 100%;
+  box-sizing: border-box;
   border-left: 2px solid #4ade80;
   border-radius: 0;
   padding: 7px 9px;
@@ -2528,6 +2580,7 @@ body.agent-chat-no-page-scroll .page {
 .agent-chat-compose {
   display: grid;
   gap: 6px;
+  min-width: 0;
   padding: 8px 12px;
   border: 1px solid #2c3140;
   border-radius: 0;
@@ -2603,10 +2656,12 @@ body.agent-chat-no-page-scroll .page {
 .agent-chat-compose-row {
   display: flex;
   align-items: flex-end;
+  min-width: 0;
 }
 
 .agent-chat-compose-input {
   flex: 1;
+  min-width: 0;
   width: auto;
   display: block;
   border: 0;

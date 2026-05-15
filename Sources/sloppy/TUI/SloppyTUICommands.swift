@@ -123,6 +123,53 @@ enum SloppyTUISlashCommandRouter {
     }
 }
 
+enum SloppyTUIScrollbackCommand: Equatable {
+    case status
+    case update(mode: SloppyTUIScrollbackMode, lineLimit: Int?)
+    case failure(String)
+
+    static let usage = "Usage: `/scrollback [status|auto [lines]|viewport|limited <lines>|full]`"
+
+    static func parse(_ args: [String]) -> SloppyTUIScrollbackCommand {
+        guard let rawMode = args.first?.lowercased() else {
+            return .status
+        }
+
+        switch rawMode {
+        case "status":
+            return args.count == 1 ? .status : .failure(usage)
+        case "auto":
+            guard args.count <= 2 else { return .failure(usage) }
+            if args.count == 2 {
+                guard let lineLimit = parseLineLimit(args[1]) else {
+                    return .failure("Scrollback line limit must be a positive integer.\n\n\(usage)")
+                }
+                return .update(mode: .auto, lineLimit: lineLimit)
+            }
+            return .update(mode: .auto, lineLimit: nil)
+        case "viewport":
+            return args.count == 1 ? .update(mode: .viewport, lineLimit: nil) : .failure(usage)
+        case "limited":
+            guard args.count == 2 else { return .failure(usage) }
+            guard let lineLimit = parseLineLimit(args[1]) else {
+                return .failure("Scrollback line limit must be a positive integer.\n\n\(usage)")
+            }
+            return .update(mode: .limited, lineLimit: lineLimit)
+        case "full":
+            return args.count == 1 ? .update(mode: .full, lineLimit: nil) : .failure(usage)
+        default:
+            return .failure(usage)
+        }
+    }
+
+    private static func parseLineLimit(_ raw: String) -> Int? {
+        guard let value = Int(raw), value > 0 else {
+            return nil
+        }
+        return value
+    }
+}
+
 struct SloppyTUIDoubleEscapeDetector {
     static let defaultInterval: TimeInterval = 0.75
 

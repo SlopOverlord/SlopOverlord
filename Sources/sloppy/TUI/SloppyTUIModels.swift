@@ -80,6 +80,27 @@ struct SloppyTUIPicker {
     }
 }
 
+enum SloppyTUIReasoningEffortSelector {
+    static let options = ReasoningEffort.allCases
+
+    static func index(for effort: ReasoningEffort?) -> Int {
+        guard let effort,
+              let index = options.firstIndex(of: effort)
+        else {
+            return options.firstIndex(of: .medium) ?? 0
+        }
+        return index
+    }
+
+    static func effort(at index: Int) -> ReasoningEffort {
+        options[max(0, min(index, options.count - 1))]
+    }
+
+    static func movedIndex(from index: Int, delta: Int) -> Int {
+        max(0, min(index + delta, options.count - 1))
+    }
+}
+
 struct SloppyTUILocalCard {
     var id: Int
     var block: SloppyTUITimelineBlock
@@ -132,6 +153,54 @@ struct SloppyTUITokenUsageSummary: Equatable {
             return nil
         }
         return min(100, Int(((Double(totalTokens) / Double(contextWindowTokens)) * 100).rounded()))
+    }
+}
+
+struct SloppyTUIContextUsageSummary: Equatable {
+    var modelTitle: String
+    var modelID: String
+    var contextWindowLabel: String
+    var promptTokens: Int
+    var completionTokens: Int
+    var totalTokens: Int
+    var contextWindowTokens: Int
+    var pendingContextAttached: Bool
+    var pendingUploadCount: Int
+
+    var usagePercent: Int? {
+        guard contextWindowTokens > 0 else {
+            return nil
+        }
+        return min(100, Int(((Double(totalTokens) / Double(contextWindowTokens)) * 100).rounded()))
+    }
+
+    var promptPercent: Double? {
+        percent(promptTokens)
+    }
+
+    var completionPercent: Double? {
+        percent(completionTokens)
+    }
+
+    var freeTokens: Int? {
+        guard contextWindowTokens > 0 else {
+            return nil
+        }
+        return max(0, contextWindowTokens - totalTokens)
+    }
+
+    var freePercent: Double? {
+        guard let freeTokens else {
+            return nil
+        }
+        return percent(freeTokens)
+    }
+
+    private func percent(_ tokens: Int) -> Double? {
+        guard contextWindowTokens > 0 else {
+            return nil
+        }
+        return min(100, (Double(max(0, tokens)) / Double(contextWindowTokens)) * 100)
     }
 }
 

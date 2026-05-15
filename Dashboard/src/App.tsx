@@ -37,7 +37,6 @@ import {
   setStoredApiBaseOverride
 } from "./shared/api/httpClient";
 import { fetchProjects } from "./api";
-import { ProjectChatsView } from "./features/project-chats/ProjectChatsView";
 
 interface SidebarItem {
   id: string;
@@ -134,13 +133,13 @@ function DashboardShell({
     refreshSidebarProjects();
   }, [refreshSidebarProjects]);
 
-  /** If /chats route targets a project missing from the rail (e.g. created before refresh), refetch once. */
+  /** If a project chat route targets a project missing from the rail (e.g. created before refresh), refetch once. */
   useEffect(() => {
-    if (route.section !== "chats" || !route.chatProjectId) {
+    if (route.section !== "projects" || route.projectTab !== "chat" || !route.projectId) {
       sidebarChatRepairRef.current = null;
       return;
     }
-    const pid = String(route.chatProjectId).trim();
+    const pid = String(route.projectId).trim();
     if (!pid) {
       return;
     }
@@ -154,7 +153,7 @@ function DashboardShell({
     }
     sidebarChatRepairRef.current = pid;
     refreshSidebarProjects();
-  }, [route.section, route.chatProjectId, sidebarProjects, refreshSidebarProjects]);
+  }, [route.section, route.projectId, route.projectTab, sidebarProjects, refreshSidebarProjects]);
 
   useEffect(() => {
     const mediaQuery = window.matchMedia("(min-width: 1001px)");
@@ -275,13 +274,15 @@ function DashboardShell({
           routeProjectId={route.projectId}
           routeProjectTab={route.projectTab}
           routeProjectTaskReference={route.projectTaskReference}
+          routeProjectChatAgentId={route.projectTab === "chat" ? route.chatAgentId : null}
+          routeProjectChatSessionId={route.projectTab === "chat" ? route.chatSessionId : null}
           onRouteProjectChange={onProjectRouteChange as any}
+          onRouteProjectChatChange={(projectId: string, agentId: string | null, sessionId: string | null) => {
+            setChatsRoute(projectId, agentId, sessionId);
+          }}
           onSidebarProjectsListChanged={refreshSidebarProjects}
           onNavigateToChannelSession={(sessionId: string) => {
             setSessionRoute(sessionId);
-          }}
-          onNavigateToAgentChatSession={(agentId: string, sessionId: string) => {
-            onAgentRouteChange(agentId, "chat", sessionId);
           }}
         />
       )
@@ -338,9 +339,7 @@ function DashboardShell({
 
   const isNotFound = route.section === "not_found";
   const activeProjectId =
-    route.section === "chats"
-      ? route.chatProjectId
-      : (typeof route.projectId === "string" && route.projectId.trim().length > 0 ? route.projectId : null);
+    typeof route.projectId === "string" && route.projectId.trim().length > 0 ? route.projectId : null;
   const activeProjectRecord =
     activeProjectId != null
       ? sidebarProjects.find((project) => String((project as AnyRecord)?.id || "").trim() === activeProjectId)
@@ -348,11 +347,8 @@ function DashboardShell({
   const activeProjectRepoPath = activeProjectRecord
     ? String((activeProjectRecord as AnyRecord)?.repoPath || "").trim() || null
     : null;
-  /** Project chat lives under /chats — do not mark a main nav tab active; the project rail shows context. */
   const sidebarActiveItemId =
-    route.section === "chats"
-      ? null
-      : (sidebarItems.find((item) => item.id === route.section)?.id ?? sidebarItems[0].id);
+    sidebarItems.find((item) => item.id === route.section)?.id ?? sidebarItems[0].id;
   const pageContent = isNotFound ? (
     <NotFoundView />
   ) : route.section === "sessions" ? (
@@ -360,8 +356,6 @@ function DashboardShell({
       sessionId={route.sessionId}
       onNavigateBack={() => setSection("overview")}
     />
-  ) : route.section === "chats" ? (
-    <ProjectChatsView route={route} setChatsRoute={setChatsRoute} projects={sidebarProjects} />
   ) : (
     (sidebarItems.find((item) => item.id === route.section) || sidebarItems[0]).content
   );
@@ -384,7 +378,7 @@ function DashboardShell({
         isMobileOpen={mobileSidebarOpen}
         onRequestClose={() => setMobileSidebarOpen(false)}
         projectRailProjects={sidebarProjects}
-        selectedChatProjectId={route.section === "chats" ? route.chatProjectId : null}
+        selectedChatProjectId={route.section === "projects" && route.projectTab === "chat" ? route.projectId : null}
         onSelectChatProject={(projectId: string) => {
           setChatsRoute(projectId, null, null);
         }}

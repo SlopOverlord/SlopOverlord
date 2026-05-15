@@ -59,7 +59,7 @@ export function useDashboardRoute(): DashboardRouteController {
       ...current,
       section: nextSection,
       agentInitialChatSessionId: nextSection === "agents" ? current.agentInitialChatSessionId : null,
-      ...(nextSection !== "chats"
+      ...(nextSection !== "projects"
         ? { chatProjectId: null, chatAgentId: null, chatSessionId: null }
         : {})
     }));
@@ -89,7 +89,8 @@ export function useDashboardRoute(): DashboardRouteController {
         projectTab: normalizedProjectTab,
         projectTaskReference: normalizedTaskReference,
         agentInitialChatSessionId: null,
-        chatProjectId: null,
+        chatProjectId:
+          normalizedProjectID && normalizedProjectTab === "chat" ? normalizedProjectID : null,
         chatAgentId: null,
         chatSessionId: null
       }));
@@ -149,14 +150,14 @@ export function useDashboardRoute(): DashboardRouteController {
 
       setRoute((current) => ({
         ...current,
-        section: "chats",
+        section: "projects",
+        projectId: normalizedProjectID,
+        projectTab: normalizedProjectID ? "chat" : null,
+        projectTaskReference: null,
         chatProjectId: normalizedProjectID,
         chatAgentId: normalizedAgentID,
         chatSessionId: normalizedSessionID,
-        agentInitialChatSessionId: null,
-        projectId: null,
-        projectTab: null,
-        projectTaskReference: null
+        agentInitialChatSessionId: null
       }));
     },
     []

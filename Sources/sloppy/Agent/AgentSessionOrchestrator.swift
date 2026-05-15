@@ -49,6 +49,7 @@ actor AgentSessionOrchestrator {
     private var projectBootstrapProvider: (@Sendable (String) async -> String?)?
 
     private var activeSessionRunChannels: Set<String> = []
+    private var activeSessionRunIDsByChannel: [String: UUID] = [:]
     private var interruptedSessionRunChannels: Set<String> = []
     private var streamedAssistantByChannel: [String: String] = [:]
     private var streamedAssistantLastPersistedByChannel: [String: String] = [:]
@@ -371,7 +372,9 @@ actor AgentSessionOrchestrator {
                     }
                 )
                 runtimeOutcome = SessionRuntimeOutcome(
-                    assistantText: result.assistantText.isEmpty ? "Done." : result.assistantText,
+                    assistantText: result.assistantText.isEmpty && result.stopReason != .cancelled
+                        ? "Done."
+                        : result.assistantText,
                     routeDecision: nil,
                     wasInterrupted: result.stopReason == .cancelled,
                     didResetContext: result.didResetContext,
@@ -383,8 +386,7 @@ actor AgentSessionOrchestrator {
                     finishedNaturally: result.stopReason != .cancelled,
                     hitTurnLimit: false,
                     toolErrors: [],
-                    lastAssistantText: result.assistantText,
-                    endedWithoutRequiredToolUse: false
+                    lastAssistantText: result.assistantText
                 )
             } catch {
                 throw OrchestratorError.storageFailure
@@ -510,12 +512,6 @@ actor AgentSessionOrchestrator {
                 stage: .interrupted,
                 label: "Incomplete",
                 details: "Agent reached the tool turn limit before producing a final answer."
-            )
-        } else if runtimeOutcome.endedWithoutRequiredToolUse {
-            completionStatus = AgentRunStatusEvent(
-                stage: .interrupted,
-                label: "Incomplete",
-                details: "Agent produced only a progress update without using tools."
             )
         } else {
             completionStatus = AgentRunStatusEvent(
@@ -755,7 +751,6 @@ actor AgentSessionOrchestrator {
         var hitTurnLimit: Bool
         var toolErrors: [ToolInvocationResult]
         var lastAssistantText: String
-        var endedWithoutRequiredToolUse: Bool
     }
 
     static func runtimeContent(_ content: String, mode: AgentChatMode?) -> String {
@@ -770,6 +765,7 @@ actor AgentSessionOrchestrator {
         case .build:
             instruction = """
             Implement the requested change by writing code, editing files, and running the smallest relevant verification. 
+            If the request references a project task (for example `#SLOPPY-12`) or follows a Plan-mode task handoff, fetch the task details first with `project.task_get` or `project.task_list` and use its full description, acceptance criteria, and constraints as implementation context.
             Before meaningful edits, call `planning.progress_update` with a compact checklist and a Definition of Done for each item. Skip this only for trivial one-answer or no-change turns.
             Keep that checklist current: mark an item `in_progress` before working on it, mark it `done` only after concrete evidence or checks, mark it `blocked` with details when stuck, and use `skipped` when intentionally out of scope.
             Use `agents.delegate_task` only for independent, non-blocking side work. Pass self-contained context, narrow `toolsets`, keep parallel delegated tasks to at most 3, wait for summaries, and integrate their results before finishing.
@@ -781,8 +777,12 @@ actor AgentSessionOrchestrator {
             """
         case .plan:
             instruction = """
-            Produce a concise implementation or investigation plan. 
-            Do not edit files, run mutating commands, or make irreversible changes unless the authoritative runtime mode is build or debug for this turn.
+            Produce a concise implementation or investigation plan with enough detail for a later Build-mode turn to execute without losing context.
+            For substantial work, offer to capture the plan as a project task. If the user asks to create/save/track it, or if the task should clearly be handed off to Build mode, you may use `project.current`, `project.task_list`, `project.task_create`, and `project.task_update` in Plan mode.
+            Before creating a planning task, check existing active tasks with `project.task_list` when a current project is available, and update a matching task instead of creating a duplicate.
+            Project tasks created from Plan mode should include the goal, scope, relevant files or modules, proposed steps, acceptance criteria, verification commands, risks/open questions, and any user decisions that Build mode must preserve.
+            Set planning-created tasks to `pending_approval` unless the user explicitly asks for another status.
+            Do not edit files, run code-changing commands, or make irreversible non-task changes unless the authoritative runtime mode is build or debug for this turn.
             """
         case .debug:
             instruction = """
@@ -830,7 +830,9 @@ actor AgentSessionOrchestrator {
         mode: AgentChatMode
     ) async -> SessionRuntimeOutcome {
         let channelID = sessionChannelID(agentID: agentID, sessionID: sessionID)
+        let runID = UUID()
         activeSessionRunChannels.insert(channelID)
+        activeSessionRunIDsByChannel[channelID] = runID
         interruptedSessionRunChannels.remove(channelID)
         streamedAssistantByChannel[channelID] = ""
         streamedAssistantLastPersistedByChannel[channelID] = ""
@@ -844,7 +846,7 @@ actor AgentSessionOrchestrator {
 
         let messageContent = content.isEmpty ? "User attached files." : content
         let toolInvokerRecordsEvents = self.toolInvokerRecordsEvents
-        let nativeLoopConfig = NativeAgentLoopConfig(maxToolRounds: 30)
+        let nativeLoopConfig = NativeAgentLoopConfig(maxToolRounds: 60)
         let nativeLoopOutcomeBox = NativeAgentLoopOutcomeBox()
         let routeDecision = await runtime.postMessage(
             channelId: channelID,
@@ -862,7 +864,8 @@ actor AgentSessionOrchestrator {
                     agentID: agentID,
                     sessionID: sessionID,
                     channelID: channelID,
-                    partialText: partialText
+                    partialText: partialText,
+                    runID: runID
                 )
             },
             toolInvoker: { [weak self] toolRequest in
@@ -876,6 +879,10 @@ actor AgentSessionOrchestrator {
                             retryable: true
                         )
                     )
+                }
+
+                guard await self.shouldContinueSessionRun(channelID: channelID, runID: runID) else {
+                    return Self.cancelledToolResult(tool: toolRequest.tool)
                 }
 
                 await self.markSessionRunToolDriven(channelID: channelID)
@@ -907,7 +914,13 @@ actor AgentSessionOrchestrator {
                 )
 
                 if toolRequest.tool == SessionCompleteTool.toolName {
+                    guard await self.shouldContinueSessionRun(channelID: channelID, runID: runID) else {
+                        return Self.cancelledToolResult(tool: toolRequest.tool)
+                    }
                     let result = await self.completeActiveSessionRun(channelID: channelID, request: toolRequest)
+                    guard await self.shouldContinueSessionRun(channelID: channelID, runID: runID) else {
+                        return Self.cancelledToolResult(tool: toolRequest.tool)
+                    }
                     let toolResultEvent = AgentSessionEvent(
                         agentId: agentID,
                         sessionId: sessionID,
@@ -932,7 +945,13 @@ actor AgentSessionOrchestrator {
                     return result
                 }
 
+                guard await self.shouldContinueSessionRun(channelID: channelID, runID: runID) else {
+                    return Self.cancelledToolResult(tool: toolRequest.tool)
+                }
                 let result = await self.invokeTool(agentID: agentID, sessionID: sessionID, request: toolRequest, mode: mode)
+                guard await self.shouldContinueSessionRun(channelID: channelID, runID: runID) else {
+                    return Self.cancelledToolResult(tool: toolRequest.tool)
+                }
                 if result.ok,
                    result.tool == "planning.request_input",
                    result.data?.asObject?["paused"]?.asBool == true,
@@ -992,6 +1011,7 @@ actor AgentSessionOrchestrator {
             },
             observationHandler: { [weak self] observation in
                 guard let self, case .thinking(let text) = observation else { return }
+                guard await self.shouldContinueSessionRun(channelID: channelID, runID: runID) else { return }
                 let thinkingEvent = AgentSessionEvent(
                     agentId: agentID,
                     sessionId: sessionID,
@@ -1018,21 +1038,17 @@ actor AgentSessionOrchestrator {
         let completionSummary = sessionCompletionSummaryByChannel[channelID]?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         let usedTools = toolDrivenSessionRunChannels.contains(channelID)
         let didExplicitlyComplete = completedSessionRunChannels.contains(channelID)
-        let endedWithoutRequiredToolUse = Self.isToollessProgressOnly(
-            mode: mode,
-            assistantText: !streamedAssistantText.isEmpty
-                ? streamedAssistantText
-                : (!assistantTextFromSnapshot.isEmpty ? assistantTextFromSnapshot : completionSummary),
-            usedTools: usedTools,
-            toolInvokerAvailable: toolInvoker != nil
-        )
+        let wasInterrupted = interruptedSessionRunChannels.contains(channelID)
+        let assistantText = !streamedAssistantText.isEmpty
+            ? streamedAssistantText
+            : (!assistantTextFromSnapshot.isEmpty
+                ? assistantTextFromSnapshot
+                : (!completionSummary.isEmpty ? completionSummary : (wasInterrupted ? "" : "Done.")))
 
         return SessionRuntimeOutcome(
-            assistantText: !streamedAssistantText.isEmpty
-                ? streamedAssistantText
-                : (!assistantTextFromSnapshot.isEmpty ? assistantTextFromSnapshot : (!completionSummary.isEmpty ? completionSummary : "Done.")),
+            assistantText: assistantText,
             routeDecision: routeDecision,
-            wasInterrupted: interruptedSessionRunChannels.contains(channelID),
+            wasInterrupted: wasInterrupted,
             didResetContext: false,
             pausedInputRequestID: pausedInputRequestByChannel[channelID],
             usedTools: usedTools,
@@ -1042,53 +1058,8 @@ actor AgentSessionOrchestrator {
             finishedNaturally: nativeLoopOutcome?.finishedNaturally ?? true,
             hitTurnLimit: nativeLoopOutcome?.hitTurnLimit ?? false,
             toolErrors: nativeLoopOutcome?.toolErrors ?? [],
-            lastAssistantText: nativeLoopOutcome?.lastAssistantText ?? "",
-            endedWithoutRequiredToolUse: endedWithoutRequiredToolUse
+            lastAssistantText: nativeLoopOutcome?.lastAssistantText ?? ""
         )
-    }
-
-    private static func isToollessProgressOnly(
-        mode: AgentChatMode,
-        assistantText: String,
-        usedTools: Bool,
-        toolInvokerAvailable: Bool
-    ) -> Bool {
-        guard toolInvokerAvailable, !usedTools else {
-            return false
-        }
-        guard mode == .build || mode == .debug else {
-            return false
-        }
-        let normalized = assistantText
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-            .lowercased()
-        guard !normalized.isEmpty, normalized.count <= 280 else {
-            return false
-        }
-
-        let prefixes = [
-            "изучаю",
-            "сейчас изучу",
-            "теперь изучу",
-            "посмотрю",
-            "сейчас посмотрю",
-            "проверю",
-            "сейчас проверю",
-            "начинаю",
-            "i'll inspect",
-            "i’ll inspect",
-            "i will inspect",
-            "i'll check",
-            "i’ll check",
-            "i will check",
-            "let me inspect",
-            "let me check",
-            "looking into",
-            "i'm going to",
-            "i’m going to",
-            "i am going to"
-        ]
-        return prefixes.contains { normalized.hasPrefix($0) }
     }
 
     private func logSessionRunCompletion(
@@ -1255,6 +1226,7 @@ actor AgentSessionOrchestrator {
 
     private func cleanupSessionRunTracking(channelID: String) {
         activeSessionRunChannels.remove(channelID)
+        activeSessionRunIDsByChannel.removeValue(forKey: channelID)
         interruptedSessionRunChannels.remove(channelID)
         streamedAssistantByChannel.removeValue(forKey: channelID)
         streamedAssistantLastPersistedByChannel.removeValue(forKey: channelID)
@@ -1297,8 +1269,13 @@ actor AgentSessionOrchestrator {
         agentID: String,
         sessionID: String,
         channelID: String,
-        partialText: String
+        partialText: String,
+        runID: UUID? = nil
     ) async -> Bool {
+        guard shouldContinueSessionRun(channelID: channelID, runID: runID) else {
+            return false
+        }
+
         let normalized = partialText.replacingOccurrences(of: "\r\n", with: "\n")
         streamedAssistantByChannel[channelID] = normalized
 
@@ -1306,7 +1283,26 @@ actor AgentSessionOrchestrator {
             await responseChunkObserver(agentID, sessionID, normalized)
         }
 
+        return shouldContinueSessionRun(channelID: channelID, runID: runID)
+    }
+
+    private func shouldContinueSessionRun(channelID: String, runID: UUID?) -> Bool {
+        if let runID, activeSessionRunIDsByChannel[channelID] != runID {
+            return false
+        }
         return !interruptedSessionRunChannels.contains(channelID)
+    }
+
+    private static func cancelledToolResult(tool: String) -> ToolInvocationResult {
+        ToolInvocationResult(
+            tool: tool,
+            ok: false,
+            error: ToolErrorPayload(
+                code: "cancelled",
+                message: "Tool invocation was cancelled because the session run was interrupted.",
+                retryable: true
+            )
+        )
     }
 
     private func isAssistantErrorText(_ text: String) -> Bool {

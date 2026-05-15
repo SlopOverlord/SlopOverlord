@@ -15,7 +15,10 @@ export function navigateToTaskScreen(taskReference: unknown): void {
     agentTab: null,
     agentInitialChatSessionId: null,
     sessionAgentId: null,
-    sessionId: null
+    sessionId: null,
+    chatProjectId: null,
+    chatAgentId: null,
+    chatSessionId: null
   });
   const nextPath = `${pathname}${window.location.search}${window.location.hash}`;
   if (window.location.pathname === pathname) {

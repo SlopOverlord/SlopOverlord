@@ -1,5 +1,64 @@
 import Foundation
 
+enum SloppyTUIScrollbackMode: String, Codable, Sendable, CaseIterable {
+    case auto
+    case viewport
+    case limited
+    case full
+}
+
+enum SloppyTUITimelineScrollBehavior: Equatable {
+    case native(limit: Int?)
+    case viewport
+
+    var usesViewport: Bool {
+        if case .viewport = self {
+            return true
+        }
+        return false
+    }
+}
+
+enum SloppyTUIScrollbackPolicy {
+    static let defaultLineLimit = 2_000
+
+    static func normalizedLineLimit(_ value: Int) -> Int {
+        max(1, value)
+    }
+
+    static func behavior(
+        mode: SloppyTUIScrollbackMode,
+        lineLimit: Int,
+        totalLineCount: Int
+    ) -> SloppyTUITimelineScrollBehavior {
+        let limit = normalizedLineLimit(lineLimit)
+        switch mode {
+        case .auto:
+            return totalLineCount > limit ? .viewport : .native(limit: limit)
+        case .viewport:
+            return .viewport
+        case .limited:
+            return .native(limit: limit)
+        case .full:
+            return .native(limit: nil)
+        }
+    }
+
+    static func nativeLineRange(
+        behavior: SloppyTUITimelineScrollBehavior,
+        totalLineCount: Int
+    ) -> Range<Int>? {
+        let total = max(0, totalLineCount)
+        switch behavior {
+        case .native(let limit):
+            let start = limit.map { max(0, total - normalizedLineLimit($0)) } ?? 0
+            return start..<total
+        case .viewport:
+            return nil
+        }
+    }
+}
+
 struct SloppyTUIState: Codable, Sendable {
     struct Selection: Codable, Sendable {
         var agentId: String
@@ -16,6 +75,8 @@ struct SloppyTUIState: Codable, Sendable {
     var sessionDirectories: [String: [String]]
     var petEnabled: Bool
     var welcomeTipCursor: Int
+    var scrollbackMode: SloppyTUIScrollbackMode
+    var scrollbackLineLimit: Int
 
     enum CodingKeys: String, CodingKey {
         case selections
@@ -23,6 +84,8 @@ struct SloppyTUIState: Codable, Sendable {
         case sessionDirectories
         case petEnabled
         case welcomeTipCursor
+        case scrollbackMode
+        case scrollbackLineLimit
     }
 
     init(
@@ -30,13 +93,17 @@ struct SloppyTUIState: Codable, Sendable {
         drafts: [String: String] = [:],
         sessionDirectories: [String: [String]] = [:],
         petEnabled: Bool = true,
-        welcomeTipCursor: Int = 0
+        welcomeTipCursor: Int = 0,
+        scrollbackMode: SloppyTUIScrollbackMode = .auto,
+        scrollbackLineLimit: Int = SloppyTUIScrollbackPolicy.defaultLineLimit
     ) {
         self.selections = selections
         self.drafts = drafts
         self.sessionDirectories = sessionDirectories
         self.petEnabled = petEnabled
         self.welcomeTipCursor = welcomeTipCursor
+        self.scrollbackMode = scrollbackMode
+        self.scrollbackLineLimit = SloppyTUIScrollbackPolicy.normalizedLineLimit(scrollbackLineLimit)
     }
 
     init(from decoder: Decoder) throws {
@@ -46,6 +113,10 @@ struct SloppyTUIState: Codable, Sendable {
         sessionDirectories = try container.decodeIfPresent([String: [String]].self, forKey: .sessionDirectories) ?? [:]
         petEnabled = try container.decodeIfPresent(Bool.self, forKey: .petEnabled) ?? true
         welcomeTipCursor = try container.decodeIfPresent(Int.self, forKey: .welcomeTipCursor) ?? 0
+        scrollbackMode = (try? container.decodeIfPresent(SloppyTUIScrollbackMode.self, forKey: .scrollbackMode)) ?? .auto
+        scrollbackLineLimit = SloppyTUIScrollbackPolicy.normalizedLineLimit(
+            (try? container.decodeIfPresent(Int.self, forKey: .scrollbackLineLimit)) ?? SloppyTUIScrollbackPolicy.defaultLineLimit
+        )
     }
 }
 

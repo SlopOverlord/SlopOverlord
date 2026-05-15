@@ -17,7 +17,7 @@ struct SloppyClientApp: App {
             RootShellView()
                 .theme(.sloppyDark)
 //                .debugOverlay()
-                .hotReloading()
+//                .hotReloading()
         }
         .windowMode(.windowed)
         .minimumSize(width: 1280, height: 800)

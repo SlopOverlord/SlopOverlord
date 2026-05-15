@@ -231,6 +231,44 @@ enum SloppyTUITheme {
         return String(format: "$%.2f", amount)
     }
 
+    private static func formatPercent(_ value: Double) -> String {
+        let percent = max(0, min(100, value))
+        if percent > 0, percent < 0.1 {
+            return String(format: "%.2f%%", percent)
+        }
+        if percent < 10 {
+            return String(format: "%.1f%%", percent)
+        }
+        return String(format: "%.0f%%", percent)
+    }
+
+    private static func contextUsageBar(_ summary: SloppyTUIContextUsageSummary) -> String {
+        let width = 20
+        guard summary.contextWindowTokens > 0 else {
+            return String(repeating: "⛶ ", count: width).trimmingCharacters(in: .whitespaces)
+        }
+
+        let filled = min(width, max(0, Int((Double(summary.totalTokens) / Double(summary.contextWindowTokens) * Double(width)).rounded())))
+        var promptCount = min(filled, Int((Double(summary.promptTokens) / Double(summary.contextWindowTokens) * Double(width)).rounded()))
+        var completionCount = min(max(0, filled - promptCount), Int((Double(summary.completionTokens) / Double(summary.contextWindowTokens) * Double(width)).rounded()))
+
+        if summary.promptTokens > 0, filled > 0, promptCount == 0 {
+            promptCount = 1
+        }
+        if summary.completionTokens > 0, filled > promptCount, completionCount == 0 {
+            completionCount = 1
+        }
+        if promptCount + completionCount > filled {
+            completionCount = max(0, filled - promptCount)
+        }
+
+        let freeCount = max(0, width - promptCount - completionCount)
+        let cells = Array(repeating: "⛁", count: promptCount)
+            + Array(repeating: "⛀", count: completionCount)
+            + Array(repeating: "⛶", count: freeCount)
+        return cells.joined(separator: " ")
+    }
+
     static func welcomeScreen(
         width: Int,
         cwd: String,
@@ -296,6 +334,47 @@ enum SloppyTUITheme {
     static func tokenUsageFooterLine(width: Int, summary: SloppyTUITokenUsageSummary) -> String {
         let text = "  " + tokenUsageStatus(summary)
         return applyPanelBackground(padded(fittedLine(text, width: width), width: width), width: width)
+    }
+
+    static func contextUsageMarkdown(_ summary: SloppyTUIContextUsageSummary) -> String {
+        let usagePercent = summary.usagePercent.map { "\($0)%" } ?? "unknown"
+        let contextLabel = summary.contextWindowLabel.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            ? "unknown context"
+            : summary.contextWindowLabel
+        let title = summary.modelTitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            ? summary.modelID
+            : summary.modelTitle
+        let bar = contextUsageBar(summary)
+        let promptPercent = summary.promptPercent.map(formatPercent) ?? "n/a"
+        let completionPercent = summary.completionPercent.map(formatPercent) ?? "n/a"
+        let freeText: String
+        if let freeTokens = summary.freeTokens,
+           let freePercent = summary.freePercent {
+            freeText = "\(formatTokenCountShort(freeTokens)) tokens (\(formatPercent(freePercent)))"
+        } else {
+            freeText = "unknown"
+        }
+        let pendingContext = summary.pendingContextAttached ? "yes" : "no"
+        let pendingUploads = summary.pendingUploadCount > 0 ? "\(summary.pendingUploadCount)" : "none"
+
+        return """
+        ## Context Usage
+        ```text
+        \(bar)  \(title) (\(contextLabel))
+        \(String(repeating: " ", count: 23))  \(summary.modelID)
+        \(String(repeating: " ", count: 23))  \(formatTokenCountShort(summary.totalTokens))/\(contextLabel.lowercased()) tokens (\(usagePercent))
+
+        Recorded session usage by category
+        ⛁ Prompt:     \(formatTokenCountShort(summary.promptTokens)) tokens (\(promptPercent))
+        ⛀ Completion: \(formatTokenCountShort(summary.completionTokens)) tokens (\(completionPercent))
+        ⛶ Free space: \(freeText)
+
+        Pending next-message context: \(pendingContext)
+        Pending uploads: \(pendingUploads)
+        ```
+
+        Attach workspace context with `/context changes` or `/context diff`.
+        """
     }
 
     static func highlightedComposerLines(_ lines: [String]) -> [String] {
@@ -659,6 +738,102 @@ enum SloppyTUITheme {
         return lines
     }
 
+    static func reasoningEffortSliderLines(
+        width: Int,
+        efforts: [ReasoningEffort],
+        selectedIndex: Int
+    ) -> [String] {
+        guard !efforts.isEmpty else { return [] }
+        let paletteWidth = max(1, min(max(1, width - 4), 96))
+        let left = max(0, (width - paletteWidth) / 2)
+        let indent = String(repeating: " ", count: left)
+        let innerWidth = max(1, paletteWidth - 4)
+        let sliderWidth = max(1, min(innerWidth, max(24, efforts.count * 12 - 1)))
+        let sliderLeft = max(0, (paletteWidth - sliderWidth) / 2)
+        let boundedIndex = max(0, min(selectedIndex, efforts.count - 1))
+
+        func panelLine(_ content: String) -> String {
+            let line = String(repeating: " ", count: sliderLeft) + fittedLine(content, width: sliderWidth)
+            return indent + applyPanelBackground(padded(line, width: paletteWidth), width: paletteWidth)
+        }
+
+        let labels = efforts.map(\.rawValue)
+        let hint = "←/→ to change effort · Enter to confirm"
+        return [
+            panelLine(reasoningEffortAxisLine(width: sliderWidth)),
+            panelLine(reasoningEffortTrackLine(width: sliderWidth, count: efforts.count, selectedIndex: boundedIndex)),
+            panelLine(reasoningEffortLabelLine(labels: labels, selectedIndex: boundedIndex, width: sliderWidth)),
+            indent + applyPanelBackground(padded("", width: paletteWidth), width: paletteWidth),
+            indent + applyPanelBackground(padded("  " + muted(hint), width: paletteWidth), width: paletteWidth),
+        ]
+    }
+
+    private static func reasoningEffortAxisLine(width: Int) -> String {
+        let left = "Speed"
+        let right = "Intelligence"
+        let leftWidth = VisibleWidth.measure(left)
+        let rightWidth = VisibleWidth.measure(right)
+        guard leftWidth + rightWidth + 1 <= width else {
+            return center(fittedLine(left + " / " + right, width: width), width: width)
+        }
+        let gap = width - leftWidth - rightWidth
+        return foreground(left) + String(repeating: " ", count: gap) + foreground(right)
+    }
+
+    private static func reasoningEffortTrackLine(width: Int, count: Int, selectedIndex: Int) -> String {
+        guard width > 1 else { return foreground("▲") }
+        let position = count <= 1
+            ? width / 2
+            : Int((Double(selectedIndex) * Double(width - 1) / Double(count - 1)).rounded())
+        let left = String(repeating: "─", count: max(0, position))
+        let right = String(repeating: "─", count: max(0, width - position - 1))
+        return muted(left) + foreground("▲") + muted(right)
+    }
+
+    private static func reasoningEffortLabelLine(labels: [String], selectedIndex: Int, width: Int) -> String {
+        let minimumWidth = labels.reduce(0) { $0 + VisibleWidth.measure($1) } + max(0, labels.count - 1)
+        guard minimumWidth <= width else {
+            let compact = labels.enumerated().map { index, label in
+                index == selectedIndex ? green(AnsiStyling.bold(label)) : muted(label)
+            }.joined(separator: " ")
+            return fittedLine(compact, width: width)
+        }
+
+        var starts = labels.enumerated().map { index, label -> Int in
+            let position = labels.count <= 1
+                ? width / 2
+                : Int((Double(index) * Double(width - 1) / Double(labels.count - 1)).rounded())
+            return max(0, position - (VisibleWidth.measure(label) / 2))
+        }
+
+        for index in starts.indices.dropFirst() {
+            let previousEnd = starts[index - 1] + VisibleWidth.measure(labels[index - 1])
+            starts[index] = max(starts[index], previousEnd + 1)
+        }
+        if let lastStart = starts.last,
+           let lastLabel = labels.last {
+            let overflow = lastStart + VisibleWidth.measure(lastLabel) - width
+            if overflow > 0 {
+                starts = starts.map { max(0, $0 - overflow) }
+            }
+        }
+
+        var line = ""
+        var cursor = 0
+        for (index, label) in labels.enumerated() {
+            let start = max(cursor, starts[index])
+            if start > cursor {
+                line += String(repeating: " ", count: start - cursor)
+            }
+            line += index == selectedIndex ? green(AnsiStyling.bold(label)) : muted(label)
+            cursor = start + VisibleWidth.measure(label)
+        }
+        if cursor < width {
+            line += String(repeating: " ", count: width - cursor)
+        }
+        return line
+    }
+
     static func quickReferenceLines(
         width: Int,
         shortcuts: [SloppyTUIShortcutDescriptor] = SloppyTUIShortcutCatalog.all
@@ -960,13 +1135,13 @@ enum SloppyTUITheme {
         let compact = contentWidth < 58
         let tips: [String] = compact
             ? [
-                "/help lists commands and native scroll behavior.",
+                "/scrollback tunes timeline history rendering.",
                 "Use /pet to toggle your Sloppie.",
                 "Type # to reference project tasks.",
                 "/undo and /redo are per-session.",
             ]
             : [
-                "Mouse or trackpad scroll uses your terminal's normal scrollback.",
+                "/scrollback auto keeps chats smooth when history gets large.",
                 "Use /pet to toggle your terminal Sloppie and peek at its current mood.",
                 "/undo and /redo restore file changes from the last completed TUI turn.",
                 "Type @path to attach project files as explicit context with autocomplete.",

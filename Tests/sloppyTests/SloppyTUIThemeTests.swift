@@ -183,6 +183,64 @@ func quickReferenceRendersNarrowSingleColumnLayout() {
 }
 
 @Test
+func reasoningEffortSliderRendersSelectionAndFitsWidth() {
+    let width = 72
+    let lines = SloppyTUITheme.reasoningEffortSliderLines(
+        width: width,
+        efforts: SloppyTUIReasoningEffortSelector.options,
+        selectedIndex: SloppyTUIReasoningEffortSelector.index(for: .medium)
+    )
+    let plain = lines.map(stripANSI).joined(separator: "\n")
+
+    #expect(plain.contains("Speed"))
+    #expect(plain.contains("Intelligence"))
+    #expect(plain.contains("low"))
+    #expect(plain.contains("medium"))
+    #expect(plain.contains("high"))
+    #expect(plain.contains("Enter to confirm"))
+
+    for line in lines {
+        #expect(VisibleWidth.measure(line) <= width)
+    }
+}
+
+@Test
+func reasoningEffortSelectorDefaultsToMediumAndClampsMovement() {
+    #expect(SloppyTUIReasoningEffortSelector.index(for: nil) == SloppyTUIReasoningEffortSelector.index(for: .medium))
+    #expect(SloppyTUIReasoningEffortSelector.effort(at: -10) == .low)
+    #expect(SloppyTUIReasoningEffortSelector.effort(at: 10) == .high)
+    #expect(SloppyTUIReasoningEffortSelector.movedIndex(from: 0, delta: -1) == 0)
+    #expect(SloppyTUIReasoningEffortSelector.movedIndex(from: 2, delta: 1) == 2)
+}
+
+@Test
+func contextUsageMarkdownShowsReadableTokenBreakdown() {
+    let markdown = SloppyTUITheme.contextUsageMarkdown(.init(
+        modelTitle: "Claude Opus 4.7",
+        modelID: "claude-opus-4-7",
+        contextWindowLabel: "1M",
+        promptTokens: 6_000,
+        completionTokens: 2_000,
+        totalTokens: 8_000,
+        contextWindowTokens: 1_000_000,
+        pendingContextAttached: true,
+        pendingUploadCount: 2
+    ))
+
+    #expect(markdown.contains("## Context Usage"))
+    #expect(markdown.contains("Claude Opus 4.7 (1M)"))
+    #expect(markdown.contains("claude-opus-4-7"))
+    #expect(markdown.contains("8.0K/1m tokens (1%)"))
+    #expect(markdown.contains("Prompt:     6.0K tokens"))
+    #expect(markdown.contains("Completion: 2.0K tokens"))
+    #expect(markdown.contains("Free space: 992.0K tokens"))
+    #expect(markdown.contains("Pending next-message context: yes"))
+    #expect(markdown.contains("Pending uploads: 2"))
+    #expect(markdown.contains("/context changes"))
+    #expect(markdown.contains("/context diff"))
+}
+
+@Test
 func defaultSessionStatusAvoidsComposerMetadataDuplication() {
     let status = stripANSI(SloppyTUITheme.sessionStatusLine(
         context: "  queue: 1 ctrl+b cancel",

@@ -66,7 +66,7 @@ public enum RuntimeResponseObservation: Sendable {
 public struct NativeAgentLoopConfig: Sendable, Equatable {
     public var maxToolRounds: Int
 
-    public init(maxToolRounds: Int = 30) {
+    public init(maxToolRounds: Int = 60) {
         self.maxToolRounds = max(0, maxToolRounds)
     }
 }
@@ -81,7 +81,7 @@ public struct NativeAgentLoopOutcome: Sendable, Equatable {
 
     public init(
         toolRoundsUsed: Int = 0,
-        maxToolRounds: Int = 30,
+        maxToolRounds: Int = 60,
         finishedNaturally: Bool = false,
         hitTurnLimit: Bool = false,
         toolErrors: [ToolInvocationResult] = [],
@@ -1176,7 +1176,7 @@ public actor RuntimeSystem {
         for session: LanguageModelSession,
         toolCallHandler: @escaping @Sendable (ToolInvocationRequest) async -> ToolInvocationResult,
         loopTracker: StreamActivityTracker? = nil,
-        maxToolRounds: Int = 30
+        maxToolRounds: Int = 60
     ) -> SloppyToolExecutionDelegate {
         var nameMap: [String: String] = [:]
         for tool in session.tools {

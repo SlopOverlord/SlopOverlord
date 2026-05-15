@@ -289,6 +289,49 @@ private actor ToolCallingModelProvider: ModelProvider {
     }
 }
 
+private actor BlockingToolInvocationGate {
+    private var startedCount = 0
+    private var released = false
+    private var continuations: [CheckedContinuation<Void, Never>] = []
+
+    func recordStartAndBlockFirst() async {
+        startedCount += 1
+        guard startedCount == 1, !released else {
+            return
+        }
+        await withCheckedContinuation { continuation in
+            continuations.append(continuation)
+        }
+    }
+
+    func release() {
+        released = true
+        let pending = continuations
+        continuations.removeAll()
+        for continuation in pending {
+            continuation.resume()
+        }
+    }
+
+    func starts() -> Int {
+        startedCount
+    }
+}
+
+private func waitForAgentSessionCondition(
+    timeoutNanoseconds: UInt64,
+    condition: @escaping @Sendable () async -> Bool
+) async -> Bool {
+    let deadline = DispatchTime.now().uptimeNanoseconds + timeoutNanoseconds
+    while DispatchTime.now().uptimeNanoseconds < deadline {
+        if await condition() {
+            return true
+        }
+        try? await Task.sleep(nanoseconds: 10_000_000)
+    }
+    return await condition()
+}
+
 private func makeAgentSessionFixture(
     agentID: String,
     selectedModel: String,
@@ -496,7 +539,7 @@ func agentSessionTreatsPlainAssistantAnswerWithoutToolsAsDone() async throws {
 }
 
 @Test
-func agentSessionMarksToollessProgressUpdateAsIncompleteInDebugMode() async throws {
+func agentSessionTreatsToollessAssistantTextAsDoneWithoutSemanticSignal() async throws {
     let availableModels = [
         ProviderModelOption(id: "openai:gpt-5.4-mini", title: "openai:gpt-5.4-mini", capabilities: ["tools"])
     ]
@@ -533,9 +576,9 @@ func agentSessionMarksToollessProgressUpdateAsIncompleteInDebugMode() async thro
     )
 
     let finalStatus = try #require(response.appendedEvents.last(where: { $0.type == .runStatus })?.runStatus)
-    #expect(finalStatus.stage == .interrupted)
-    #expect(finalStatus.label == "Incomplete")
-    #expect(finalStatus.details == "Agent produced only a progress update without using tools.")
+    #expect(finalStatus.stage == .done)
+    #expect(finalStatus.label == "Done")
+    #expect(finalStatus.details == "Response is ready.")
 }
 
 @Test
@@ -667,7 +710,7 @@ func agentSessionMarksTurnIncompleteWhenNativeToolRoundLimitIsReached() async th
     )
     let provider = ToolCallingModelProvider(
         models: availableModels.map(\.id),
-        toolNames: Array(repeating: "files.list", count: 31),
+        toolNames: Array(repeating: "files.list", count: 61),
         finalText: "This should not become the handoff."
     )
     let runtime = RuntimeSystem(modelProvider: provider, defaultModel: "openai:gpt-5.4-mini")
@@ -703,7 +746,78 @@ func agentSessionMarksTurnIncompleteWhenNativeToolRoundLimitIsReached() async th
 
     let verificationStore = AgentSessionFileStore(agentsRootURL: agentsRootURL)
     let detail = try verificationStore.loadSession(agentID: agentID, sessionID: session.id)
-    #expect(detail.events.filter { $0.toolCall?.tool == "files.list" }.count == 30)
+    #expect(detail.events.filter { $0.toolCall?.tool == "files.list" }.count == 60)
+}
+
+@Test
+func agentSessionInterruptPreventsLateNativeToolCallbacksFromAppendingEvents() async throws {
+    let availableModels = [
+        ProviderModelOption(id: "openai:gpt-5.4-mini", title: "openai:gpt-5.4-mini", capabilities: ["tools"])
+    ]
+    let agentID = "late-tool-interrupt-agent"
+    let (catalogStore, sessionStore, agentsRootURL) = try makeAgentSessionFixture(
+        agentID: agentID,
+        selectedModel: "openai:gpt-5.4-mini",
+        availableModels: availableModels
+    )
+    let provider = ToolCallingModelProvider(
+        models: availableModels.map(\.id),
+        toolNames: ["runtime.exec", "runtime.exec"],
+        finalText: "This should not append after interruption."
+    )
+    let runtime = RuntimeSystem(modelProvider: provider, defaultModel: "openai:gpt-5.4-mini")
+    let gate = BlockingToolInvocationGate()
+    let orchestrator = AgentSessionOrchestrator(
+        runtime: runtime,
+        sessionStore: sessionStore,
+        agentCatalogStore: catalogStore,
+        availableModels: availableModels,
+        toolInvoker: { _, _, request, _ in
+            await gate.recordStartAndBlockFirst()
+            return ToolInvocationResult(tool: request.tool, ok: true, data: .object(["ok": .bool(true)]))
+        }
+    )
+
+    let session = try await orchestrator.createSession(agentID: agentID, request: AgentSessionCreateRequest())
+    let postTask = Task {
+        try await orchestrator.postMessage(
+            agentID: agentID,
+            sessionID: session.id,
+            request: AgentSessionPostMessageRequest(
+                userId: "dashboard",
+                content: "run tools, then stop",
+                mode: .build
+            )
+        )
+    }
+
+    let firstToolStarted = await waitForAgentSessionCondition(timeoutNanoseconds: 1_000_000_000) {
+        await gate.starts() == 1
+    }
+    #expect(firstToolStarted)
+
+    _ = try await orchestrator.controlSession(
+        agentID: agentID,
+        sessionID: session.id,
+        request: AgentSessionControlRequest(action: .interruptTree, requestedBy: "dashboard", reason: "Stopped by user")
+    )
+    await gate.release()
+    _ = try await postTask.value
+
+    let verificationStore = AgentSessionFileStore(agentsRootURL: agentsRootURL)
+    let detail = try verificationStore.loadSession(agentID: agentID, sessionID: session.id)
+    let firstInterruptedIndex = try #require(detail.events.firstIndex { $0.runStatus?.stage == .interrupted })
+    let eventsAfterInterrupt = detail.events.dropFirst(firstInterruptedIndex + 1)
+
+    #expect(await gate.starts() == 1)
+    #expect(detail.events.filter { $0.toolCall?.tool == "runtime.exec" }.count == 1)
+    #expect(detail.events.contains {
+        $0.message?.role == .assistant &&
+            $0.message?.segments.compactMap(\.text).joined(separator: "\n") == "Done."
+    } == false)
+    #expect(eventsAfterInterrupt.contains { $0.toolCall != nil } == false)
+    #expect(eventsAfterInterrupt.contains { $0.toolResult != nil } == false)
+    #expect(eventsAfterInterrupt.contains { $0.runStatus?.stage == .searching } == false)
 }
 
 @Test

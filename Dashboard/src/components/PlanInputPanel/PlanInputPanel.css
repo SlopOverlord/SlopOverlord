@@ -1,6 +1,10 @@
 .plan-input-panel {
   display: grid;
   gap: 12px;
+  width: min(760px, 100%);
+  min-width: 0;
+  max-width: 100%;
+  box-sizing: border-box;
   margin: 8px 0;
   padding: 14px;
   border: 1px solid var(--border-subtle, rgba(148, 163, 184, 0.28));
@@ -12,15 +16,18 @@
   display: flex;
   align-items: center;
   gap: 8px;
+  min-width: 0;
 }
 
 .plan-input-panel__question {
   display: grid;
   gap: 8px;
+  min-width: 0;
 }
 
 .plan-input-panel__question p {
   margin: 0;
+  overflow-wrap: anywhere;
 }
 
 .plan-input-panel__header {
@@ -48,11 +55,13 @@
 .plan-input-panel__option span {
   display: grid;
   gap: 2px;
+  min-width: 0;
 }
 
 .plan-input-panel__option small,
 .plan-input-panel__error {
   color: var(--text-muted, #64748b);
+  overflow-wrap: anywhere;
 }
 
 .plan-input-panel__custom {
@@ -80,4 +89,5 @@
   flex-wrap: wrap;
   justify-content: flex-end;
   gap: 8px;
+  min-width: 0;
 }

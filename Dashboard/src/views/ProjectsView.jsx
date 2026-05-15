@@ -800,7 +800,10 @@ export function ProjectsView({
   routeProjectId = null,
   routeProjectTab = "overview",
   routeProjectTaskReference = null,
+  routeProjectChatAgentId = null,
+  routeProjectChatSessionId = null,
   onRouteProjectChange = () => { },
+  onRouteProjectChatChange = (_projectId, _agentId, _sessionId) => { },
   onSidebarProjectsListChanged = () => { },
   onNavigateToChannelSession = (_sessionId) => { }
 }) {
@@ -1768,8 +1771,11 @@ export function ProjectsView({
       return (
         <ProjectChatTab
           project={project}
-          onNavigateToChannelSession={onNavigateToChannelSession}
-          onAddChannel={openAddChannelModal}
+          chatAgentId={routeProjectChatAgentId}
+          chatSessionId={routeProjectChatSessionId}
+          onChatRouteChange={(agentId, sessionId) => {
+            onRouteProjectChatChange(project.id, agentId, sessionId);
+          }}
         />
       );
     }
