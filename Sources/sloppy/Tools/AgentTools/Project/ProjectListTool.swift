@@ -25,6 +25,7 @@ struct ProjectListTool: CoreTool {
                 "name": .string(project.name),
                 "description": .string(project.description),
                 "icon": project.icon.map { .string($0) } ?? .null,
+                "isFavorite": .bool(project.isFavorite),
                 "channels": .array(project.channels.map { ch in
                     .object([
                         "channelId": .string(ch.channelId),

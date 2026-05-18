@@ -18,6 +18,7 @@ struct ProjectUpdateTool: CoreTool {
             .init(name: "actors", description: "Updated list of actor IDs", schema: DynamicGenerationSchema(arrayOf: DynamicGenerationSchema(type: String.self)), isOptional: true),
             .init(name: "teams", description: "Updated list of team IDs", schema: DynamicGenerationSchema(arrayOf: DynamicGenerationSchema(type: String.self)), isOptional: true),
             .init(name: "repoPath", description: "Repository path", schema: DynamicGenerationSchema(type: String.self), isOptional: true),
+            .init(name: "isFavorite", description: "Whether the project is pinned to favorites", schema: DynamicGenerationSchema(type: Bool.self), isOptional: true),
         ])
     }
 
@@ -43,7 +44,8 @@ struct ProjectUpdateTool: CoreTool {
                     icon: arguments["icon"]?.asString,
                     actors: actors,
                     teams: teams,
-                    repoPath: arguments["repoPath"]?.asString
+                    repoPath: arguments["repoPath"]?.asString,
+                    isFavorite: arguments["isFavorite"]?.asBool
                 )
             )
             return toolSuccess(tool: name, data: .object([

@@ -177,6 +177,68 @@
   box-shadow: 4px 4px 0px var(--accent);
 }
 
+.project-grid-card--favorite {
+  border-color: color-mix(in srgb, var(--accent) 55%, var(--line));
+}
+
+.project-grid-section-title {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 6px;
+  padding: 4px 2px;
+  color: var(--muted);
+  font-family: "Fira Code", monospace;
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.project-grid-section-title .material-symbols-rounded {
+  color: var(--accent);
+  font-size: 17px;
+}
+
+.project-favorite-btn {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  z-index: 2;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: 0;
+  background: var(--surface);
+  color: var(--muted);
+  cursor: pointer;
+  transition: border-color 0.15s ease, color 0.15s ease, background 0.15s ease;
+}
+
+.project-favorite-btn:hover,
+.project-favorite-btn.active {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: var(--surface-2);
+}
+
+.project-favorite-btn .material-symbols-rounded {
+  font-size: 18px;
+}
+
+.project-favorite-btn.active .material-symbols-rounded {
+  font-variation-settings:
+    "FILL" 1,
+    "wght" 500,
+    "GRAD" 0,
+    "opsz" 24;
+}
+
 .project-agent-stack {
   display: flex;
   align-items: center;
@@ -232,6 +294,14 @@
   font-size: 1.8rem;
   color: var(--accent);
   line-height: 1;
+}
+
+.project-grid-icon-image {
+  width: 52px;
+  height: 52px;
+  object-fit: cover;
+  border: 1px solid var(--line);
+  background: var(--surface);
 }
 
 .project-grid-name {
@@ -3038,6 +3108,60 @@
   font-size: 20px;
 }
 
+.settings-icon-upload-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 10px;
+}
+
+.settings-icon-upload-input {
+  display: none;
+}
+
+.settings-icon-upload-button,
+.settings-icon-clear-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 34px;
+  padding: 7px 12px;
+  border: 1px solid var(--line);
+  border-radius: 0;
+  background: var(--surface-2);
+  color: var(--muted);
+  font-family: "Fira Code", monospace;
+  font-size: 0.78rem;
+  cursor: pointer;
+  transition: border-color 0.15s, color 0.15s, background 0.15s;
+}
+
+.settings-icon-upload-button:hover,
+.settings-icon-upload-button.active,
+.settings-icon-clear-button:hover {
+  border-color: var(--line-strong);
+  color: var(--text);
+}
+
+.settings-icon-upload-button.active {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.settings-icon-upload-button .material-symbols-rounded {
+  font-size: 18px;
+}
+
+.settings-icon-upload-status {
+  min-width: 0;
+  color: var(--muted);
+  font-size: 0.78rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .settings-icon-preview {
   display: flex;
   align-items: center;
@@ -3050,8 +3174,21 @@
   color: var(--muted);
 }
 
-.settings-icon-preview .material-symbols-rounded {
+.settings-icon-preview-icon {
+  width: 32px;
+  height: 32px;
+  flex: 0 0 auto;
+}
+
+.settings-icon-preview-icon.material-symbols-rounded {
   color: var(--accent);
+  font-size: 2rem;
+}
+
+.settings-icon-preview-image {
+  object-fit: cover;
+  border: 1px solid var(--line);
+  background: var(--surface);
 }
 
 /* ── Danger zone ─────────────────────────────────────────── */

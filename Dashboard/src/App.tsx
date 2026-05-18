@@ -38,7 +38,7 @@ import {
   resolveApiBase,
   setStoredApiBaseOverride
 } from "./shared/api/httpClient";
-import { fetchProjects } from "./api";
+import { fetchProjectSummaries } from "./api";
 
 interface SidebarItem {
   id: string;
@@ -50,6 +50,21 @@ interface SidebarItem {
 }
 
 type AnyRecord = Record<string, unknown>;
+
+function normalizeSidebarProject(project: AnyRecord): AnyRecord | null {
+  const id = String(project?.id || "").trim();
+  if (!id) {
+    return null;
+  }
+  return {
+    id,
+    name: String(project?.name || id).trim() || id,
+    icon: String(project?.icon || "").trim() || null,
+    repoPath: String(project?.repoPath || "").trim() || null,
+    isFavorite: Boolean(project?.isFavorite),
+    isArchived: Boolean(project?.isArchived)
+  };
+}
 
 function isDashboardAuthRequired(config: AnyRecord | null) {
   const uiConfig = (config?.ui as AnyRecord | undefined) ?? null;
@@ -116,10 +131,21 @@ function DashboardShell({
   useNotificationSocket();
 
   const refreshSidebarProjects = useCallback(() => {
-    fetchProjects()
+    fetchProjectSummaries()
       .then((list) => {
         if (Array.isArray(list)) {
-          setSidebarProjects(list);
+          setSidebarProjects(
+            list
+              .map((project) => normalizeSidebarProject(project as AnyRecord))
+              .filter((project): project is AnyRecord => Boolean(project) && !project.isArchived)
+              .sort((left, right) => {
+                const favoriteDelta = Number(Boolean(right.isFavorite)) - Number(Boolean(left.isFavorite));
+                if (favoriteDelta !== 0) {
+                  return favoriteDelta;
+                }
+                return String(left.name || "").localeCompare(String(right.name || ""), undefined, { sensitivity: "base" });
+              })
+          );
         }
       })
       .catch(() => {

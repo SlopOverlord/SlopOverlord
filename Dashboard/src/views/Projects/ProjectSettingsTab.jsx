@@ -9,6 +9,7 @@ import {
     setProjectTaskSyncToken,
     clearProjectTaskSyncToken
 } from "../../api";
+import { PROJECT_IMAGE_ICON_MAX_BYTES, ProjectIcon, isProjectImageIcon } from "../../components/ProjectIcon";
 
 const SETTINGS_TABS = [
     { id: "general", title: "General", icon: "settings" },
@@ -67,6 +68,8 @@ const PROJECT_ICONS = [
     "school", "build", "architecture", "api", "hub",
     "storage", "monitoring", "security", "memory", "web"
 ];
+
+const PROJECT_ICON_ACCEPT = "image/png,image/jpeg,image/webp,image/gif";
 
 const LOOP_MODE_OPTIONS = [
     {
@@ -216,6 +219,8 @@ export function ProjectSettingsTab({
     const [teamSearch, setTeamSearch] = useState("");
     const [teamDropdownOpen, setTeamDropdownOpen] = useState(false);
     const teamSearchRef = useRef(null);
+    const iconUploadRef = useRef(null);
+    const [iconUploadStatus, setIconUploadStatus] = useState("");
     const [taskSyncDraft, setTaskSyncDraft] = useState(() => cloneTaskSyncDraft(project));
     const [taskSyncToken, setTaskSyncToken] = useState("");
     const [taskSyncTokenStatus, setTaskSyncTokenStatus] = useState(null);
@@ -225,6 +230,7 @@ export function ProjectSettingsTab({
     useEffect(() => {
         setDraft(cloneDraft(project));
         setTaskSyncDraft(cloneTaskSyncDraft(project));
+        setIconUploadStatus("");
     }, [project?.id, project?.updatedAt]);
 
     useEffect(() => {
@@ -275,7 +281,7 @@ export function ProjectSettingsTab({
     async function saveSettings() {
         const result = await onUpdateProject({
             name: draft.name.trim() || undefined,
-            icon: draft.icon.trim() || null,
+            icon: draft.icon.trim(),
             models: draft.models,
             agentFiles: draft.agentFiles,
             heartbeat: draft.heartbeat,
@@ -294,7 +300,39 @@ export function ProjectSettingsTab({
 
     function cancelChanges() {
         setDraft(cloneDraft(project));
+        setIconUploadStatus("");
         setStatusText("Changes cancelled");
+    }
+
+    function handleIconUpload(event) {
+        const file = event.target.files?.[0];
+        event.target.value = "";
+        if (!file) return;
+
+        if (!PROJECT_ICON_ACCEPT.split(",").includes(file.type)) {
+            setIconUploadStatus("Use PNG, JPEG, WebP, or GIF.");
+            return;
+        }
+
+        if (file.size > PROJECT_IMAGE_ICON_MAX_BYTES) {
+            setIconUploadStatus("Image must be 512 KB or smaller.");
+            return;
+        }
+
+        const reader = new FileReader();
+        reader.onload = () => {
+            const value = typeof reader.result === "string" ? reader.result : "";
+            if (!isProjectImageIcon(value)) {
+                setIconUploadStatus("Could not read this image.");
+                return;
+            }
+            mutateDraft((d) => { d.icon = value; });
+            setIconUploadStatus(file.name);
+        };
+        reader.onerror = () => {
+            setIconUploadStatus("Could not read this image.");
+        };
+        reader.readAsDataURL(file);
     }
 
     function renderGeneral() {
@@ -325,7 +363,10 @@ export function ProjectSettingsTab({
                                         key={iconName}
                                         type="button"
                                         className={`settings-icon-option ${active ? "active" : ""}`}
-                                        onClick={() => mutateDraft((d) => { d.icon = active ? "" : iconName; })}
+                                        onClick={() => {
+                                            mutateDraft((d) => { d.icon = active ? "" : iconName; });
+                                            setIconUploadStatus("");
+                                        }}
                                         title={iconName}
                                     >
                                         <span className="material-symbols-rounded">{iconName}</span>
@@ -333,10 +374,46 @@ export function ProjectSettingsTab({
                                 );
                             })}
                         </div>
+                        <div className="settings-icon-upload-row">
+                            <input
+                                ref={iconUploadRef}
+                                type="file"
+                                accept={PROJECT_ICON_ACCEPT}
+                                className="settings-icon-upload-input"
+                                onChange={handleIconUpload}
+                            />
+                            <button
+                                type="button"
+                                className={`settings-icon-upload-button ${isProjectImageIcon(draft.icon) ? "active" : ""}`}
+                                onClick={() => iconUploadRef.current?.click()}
+                            >
+                                <span className="material-symbols-rounded" aria-hidden="true">add_photo_alternate</span>
+                                <span>Upload image</span>
+                            </button>
+                            {isProjectImageIcon(draft.icon) ? (
+                                <button
+                                    type="button"
+                                    className="settings-icon-clear-button"
+                                    onClick={() => {
+                                        mutateDraft((d) => { d.icon = ""; });
+                                        setIconUploadStatus("");
+                                    }}
+                                >
+                                    Clear image
+                                </button>
+                            ) : null}
+                            {iconUploadStatus ? (
+                                <span className="settings-icon-upload-status">{iconUploadStatus}</span>
+                            ) : null}
+                        </div>
                         {draft.icon && (
                             <div className="settings-icon-preview">
-                                <span className="material-symbols-rounded" style={{ fontSize: "2rem" }}>{draft.icon}</span>
-                                <span>{draft.icon}</span>
+                                <ProjectIcon
+                                    icon={draft.icon}
+                                    className="settings-icon-preview-icon"
+                                    imageClassName="settings-icon-preview-image"
+                                />
+                                <span>{isProjectImageIcon(draft.icon) ? "Custom image" : draft.icon}</span>
                             </div>
                         )}
                     </div>

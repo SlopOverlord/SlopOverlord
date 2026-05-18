@@ -42,6 +42,7 @@ export const probeProvider = coreApi.probeProvider;
 export const probeACPTarget = coreApi.probeACPTarget;
 export const fetchSearchProviderStatus = coreApi.fetchSearchProviderStatus;
 export const fetchProjects = coreApi.fetchProjects;
+export const fetchProjectSummaries = coreApi.fetchProjectSummaries;
 export const fetchProject = coreApi.fetchProject;
 export const fetchTaskByReference = coreApi.fetchTaskByReference;
 export const createProject = coreApi.createProject;

@@ -12,7 +12,7 @@ struct ProjectTaskCreateTool: CoreTool {
     var parameters: GenerationSchema {
         .objectSchema([
             .init(name: "title", description: "Task title", schema: DynamicGenerationSchema(type: String.self)),
-            .init(name: "description", description: "Task description", schema: DynamicGenerationSchema(type: String.self), isOptional: true),
+            .init(name: "description", description: "Task description. For planning or pending_approval tasks, provide a structured markdown brief with ## Goal, ## Context, ## Definition of Done, and ## Tests / Verification, preserving the full planning handoff rather than a short summary.", schema: DynamicGenerationSchema(type: String.self), isOptional: true),
             .init(name: "priority", description: "Task priority: low, medium, high", schema: DynamicGenerationSchema(type: String.self), isOptional: true),
             .init(name: "status", description: "Initial task status", schema: DynamicGenerationSchema(type: String.self), isOptional: true),
             .init(name: "kind", description: "Task kind: planning, execution, bugfix", schema: DynamicGenerationSchema(type: String.self), isOptional: true),
@@ -54,13 +54,21 @@ struct ProjectTaskCreateTool: CoreTool {
         do {
             let kind = arguments["kind"]?.asString.flatMap { ProjectTaskKind(rawValue: $0) }
             let loopMode = arguments["loopModeOverride"]?.asString.flatMap { ProjectLoopMode(rawValue: $0) }
+            let description = arguments["description"]?.asString
+            let taskStatus = trimmedStringArgument(arguments, "status") ?? ProjectTaskStatus.pendingApproval.rawValue
+            if planningTaskBriefIsRequired(kind: kind, status: taskStatus) {
+                let missingHeadings = missingRequiredPlanningTaskBriefHeadings(in: description)
+                if !missingHeadings.isEmpty {
+                    return planningTaskBriefValidationFailure(tool: name, missingHeadings: missingHeadings)
+                }
+            }
             let updated = try await svc.createTask(
                 projectID: project.id,
                 request: ProjectTaskCreateRequest(
                     title: title,
-                    description: arguments["description"]?.asString,
+                    description: description,
                     priority: trimmedStringArgument(arguments, "priority") ?? "medium",
-                    status: trimmedStringArgument(arguments, "status") ?? ProjectTaskStatus.pendingApproval.rawValue,
+                    status: taskStatus,
                     kind: kind,
                     loopModeOverride: loopMode,
                     actorId: arguments["actorId"]?.asString,

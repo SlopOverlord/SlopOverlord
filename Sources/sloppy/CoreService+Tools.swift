@@ -208,6 +208,12 @@ extension CoreService {
                     summary: summary,
                     events: [toolCallEvent]
                 )
+                await applyPetProgressForAgentSessionEvents(
+                    agentID: normalizedAgentID,
+                    sessionID: normalizedSessionID,
+                    summary: summary,
+                    events: [toolCallEvent]
+                )
             } catch {
                 return .init(
                     tool: request.tool,
@@ -343,6 +349,12 @@ extension CoreService {
                     events: eventsToAppend
                 )
                 publishLiveSessionEvents(
+                    agentID: normalizedAgentID,
+                    sessionID: normalizedSessionID,
+                    summary: summary,
+                    events: eventsToAppend
+                )
+                await applyPetProgressForAgentSessionEvents(
                     agentID: normalizedAgentID,
                     sessionID: normalizedSessionID,
                     summary: summary,

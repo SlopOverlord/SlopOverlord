@@ -1,4 +1,5 @@
 import React from "react";
+import { ProjectIcon } from "./ProjectIcon";
 
 function sidebarProjectInitials(name, id) {
   const raw = String(name || id || "?").trim();
@@ -70,41 +71,44 @@ export function SidebarView({
             {!isCompact && <span className="sidebar-label" style={{ textTransform: 'uppercase' }}>[ {item.label.title} ]</span>}
           </button>
         ))}
-      </nav>
-      {Array.isArray(projectRailProjects) && projectRailProjects.length > 0 ? (
-        <div className="sidebar-project-rail" aria-label="Project chats">
-          {!isCompact ? <div className="sidebar-project-rail-label">Project chats</div> : null}
-          <div className="sidebar-project-rail-icons">
-            {projectRailProjects.map((p) => {
-              const pid = String(p?.id || "").trim();
-              if (!pid) {
-                return null;
-              }
-              const projectLabel = String(p?.name || pid).trim() || pid;
-              return (
-                <button
-                  key={pid}
-                  type="button"
-                  className={`sidebar-project-rail-item ${selectedChatProjectId === pid ? "active" : ""}`}
-                  title={projectLabel}
-                  data-testid={`sidebar-project-rail-${pid}`}
-                  onClick={() => {
-                    onSelectChatProject(pid);
-                    onRequestClose();
-                  }}
-                >
-                  <span className="sidebar-project-rail-avatar" aria-hidden="true">
-                    {sidebarProjectInitials(p?.name, pid)}
-                  </span>
-                  {!isCompact ? (
-                    <span className="sidebar-project-rail-name">{projectLabel}</span>
-                  ) : null}
-                </button>
-              );
-            })}
+        {Array.isArray(projectRailProjects) && projectRailProjects.length > 0 ? (
+          <div className="sidebar-project-rail" aria-label="Project chats">
+            {!isCompact ? <div className="sidebar-project-rail-label">Project chats</div> : null}
+            <div className="sidebar-project-rail-icons">
+              {projectRailProjects.map((p) => {
+                const pid = String(p?.id || "").trim();
+                if (!pid) {
+                  return null;
+                }
+                const projectLabel = String(p?.name || pid).trim() || pid;
+                return (
+                  <button
+                    key={pid}
+                    type="button"
+                    className={`sidebar-project-rail-item ${selectedChatProjectId === pid ? "active" : ""}`}
+                    title={projectLabel}
+                    data-testid={`sidebar-project-rail-${pid}`}
+                    onClick={() => {
+                      onSelectChatProject(pid);
+                      onRequestClose();
+                    }}
+                  >
+                    <ProjectIcon
+                      icon={p?.icon}
+                      fallback={sidebarProjectInitials(p?.name, pid)}
+                      className="sidebar-project-rail-avatar"
+                      imageClassName="sidebar-project-rail-avatar-image"
+                    />
+                    {!isCompact ? (
+                      <span className="sidebar-project-rail-name">{projectLabel}</span>
+                    ) : null}
+                  </button>
+                );
+              })}
+            </div>
           </div>
-        </div>
-      ) : null}
+        ) : null}
+      </nav>
       {footer && <div className="sidebar-footer">{footer}</div>}
     </aside>
   );

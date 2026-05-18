@@ -100,6 +100,28 @@ func petEvolutionStageThresholdsMatchPlan() {
 }
 
 @Test
+func petProgressKeepsSmallPositiveActivityGains() {
+    let baseStats = AgentPetStats(wisdom: 20, debugging: 20, patience: 20, snark: 20, chaos: 20)
+    var state = AgentPetProgressState(currentStats: baseStats)
+
+    AgentPetProgressionEngine.apply(
+        state: &state,
+        input: AgentPetProgressionInput(
+            sourceKind: .agentSession,
+            eventKind: .toolCall,
+            channelId: "agent:pet-small-gain:session:s1",
+            sessionId: "s1",
+            timestamp: Date(timeIntervalSince1970: 1_700_000_000),
+            content: "files.read"
+        ),
+        baseStats: baseStats
+    )
+
+    #expect(state.totalXp > 0)
+    #expect(state.currentStats.debugging > baseStats.debugging)
+}
+
+@Test
 func petProgressCombinesSourcesAndCapsRepeatedShortMessages() throws {
     let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
     let store = AgentCatalogFileStore(agentsRootURL: root)
@@ -157,4 +179,32 @@ func petProgressCombinesSourcesAndCapsRepeatedShortMessages() throws {
     #expect(currentStats.chaos >= baseStats.chaos)
     #expect(currentStats.snark - baseStats.snark <= 10)
     #expect(currentStats.chaos - baseStats.chaos <= 12)
+    #expect((updated.pet?.evolution?.totalXp ?? 0) > 0)
+}
+
+@Test
+func petProgressTracksCoreServiceToolInvocationEvents() async throws {
+    let service = CoreService(config: .test, persistenceBuilder: InMemoryCorePersistenceBuilder())
+    let agentID = "pet-tool-events-\(UUID().uuidString)"
+    _ = try await service.createAgent(
+        AgentCreateRequest(id: agentID, displayName: "Pet Tool Events", role: "Debugger")
+    )
+    let session = try await service.createAgentSession(
+        agentID: agentID,
+        request: AgentSessionCreateRequest(title: "Tool progress")
+    )
+
+    let before = try #require(try await service.getAgent(id: agentID).pet)
+    let result = await service.invokeToolFromRuntime(
+        agentID: agentID,
+        sessionID: session.id,
+        request: ToolInvocationRequest(tool: "system.list_tools")
+    )
+
+    #expect(result.ok)
+
+    let updated = try await service.getAgent(id: agentID)
+    let updatedPet = try #require(updated.pet)
+    #expect((updatedPet.evolution?.totalXp ?? 0) > (before.evolution?.totalXp ?? 0))
+    #expect(updatedPet.currentStats.debugging > before.currentStats.debugging)
 }

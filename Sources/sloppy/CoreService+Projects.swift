@@ -42,6 +42,10 @@ extension CoreService {
         await store.listProjects()
     }
 
+    public func listProjectSummaries() async -> [ProjectListRecord] {
+        await store.listProjectSummaries()
+    }
+
     /// Lists token usage records with optional filters and aggregates.
     public func listTokenUsage(
         channelId: String? = nil,
@@ -598,6 +602,9 @@ extension CoreService {
         }
         if let nextLoopMode = request.taskLoopMode {
             project.taskLoopMode = nextLoopMode
+        }
+        if let nextFavorite = request.isFavorite {
+            project.isFavorite = nextFavorite
         }
         if let nextArchived = request.isArchived {
             project.isArchived = nextArchived

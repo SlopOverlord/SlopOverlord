@@ -60,6 +60,7 @@ private func projectCurrentJSONValue(
         "projectName": .string(project.name),
         "description": .string(project.description),
         "icon": project.icon.map { .string($0) } ?? .null,
+        "isFavorite": .bool(project.isFavorite),
         "channelId": .string(requestedChannelId),
         "effectiveChannelId": .string(effectiveChannelId),
         "matchedChannelId": matchedChannel.map { .string($0.channelId) } ?? .null,

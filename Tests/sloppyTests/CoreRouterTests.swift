@@ -212,11 +212,22 @@ func projectCrudEndpoints() async throws {
     let list = try decoder.decode([ProjectRecord].self, from: listResponse.body)
     #expect(list.contains(where: { $0.id == created.id }))
 
+    let summaryResponse = await router.handle(method: "GET", path: "/v1/projects?summary=true", body: nil)
+    #expect(summaryResponse.status == 200)
+    let summaries = try decoder.decode([ProjectListRecord].self, from: summaryResponse.body)
+    #expect(summaries.contains(where: { $0.id == created.id && $0.taskCounts.total == 0 }))
+
     let updateBody = try JSONEncoder().encode(ProjectUpdateRequest(name: "Platform Board v2"))
     let updateResponse = await router.handle(method: "PATCH", path: "/v1/projects/\(created.id)", body: updateBody)
     #expect(updateResponse.status == 200)
     let updated = try decoder.decode(ProjectRecord.self, from: updateResponse.body)
     #expect(updated.name == "Platform Board v2")
+
+    let favoriteBody = try JSONEncoder().encode(ProjectUpdateRequest(isFavorite: true))
+    let favoriteResponse = await router.handle(method: "PATCH", path: "/v1/projects/\(created.id)", body: favoriteBody)
+    #expect(favoriteResponse.status == 200)
+    let favoriteProject = try decoder.decode(ProjectRecord.self, from: favoriteResponse.body)
+    #expect(favoriteProject.isFavorite)
 
     let updateMembersBody = try JSONEncoder().encode(
         ProjectUpdateRequest(actors: ["actor:builder", "actor:qa"], teams: ["team:platform"])

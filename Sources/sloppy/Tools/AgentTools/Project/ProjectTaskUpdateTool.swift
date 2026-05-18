@@ -14,7 +14,7 @@ struct ProjectTaskUpdateTool: CoreTool {
             .init(name: "taskId", description: "Task ID to update", schema: DynamicGenerationSchema(type: String.self), isOptional: true),
             .init(name: "reference", description: "Task reference (alternative to taskId)", schema: DynamicGenerationSchema(type: String.self), isOptional: true),
             .init(name: "title", description: "New title", schema: DynamicGenerationSchema(type: String.self), isOptional: true),
-            .init(name: "description", description: "New description", schema: DynamicGenerationSchema(type: String.self), isOptional: true),
+            .init(name: "description", description: "New description. For planning or pending_approval tasks, provide a structured markdown brief with ## Goal, ## Context, ## Definition of Done, and ## Tests / Verification, preserving the full planning handoff rather than a short summary.", schema: DynamicGenerationSchema(type: String.self), isOptional: true),
             .init(name: "priority", description: "New priority", schema: DynamicGenerationSchema(type: String.self), isOptional: true),
             .init(name: "status", description: "New status", schema: DynamicGenerationSchema(type: String.self), isOptional: true),
             .init(name: "completionConfidence", description: "Required when setting status to done. Use done only if you verified the task is complete; otherwise use blocked, waiting_input, or unsure.", schema: DynamicGenerationSchema(type: String.self), isOptional: true),
@@ -88,6 +88,15 @@ struct ProjectTaskUpdateTool: CoreTool {
             }
             let kind = arguments["kind"]?.asString.flatMap { ProjectTaskKind(rawValue: $0) }
             let loopMode = arguments["loopModeOverride"]?.asString.flatMap { ProjectLoopMode(rawValue: $0) }
+            let updatedDescription = arguments["description"]?.asString ?? task.description
+            let updatedKind = kind ?? task.kind
+            let updatedStatus = requestedStatus ?? task.status
+            if planningTaskBriefIsRequired(kind: updatedKind, status: updatedStatus) {
+                let missingHeadings = missingRequiredPlanningTaskBriefHeadings(in: updatedDescription)
+                if !missingHeadings.isEmpty {
+                    return planningTaskBriefValidationFailure(tool: name, missingHeadings: missingHeadings)
+                }
+            }
             let updatedProject = try await svc.updateTask(
                 projectID: project.id,
                 taskID: task.id,

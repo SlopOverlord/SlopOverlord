@@ -491,13 +491,14 @@ public struct ProjectRecord: Codable, Sendable, Equatable {
     public var reviewSettings: ProjectReviewSettings
     public var taskLoopMode: ProjectLoopMode
     public var taskSyncSettings: ProjectTaskSyncSettings
+    public var isFavorite: Bool
     public var isArchived: Bool
     public var createdAt: Date
     public var updatedAt: Date
 
     private enum CodingKeys: String, CodingKey {
         case id, name, description, icon, channels, tasks, actors, teams, models
-        case agentFiles, heartbeat, repoPath, reviewSettings, taskLoopMode, taskSyncSettings, isArchived, createdAt, updatedAt
+        case agentFiles, heartbeat, repoPath, reviewSettings, taskLoopMode, taskSyncSettings, isFavorite, isArchived, createdAt, updatedAt
     }
 
     public init(
@@ -516,6 +517,7 @@ public struct ProjectRecord: Codable, Sendable, Equatable {
         reviewSettings: ProjectReviewSettings = ProjectReviewSettings(),
         taskLoopMode: ProjectLoopMode = .human,
         taskSyncSettings: ProjectTaskSyncSettings = ProjectTaskSyncSettings(),
+        isFavorite: Bool = false,
         isArchived: Bool = false,
         createdAt: Date = Date(),
         updatedAt: Date = Date()
@@ -535,6 +537,7 @@ public struct ProjectRecord: Codable, Sendable, Equatable {
         self.reviewSettings = reviewSettings
         self.taskLoopMode = taskLoopMode
         self.taskSyncSettings = taskSyncSettings
+        self.isFavorite = isFavorite
         self.isArchived = isArchived
         self.createdAt = createdAt
         self.updatedAt = updatedAt
@@ -557,9 +560,87 @@ public struct ProjectRecord: Codable, Sendable, Equatable {
         reviewSettings = try container.decodeIfPresent(ProjectReviewSettings.self, forKey: .reviewSettings) ?? ProjectReviewSettings()
         taskLoopMode = try container.decodeIfPresent(ProjectLoopMode.self, forKey: .taskLoopMode) ?? .human
         taskSyncSettings = try container.decodeIfPresent(ProjectTaskSyncSettings.self, forKey: .taskSyncSettings) ?? ProjectTaskSyncSettings()
+        isFavorite = try container.decodeIfPresent(Bool.self, forKey: .isFavorite) ?? false
         isArchived = try container.decodeIfPresent(Bool.self, forKey: .isArchived) ?? false
         createdAt = try container.decode(Date.self, forKey: .createdAt)
         updatedAt = try container.decodeIfPresent(Date.self, forKey: .updatedAt) ?? createdAt
+    }
+}
+
+public struct ProjectTaskCountSummary: Codable, Sendable, Equatable {
+    public var total: Int
+    public var backlog: Int
+    public var ready: Int
+    public var inProgress: Int
+    public var waitingInput: Int
+    public var blocked: Int
+    public var needsReview: Int
+    public var done: Int
+
+    public init(
+        total: Int = 0,
+        backlog: Int = 0,
+        ready: Int = 0,
+        inProgress: Int = 0,
+        waitingInput: Int = 0,
+        blocked: Int = 0,
+        needsReview: Int = 0,
+        done: Int = 0
+    ) {
+        self.total = total
+        self.backlog = backlog
+        self.ready = ready
+        self.inProgress = inProgress
+        self.waitingInput = waitingInput
+        self.blocked = blocked
+        self.needsReview = needsReview
+        self.done = done
+    }
+}
+
+public struct ProjectListRecord: Codable, Sendable, Equatable {
+    public var id: String
+    public var name: String
+    public var description: String
+    public var icon: String?
+    public var channels: [ProjectChannel]
+    public var actors: [String]
+    public var teams: [String]
+    public var repoPath: String?
+    public var taskCounts: ProjectTaskCountSummary
+    public var isFavorite: Bool
+    public var isArchived: Bool
+    public var createdAt: Date
+    public var updatedAt: Date
+
+    public init(
+        id: String,
+        name: String,
+        description: String,
+        icon: String? = nil,
+        channels: [ProjectChannel] = [],
+        actors: [String] = [],
+        teams: [String] = [],
+        repoPath: String? = nil,
+        taskCounts: ProjectTaskCountSummary = ProjectTaskCountSummary(),
+        isFavorite: Bool = false,
+        isArchived: Bool = false,
+        createdAt: Date = Date(),
+        updatedAt: Date = Date()
+    ) {
+        self.id = id
+        self.name = name
+        self.description = description
+        self.icon = icon
+        self.channels = channels
+        self.actors = actors
+        self.teams = teams
+        self.repoPath = repoPath
+        self.taskCounts = taskCounts
+        self.isFavorite = isFavorite
+        self.isArchived = isArchived
+        self.createdAt = createdAt
+        self.updatedAt = updatedAt
     }
 }
 
@@ -817,6 +898,7 @@ public struct ProjectUpdateRequest: Codable, Sendable {
     public var repoPath: String?
     public var reviewSettings: ProjectReviewSettings?
     public var taskLoopMode: ProjectLoopMode?
+    public var isFavorite: Bool?
     public var isArchived: Bool?
 
     public init(
@@ -831,6 +913,7 @@ public struct ProjectUpdateRequest: Codable, Sendable {
         repoPath: String? = nil,
         reviewSettings: ProjectReviewSettings? = nil,
         taskLoopMode: ProjectLoopMode? = nil,
+        isFavorite: Bool? = nil,
         isArchived: Bool? = nil
     ) {
         self.name = name
@@ -844,6 +927,7 @@ public struct ProjectUpdateRequest: Codable, Sendable {
         self.repoPath = repoPath
         self.reviewSettings = reviewSettings
         self.taskLoopMode = taskLoopMode
+        self.isFavorite = isFavorite
         self.isArchived = isArchived
     }
 }

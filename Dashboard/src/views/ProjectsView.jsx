@@ -3,7 +3,8 @@ import {
   fetchActorsBoard,
   fetchChannelState,
   fetchChannelSessions,
-  fetchProjects as fetchProjectsRequest,
+  fetchProject as fetchProjectRequest,
+  fetchProjectSummaries as fetchProjectSummariesRequest,
   createProject as createProjectRequest,
   updateProject as updateProjectRequest,
   deleteProject as deleteProjectRequest,
@@ -881,7 +882,17 @@ export function ProjectsView({
     });
   });
 
-  const activeProjects = useMemo(() => projects.filter((p) => !p.isArchived), [projects]);
+  const activeProjects = useMemo(() => {
+    return projects
+      .filter((p) => !p.isArchived)
+      .sort((left, right) => {
+        const favoriteDelta = Number(Boolean(right.isFavorite)) - Number(Boolean(left.isFavorite));
+        if (favoriteDelta !== 0) {
+          return favoriteDelta;
+        }
+        return left.name.localeCompare(right.name, undefined, { sensitivity: "base" });
+      });
+  }, [projects]);
   const archivedProjects = useMemo(() => projects.filter((p) => p.isArchived), [projects]);
 
   const selectedProject = useMemo(() => {
@@ -922,6 +933,29 @@ export function ProjectsView({
       setIsLoadingProjects(false);
     });
   }, []);
+
+  useEffect(() => {
+    if (!routeProjectId || !selectedProject?.isSummary) {
+      return;
+    }
+
+    let isCancelled = false;
+    fetchProjectRequest(routeProjectId)
+      .then((project) => {
+        if (!isCancelled && project) {
+          replaceProjectInState(project);
+        }
+      })
+      .catch(() => {
+        if (!isCancelled) {
+          setStatusText("Failed to load project details.");
+        }
+      });
+
+    return () => {
+      isCancelled = true;
+    };
+  }, [routeProjectId, selectedProject?.id, selectedProject?.isSummary, selectedProject?.updatedAt]);
 
   useEffect(() => {
     const shouldLoadAssignments =
@@ -1085,7 +1119,7 @@ export function ProjectsView({
 
   async function loadProjects() {
     setIsLoadingProjects(true);
-    const response = await fetchProjectsRequest();
+    const response = await fetchProjectSummariesRequest();
     if (!Array.isArray(response)) {
       setStatusText("Failed to load projects from Sloppy.");
       setIsLoadingProjects(false);
@@ -1293,6 +1327,16 @@ export function ProjectsView({
       onRouteProjectChange(null, null, null);
     }
     setStatusText(archive ? "Project archived." : "Project unarchived.");
+  }
+
+  async function toggleProjectFavorite(projectId, isFavorite) {
+    const updated = await updateProjectRequest(projectId, { isFavorite });
+    if (!updated) {
+      setStatusText("Failed to update project favorite.");
+      return;
+    }
+    replaceProjectInState(updated, true);
+    setStatusText(isFavorite ? "Project added to favorites." : "Project removed from favorites.");
   }
 
   function updateTaskDraft(field, value) {
@@ -1751,7 +1795,7 @@ export function ProjectsView({
 
     if (selectedTab === "overview") {
       const activeWorkers = activeWorkersForProject(project, workers);
-      const taskCounts = buildTaskCounts(project.tasks);
+      const taskCounts = project.taskCounts || buildTaskCounts(project.tasks);
       const createdItems = extractCreatedItems(project, chatSnapshots);
 
       return (
@@ -1905,6 +1949,7 @@ export function ProjectsView({
         archivedCount={archivedProjects.length}
         onToggleArchived={() => setShowArchived((v) => !v)}
         onUnarchiveProject={(projectId) => archiveProject(projectId, false)}
+        onToggleFavorite={toggleProjectFavorite}
       />}
 
       {statusText && statusText !== "No projects yet." && statusText !== "Loading projects..." && (

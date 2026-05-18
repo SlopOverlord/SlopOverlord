@@ -207,6 +207,12 @@ public actor InMemoryPersistenceStore: PersistenceStore {
         projects.values.sorted { $0.createdAt < $1.createdAt }
     }
 
+    public func listProjectSummaries() async -> [ProjectListRecord] {
+        projects.values
+            .map(Self.projectListRecord)
+            .sorted { $0.createdAt < $1.createdAt }
+    }
+
     public func project(id: String) async -> ProjectRecord? {
         projects[id]
     }
@@ -220,6 +226,37 @@ public actor InMemoryPersistenceStore: PersistenceStore {
     }
 
     private var cronTasks: [String: AgentCronTask] = [:]
+
+    private static func projectListRecord(_ project: ProjectRecord) -> ProjectListRecord {
+        var counts = ProjectTaskCountSummary(total: project.tasks.count)
+        for task in project.tasks {
+            switch ProjectTaskStatus(rawValue: task.status) {
+            case .backlog: counts.backlog += 1
+            case .ready: counts.ready += 1
+            case .inProgress: counts.inProgress += 1
+            case .waitingInput: counts.waitingInput += 1
+            case .blocked: counts.blocked += 1
+            case .needsReview: counts.needsReview += 1
+            case .done: counts.done += 1
+            default: break
+            }
+        }
+        return ProjectListRecord(
+            id: project.id,
+            name: project.name,
+            description: project.description,
+            icon: project.icon,
+            channels: project.channels,
+            actors: project.actors,
+            teams: project.teams,
+            repoPath: project.repoPath,
+            taskCounts: counts,
+            isFavorite: project.isFavorite,
+            isArchived: project.isArchived,
+            createdAt: project.createdAt,
+            updatedAt: project.updatedAt
+        )
+    }
 
     public func listCronTasks(agentId: String) async -> [AgentCronTask] {
         cronTasks.values.filter { $0.agentId == agentId }.sorted { $0.createdAt < $1.createdAt }
@@ -580,6 +617,7 @@ enum CorePersistenceFactory {
             actors_json TEXT NOT NULL DEFAULT '[]',
             teams_json TEXT NOT NULL DEFAULT '[]',
             task_sync_settings_json TEXT NOT NULL DEFAULT '{}',
+            is_favorite INTEGER NOT NULL DEFAULT 0,
             created_at TEXT NOT NULL,
             updated_at TEXT NOT NULL
         );

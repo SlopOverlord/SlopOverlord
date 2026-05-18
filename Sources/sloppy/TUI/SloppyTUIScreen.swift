@@ -10,6 +10,52 @@ private enum SloppyTUIAttachmentLimits {
     static let maxBytes = 25 * 1024 * 1024
 }
 
+enum SloppyTUISendStage: String {
+    case preparing = "Preparing message"
+    case creatingSession = "Creating session"
+    case snapshottingUndo = "Snapshotting workspace"
+    case updatingOnboarding = "Updating onboarding"
+    case sending = "Sending request"
+    case refreshing = "Refreshing session"
+}
+
+struct SloppyTUISendProgress {
+    var stage: SloppyTUISendStage
+    var attachmentCount: Int
+    var inlineReferenceCount: Int
+    var contentCharacters: Int?
+
+    init(
+        stage: SloppyTUISendStage,
+        attachmentCount: Int = 0,
+        inlineReferenceCount: Int = 0,
+        contentCharacters: Int? = nil
+    ) {
+        self.stage = stage
+        self.attachmentCount = attachmentCount
+        self.inlineReferenceCount = inlineReferenceCount
+        self.contentCharacters = contentCharacters
+    }
+
+    var statusLine: String {
+        var details: [String] = []
+        if attachmentCount > 0 {
+            details.append("\(attachmentCount) attachment" + (attachmentCount == 1 ? "" : "s"))
+        }
+        if inlineReferenceCount > 0 {
+            details.append("\(inlineReferenceCount) @path" + (inlineReferenceCount == 1 ? "" : "s"))
+        }
+        if let contentCharacters, contentCharacters > 0 {
+            details.append("\(contentCharacters) chars")
+        }
+
+        guard !details.isEmpty else {
+            return stage.rawValue + "..."
+        }
+        return stage.rawValue + " (" + details.joined(separator: ", ") + ")..."
+    }
+}
+
 private enum SloppyTUIStreamTyping {
     static let intervalNanoseconds: UInt64 = 32_000_000
     static let intervalSeconds = 0.032
@@ -1411,21 +1457,54 @@ final class SloppyTUIScreen: @preconcurrency Component, @unchecked Sendable {
         taskStartedAt = Date()
         lastTaskElapsed = nil
         setLiveAssistantDraftImmediately("")
-        liveRunStatusLine = "Thinking - Planning response strategy."
+        let inlineReferenceCount = min(SloppyTUIProjectPathTokens.attachmentPaths(in: value).count, 8)
+        updateSendProgress(.init(
+            stage: .preparing,
+            attachmentCount: uploads.count,
+            inlineReferenceCount: inlineReferenceCount
+        ))
         startThinkingAnimation()
         renderTimeline()
-        refreshStaticChrome()
+        await Task.yield()
         let content = await messageContentWithInlineAttachments(value, context: context, uploads: uploads)
         var createdSessionForThisMessage = false
         do {
+            updateSendProgress(.init(
+                stage: hasPersistedSession ? .snapshottingUndo : .creatingSession,
+                attachmentCount: uploads.count,
+                inlineReferenceCount: inlineReferenceCount,
+                contentCharacters: content.count
+            ))
+            await Task.yield()
             createdSessionForThisMessage = try await ensurePersistedSessionForMessage()
+            updateSendProgress(.init(
+                stage: .snapshottingUndo,
+                attachmentCount: uploads.count,
+                inlineReferenceCount: inlineReferenceCount,
+                contentCharacters: content.count
+            ))
+            await Task.yield()
             let undoBaseline = await makeUndoBaseline()
             if !runtime.config.onboarding.completed {
+                updateSendProgress(.init(
+                    stage: .updatingOnboarding,
+                    attachmentCount: uploads.count,
+                    inlineReferenceCount: inlineReferenceCount,
+                    contentCharacters: content.count
+                ))
+                await Task.yield()
                 var config = await runtime.service.getConfig()
                 config.onboarding.completed = true
                 _ = try await runtime.service.updateConfig(config)
             }
             let config = await runtime.service.getConfig()
+            updateSendProgress(.init(
+                stage: .sending,
+                attachmentCount: uploads.count,
+                inlineReferenceCount: inlineReferenceCount,
+                contentCharacters: content.count
+            ))
+            await Task.yield()
             _ = try await runtime.service.postAgentSessionMessage(
                 agentID: agent.id,
                 sessionID: session.id,
@@ -1443,6 +1522,9 @@ final class SloppyTUIScreen: @preconcurrency Component, @unchecked Sendable {
                 pendingUploads.removeAll()
             }
             recordUndoPointIfNeeded(undoBaseline)
+            liveRunStatusLine = "Refreshing session..."
+            refreshStaticChrome()
+            await Task.yield()
             await reloadSession()
             await refreshTokenUsage(includeCost: true)
             petMood = .happy
@@ -3793,6 +3875,9 @@ final class SloppyTUIScreen: @preconcurrency Component, @unchecked Sendable {
             pendingPlanInputRequest = nil
             activePicker = nil
             recordUndoPointIfNeeded(undoBaseline)
+            liveRunStatusLine = "Refreshing session..."
+            refreshStaticChrome()
+            await Task.yield()
             await reloadSession()
             await refreshTokenUsage(includeCost: true)
             petMood = payload.status == .answered ? .happy : petMood
@@ -4062,6 +4147,12 @@ final class SloppyTUIScreen: @preconcurrency Component, @unchecked Sendable {
                 }
             }
         }
+    }
+
+    private func updateSendProgress(_ progress: SloppyTUISendProgress) {
+        liveRunStatusLine = progress.statusLine
+        refreshStaticChrome()
+        renderTimeline()
     }
 
     private func stopThinkingAnimation() {

@@ -148,9 +148,9 @@ html.icons-ready .material-symbols-rounded {
 }
 
 .sidebar-nav {
-  display: grid;
+  display: flex;
+  flex-direction: column;
   gap: 4px;
-  align-content: start;
   flex: 1;
   min-height: 0;
   overflow-y: auto;
@@ -419,4 +419,3 @@ html.icons-ready .material-symbols-rounded {
     transition: none !important;
   }
 }
-

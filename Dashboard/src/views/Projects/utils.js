@@ -141,6 +141,26 @@ export function normalizeTask(task, index = 0) {
   };
 }
 
+function normalizeTaskCounts(taskCounts) {
+  if (!taskCounts || typeof taskCounts !== "object") {
+    return null;
+  }
+  const total = Number(taskCounts.total || 0);
+  const done = Number(taskCounts.done || 0);
+  const counts = {
+    total,
+    backlog: Number(taskCounts.backlog || 0),
+    ready: Number(taskCounts.ready || 0),
+    in_progress: Number(taskCounts.inProgress || taskCounts.in_progress || 0),
+    waiting_input: Number(taskCounts.waitingInput || taskCounts.waiting_input || 0),
+    blocked: Number(taskCounts.blocked || 0),
+    needs_review: Number(taskCounts.needsReview || taskCounts.needs_review || 0),
+    done
+  };
+  counts.not_done = Math.max(0, total - done);
+  return counts;
+}
+
 export function normalizeProject(project, index = 0) {
   const id = String(project?.id || createId("project")).trim() || createId(`project-${index + 1}`);
   const fallbackName = `Project ${index + 1}`;
@@ -154,6 +174,7 @@ export function normalizeProject(project, index = 0) {
   const tasks = Array.isArray(project?.tasks)
     ? project.tasks.map((task, taskIndex) => normalizeTask(task, taskIndex)).filter((task) => task.title.length > 0)
     : [];
+  const taskCounts = normalizeTaskCounts(project?.taskCounts);
 
   const heartbeatRaw = project?.heartbeat;
   const heartbeat = heartbeatRaw && typeof heartbeatRaw === "object"
@@ -183,6 +204,8 @@ export function normalizeProject(project, index = 0) {
     updatedAt: String(project?.updatedAt || project?.createdAt || new Date().toISOString()),
     chats,
     tasks,
+    taskCounts,
+    isSummary: Boolean(taskCounts) && !Array.isArray(project?.tasks),
     actors: Array.isArray(project?.actors) ? project.actors : [],
     teams: Array.isArray(project?.teams) ? project.teams : [],
     models: Array.isArray(project?.models) ? project.models : [],
@@ -191,6 +214,7 @@ export function normalizeProject(project, index = 0) {
     repoPath: String(project?.repoPath || "").trim() || null,
     reviewSettings,
     taskLoopMode: String(project?.taskLoopMode || "human").trim(),
+    isFavorite: Boolean(project?.isFavorite),
     isArchived: Boolean(project?.isArchived)
   };
 }

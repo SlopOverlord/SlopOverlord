@@ -102,25 +102,42 @@
 }
 
 .sidebar-tutorial-link {
-  width: 100%;
   display: flex;
   align-items: center;
-  gap: 12px;
-  min-height: 38px;
-  border: 0;
+  gap: 8px;
+  width: 100%;
+  padding: 8px;
+  margin-bottom: 6px;
+  border: 1px solid var(--line);
   color: var(--muted);
   background: transparent;
   cursor: pointer;
+  font-family: "Fira Code", monospace;
+  font-size: 11px;
+  letter-spacing: 0.05em;
   text-align: left;
+  transition: color 0.15s, border-color 0.15s;
+  box-sizing: border-box;
 }
 
 .sidebar-tutorial-link:hover {
   color: var(--accent);
+  border-color: var(--accent);
 }
 
 .sidebar-tutorial-label {
-  font-size: 12px;
-  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.sidebar.compact .sidebar-tutorial-link {
+  justify-content: center;
+  padding: 6px;
+  width: 100%;
+  max-width: 44px;
+  min-height: 40px;
+  margin-left: auto;
+  margin-right: auto;
+  margin-bottom: 4px;
 }
 
 @media (max-width: 700px) {

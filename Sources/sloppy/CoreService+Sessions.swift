@@ -38,13 +38,18 @@ extension CoreService {
         _ = try getAgent(id: normalizedAgentID)
         await refreshAgentMemoryFile(agentID: normalizedAgentID)
 
-        if let rawCheckpoint = request.checkpointSessionId?.trimmingCharacters(in: .whitespacesAndNewlines),
-           let checkpointSID = normalizedSessionID(rawCheckpoint) {
-            await runAgentMemoryCheckpoint(agentID: normalizedAgentID, sessionID: checkpointSID, reason: "new_session_command")
-        }
+        let checkpointSessionID = request.checkpointSessionId
+            .flatMap { normalizedSessionID($0.trimmingCharacters(in: .whitespacesAndNewlines)) }
 
         do {
             let session = try await sessionOrchestrator.createSession(agentID: normalizedAgentID, request: request)
+            if let checkpointSessionID {
+                scheduleAgentMemoryCheckpoint(
+                    agentID: normalizedAgentID,
+                    sessionID: checkpointSessionID,
+                    reason: "new_session_command"
+                )
+            }
             if !currentConfig.onboarding.completed,
                request.title?.localizedCaseInsensitiveContains("onboarding") == true {
                 logger.info(

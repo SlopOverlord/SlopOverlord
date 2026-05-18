@@ -827,7 +827,8 @@ public actor SQLiteStore: PersistenceStore {
             SELECT id, name, description, actors_json, teams_json,
                    models_json, agent_files_json, heartbeat_json,
                    created_at, updated_at, repo_path, review_settings_json,
-                   icon, is_archived, task_loop_mode, task_sync_settings_json
+                   icon, is_archived, task_loop_mode, task_sync_settings_json,
+                   is_favorite
             FROM dashboard_projects
             ORDER BY created_at ASC;
             """
@@ -876,6 +877,7 @@ public actor SQLiteStore: PersistenceStore {
             let taskLoopMode = taskLoopModeRaw.flatMap { ProjectLoopMode(rawValue: $0) } ?? .human
             let taskSyncJSON = sqlite3_column_text(statement, 15).map { String(cString: $0) } ?? "{}"
             let taskSyncSettings = (try? JSONDecoder().decode(ProjectTaskSyncSettings.self, from: Data(taskSyncJSON.utf8))) ?? ProjectTaskSyncSettings()
+            let isFavorite = sqlite3_column_int(statement, 16) != 0
             let channels = loadProjectChannels(db: db, projectID: id)
             let tasks = loadProjectTasks(db: db, projectID: id)
             result.append(
@@ -895,6 +897,7 @@ public actor SQLiteStore: PersistenceStore {
                     reviewSettings: reviewSettings,
                     taskLoopMode: taskLoopMode,
                     taskSyncSettings: taskSyncSettings,
+                    isFavorite: isFavorite,
                     isArchived: isArchived,
                     createdAt: createdAt,
                     updatedAt: updatedAt
@@ -908,6 +911,92 @@ public actor SQLiteStore: PersistenceStore {
 #endif
     }
 
+    public func listProjectSummaries() async -> [ProjectListRecord] {
+#if canImport(CSQLite3)
+        guard let db else {
+            return fallbackProjects.values.map(Self.projectListRecord).sorted { $0.createdAt < $1.createdAt }
+        }
+
+        let sql =
+            """
+            SELECT p.id, p.name, p.description, p.actors_json, p.teams_json,
+                   p.created_at, p.updated_at, p.repo_path, p.icon, p.is_archived,
+                   p.is_favorite,
+                   COUNT(t.id) AS task_total,
+                   SUM(CASE WHEN t.status = 'backlog' THEN 1 ELSE 0 END) AS task_backlog,
+                   SUM(CASE WHEN t.status = 'ready' THEN 1 ELSE 0 END) AS task_ready,
+                   SUM(CASE WHEN t.status = 'in_progress' THEN 1 ELSE 0 END) AS task_in_progress,
+                   SUM(CASE WHEN t.status = 'waiting_input' THEN 1 ELSE 0 END) AS task_waiting_input,
+                   SUM(CASE WHEN t.status = 'blocked' THEN 1 ELSE 0 END) AS task_blocked,
+                   SUM(CASE WHEN t.status = 'needs_review' THEN 1 ELSE 0 END) AS task_needs_review,
+                   SUM(CASE WHEN t.status = 'done' THEN 1 ELSE 0 END) AS task_done
+            FROM dashboard_projects p
+            LEFT JOIN dashboard_project_tasks t ON t.project_id = p.id
+            GROUP BY p.id
+            ORDER BY p.created_at ASC;
+            """
+
+        var statement: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK else {
+            return fallbackProjects.values.map(Self.projectListRecord).sorted { $0.createdAt < $1.createdAt }
+        }
+        defer { sqlite3_finalize(statement) }
+
+        var result: [ProjectListRecord] = []
+        while sqlite3_step(statement) == SQLITE_ROW {
+            guard
+                let idPtr = sqlite3_column_text(statement, 0),
+                let namePtr = sqlite3_column_text(statement, 1),
+                let descriptionPtr = sqlite3_column_text(statement, 2),
+                let actorsPtr = sqlite3_column_text(statement, 3),
+                let teamsPtr = sqlite3_column_text(statement, 4),
+                let createdAtPtr = sqlite3_column_text(statement, 5),
+                let updatedAtPtr = sqlite3_column_text(statement, 6)
+            else {
+                continue
+            }
+
+            let id = String(cString: idPtr)
+            let actorsJSON = String(cString: actorsPtr)
+            let teamsJSON = String(cString: teamsPtr)
+            let actors = (try? JSONDecoder().decode([String].self, from: Data(actorsJSON.utf8))) ?? []
+            let teams = (try? JSONDecoder().decode([String].self, from: Data(teamsJSON.utf8))) ?? []
+            let createdAt = isoFormatter.date(from: String(cString: createdAtPtr)) ?? Date()
+            let updatedAt = isoFormatter.date(from: String(cString: updatedAtPtr)) ?? createdAt
+            result.append(
+                ProjectListRecord(
+                    id: id,
+                    name: String(cString: namePtr),
+                    description: String(cString: descriptionPtr),
+                    icon: optionalText(statement: statement, index: 8),
+                    channels: loadProjectChannels(db: db, projectID: id),
+                    actors: actors,
+                    teams: teams,
+                    repoPath: optionalText(statement: statement, index: 7),
+                    taskCounts: ProjectTaskCountSummary(
+                        total: Int(sqlite3_column_int(statement, 11)),
+                        backlog: Int(sqlite3_column_int(statement, 12)),
+                        ready: Int(sqlite3_column_int(statement, 13)),
+                        inProgress: Int(sqlite3_column_int(statement, 14)),
+                        waitingInput: Int(sqlite3_column_int(statement, 15)),
+                        blocked: Int(sqlite3_column_int(statement, 16)),
+                        needsReview: Int(sqlite3_column_int(statement, 17)),
+                        done: Int(sqlite3_column_int(statement, 18))
+                    ),
+                    isFavorite: sqlite3_column_int(statement, 10) != 0,
+                    isArchived: sqlite3_column_int(statement, 9) != 0,
+                    createdAt: createdAt,
+                    updatedAt: updatedAt
+                )
+            )
+        }
+
+        return result
+#else
+        return fallbackProjects.values.map(Self.projectListRecord).sorted { $0.createdAt < $1.createdAt }
+#endif
+    }
+
     public func project(id: String) async -> ProjectRecord? {
 #if canImport(CSQLite3)
         if let db {
@@ -916,7 +1005,8 @@ public actor SQLiteStore: PersistenceStore {
                 SELECT id, name, description, actors_json, teams_json,
                        models_json, agent_files_json, heartbeat_json,
                        created_at, updated_at, repo_path, review_settings_json,
-                       icon, is_archived, task_loop_mode, task_sync_settings_json
+                       icon, is_archived, task_loop_mode, task_sync_settings_json,
+                       is_favorite
                 FROM dashboard_projects
                 WHERE id = ?
                 LIMIT 1;
@@ -959,6 +1049,7 @@ public actor SQLiteStore: PersistenceStore {
                 let taskLoopMode = taskLoopModeRaw.flatMap { ProjectLoopMode(rawValue: $0) } ?? .human
                 let taskSyncJSON = sqlite3_column_text(statement, 15).map { String(cString: $0) } ?? "{}"
                 let taskSyncSettings = (try? JSONDecoder().decode(ProjectTaskSyncSettings.self, from: Data(taskSyncJSON.utf8))) ?? ProjectTaskSyncSettings()
+                let isFavorite = sqlite3_column_int(statement, 16) != 0
                 return ProjectRecord(
                     id: projectID,
                     name: String(cString: namePtr),
@@ -975,6 +1066,7 @@ public actor SQLiteStore: PersistenceStore {
                     reviewSettings: reviewSettings,
                     taskLoopMode: taskLoopMode,
                     taskSyncSettings: taskSyncSettings,
+                    isFavorite: isFavorite,
                     isArchived: isArchived,
                     createdAt: createdAt,
                     updatedAt: updatedAt
@@ -1012,8 +1104,9 @@ public actor SQLiteStore: PersistenceStore {
                 icon,
                 is_archived,
                 task_loop_mode,
-                task_sync_settings_json
-            ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+                task_sync_settings_json,
+                is_favorite
+            ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
             """
 
         var projectStatement: OpaquePointer?
@@ -1046,6 +1139,7 @@ public actor SQLiteStore: PersistenceStore {
         sqlite3_bind_int(projectStatement, 14, project.isArchived ? 1 : 0)
         bindText(project.taskLoopMode.rawValue, at: 15, statement: projectStatement)
         bindText(taskSyncSettingsJSON, at: 16, statement: projectStatement)
+        sqlite3_bind_int(projectStatement, 17, project.isFavorite ? 1 : 0)
         guard sqlite3_step(projectStatement) == SQLITE_DONE else {
             return
         }
@@ -1338,6 +1432,37 @@ public actor SQLiteStore: PersistenceStore {
             map[project.id] = project
         }
         return map
+    }
+
+    private static func projectListRecord(_ project: ProjectRecord) -> ProjectListRecord {
+        var counts = ProjectTaskCountSummary(total: project.tasks.count)
+        for task in project.tasks {
+            switch ProjectTaskStatus(rawValue: task.status) {
+            case .backlog: counts.backlog += 1
+            case .ready: counts.ready += 1
+            case .inProgress: counts.inProgress += 1
+            case .waitingInput: counts.waitingInput += 1
+            case .blocked: counts.blocked += 1
+            case .needsReview: counts.needsReview += 1
+            case .done: counts.done += 1
+            default: break
+            }
+        }
+        return ProjectListRecord(
+            id: project.id,
+            name: project.name,
+            description: project.description,
+            icon: project.icon,
+            channels: project.channels,
+            actors: project.actors,
+            teams: project.teams,
+            repoPath: project.repoPath,
+            taskCounts: counts,
+            isFavorite: project.isFavorite,
+            isArchived: project.isArchived,
+            createdAt: project.createdAt,
+            updatedAt: project.updatedAt
+        )
     }
 
     private func sortedFallbackEvents() -> [EventEnvelope] {
@@ -2772,6 +2897,11 @@ public actor SQLiteStore: PersistenceStore {
         _ = sqlite3_exec(
             db,
             "ALTER TABLE dashboard_projects ADD COLUMN is_archived INTEGER NOT NULL DEFAULT 0;",
+            nil, nil, nil
+        )
+        _ = sqlite3_exec(
+            db,
+            "ALTER TABLE dashboard_projects ADD COLUMN is_favorite INTEGER NOT NULL DEFAULT 0;",
             nil, nil, nil
         )
         _ = sqlite3_exec(

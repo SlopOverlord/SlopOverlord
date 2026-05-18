@@ -111,6 +111,7 @@ export interface CoreApi {
   probeACPTarget: (payload: AnyRecord) => Promise<AnyRecord | null>;
   fetchSearchProviderStatus: () => Promise<AnyRecord | null>;
   fetchProjects: () => Promise<AnyRecord[] | null>;
+  fetchProjectSummaries: () => Promise<AnyRecord[] | null>;
   fetchProject: (projectId: string) => Promise<AnyRecord | null>;
   fetchTaskByReference: (taskReference: string) => Promise<AnyRecord | null>;
   createProject: (payload: AnyRecord) => Promise<{ project: AnyRecord; repoCloneSucceeded: boolean | null } | null>;
@@ -740,6 +741,16 @@ export function createCoreApi(): CoreApi {
     fetchProjects: async () => {
       const response = await requestJson<AnyRecord[]>({
         path: "/v1/projects"
+      });
+      if (!response.ok || !Array.isArray(response.data)) {
+        return null;
+      }
+      return response.data;
+    },
+
+    fetchProjectSummaries: async () => {
+      const response = await requestJson<AnyRecord[]>({
+        path: "/v1/projects?summary=true"
       });
       if (!response.ok || !Array.isArray(response.data)) {
         return null;

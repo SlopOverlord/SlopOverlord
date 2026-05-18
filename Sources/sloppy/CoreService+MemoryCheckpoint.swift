@@ -64,6 +64,63 @@ extension CoreService {
         return AgentMemoryCheckpointResponse(ok: true, reason: reason)
     }
 
+    func scheduleAgentMemoryCheckpoint(agentID: String, sessionID: String, reason: String) {
+        guard let normalizedAgentID = normalizedAgentID(agentID),
+              let normalizedSessionID = normalizedSessionID(sessionID)
+        else {
+            logger.warning(
+                "memory.checkpoint.background_failed",
+                metadata: [
+                    "agent_id": .string(agentID),
+                    "session_id": .string(sessionID),
+                    "reason": .string(reason),
+                    "error": .string("invalid_identifier"),
+                ]
+            )
+            return
+        }
+
+        logger.info(
+            "memory.checkpoint.background_scheduled",
+            metadata: [
+                "agent_id": .string(normalizedAgentID),
+                "session_id": .string(normalizedSessionID),
+                "reason": .string(reason),
+            ]
+        )
+
+        Task { [weak self] in
+            guard let self else {
+                return
+            }
+            await self.runScheduledAgentMemoryCheckpoint(
+                agentID: normalizedAgentID,
+                sessionID: normalizedSessionID,
+                reason: reason
+            )
+        }
+    }
+
+    private func runScheduledAgentMemoryCheckpoint(agentID: String, sessionID: String, reason: String) async {
+        logger.info(
+            "memory.checkpoint.background_started",
+            metadata: [
+                "agent_id": .string(agentID),
+                "session_id": .string(sessionID),
+                "reason": .string(reason),
+            ]
+        )
+        await runAgentMemoryCheckpoint(agentID: agentID, sessionID: sessionID, reason: reason)
+        logger.info(
+            "memory.checkpoint.background_completed",
+            metadata: [
+                "agent_id": .string(agentID),
+                "session_id": .string(sessionID),
+                "reason": .string(reason),
+            ]
+        )
+    }
+
     func runAgentMemoryCheckpoint(agentID: String, sessionID: String, reason: String) async {
         guard let normalizedAgentID = normalizedAgentID(agentID) else { return }
         guard let normalizedSessionID = normalizedSessionID(sessionID) else { return }

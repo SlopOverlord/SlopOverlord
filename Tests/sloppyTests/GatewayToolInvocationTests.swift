@@ -129,13 +129,114 @@ struct GatewayToolInvocationTests {
             channelID: channelID,
             request: ToolInvocationRequest(
                 tool: "project.task_create",
-                arguments: emptyOptionalArguments.merging(["title": .string("New task")]) { _, new in new }
+                arguments: emptyOptionalArguments.merging([
+                    "title": .string("New task"),
+                    "description": .string(planningTaskBrief())
+                ]) { _, new in new }
             )
         )
 
         #expect(createResult.ok == true)
         #expect(createResult.data?.asObject?["projectId"]?.asString == projectID)
         #expect(createResult.data?.asObject?["status"]?.asString == ProjectTaskStatus.pendingApproval.rawValue)
+    }
+
+    @Test("gateway planning task create rejects sparse descriptions")
+    func gatewayPlanningTaskCreateRejectsSparseDescriptions() async throws {
+        let service = makeService()
+        let agentID = "gateway-task-brief-reject-\(UUID().uuidString)"
+        let projectID = "gateway-task-brief-reject-\(UUID().uuidString)"
+        let channelID = "channel:brief-reject-\(UUID().uuidString)"
+        try await makeAgent(service: service, agentID: agentID)
+
+        _ = try await service.createProject(
+            ProjectCreateRequest(
+                id: projectID,
+                name: "Task Brief Reject",
+                channels: [.init(title: "Brief Reject", channelId: channelID)]
+            )
+        )
+
+        let result = await service.invokeToolFromChannelRuntime(
+            agentID: agentID,
+            channelID: channelID,
+            request: ToolInvocationRequest(
+                tool: "project.task_create",
+                arguments: [
+                    "projectId": .string(projectID),
+                    "title": .string("Fix screenshot tests")
+                ]
+            ),
+            chatMode: .plan
+        )
+
+        #expect(result.ok == false)
+        #expect(result.error?.code == "task_brief_required")
+        #expect(result.error?.retryable == true)
+        #expect(result.error?.hint?.contains("## Goal") == true)
+        #expect(result.error?.hint?.contains("full planning handoff") == true)
+    }
+
+    @Test("gateway planning task create accepts full task brief")
+    func gatewayPlanningTaskCreateAcceptsFullTaskBrief() async throws {
+        let service = makeService()
+        let agentID = "gateway-task-brief-accept-\(UUID().uuidString)"
+        let projectID = "gateway-task-brief-accept-\(UUID().uuidString)"
+        let channelID = "channel:brief-accept-\(UUID().uuidString)"
+        try await makeAgent(service: service, agentID: agentID)
+
+        _ = try await service.createProject(
+            ProjectCreateRequest(
+                id: projectID,
+                name: "Task Brief Accept",
+                channels: [.init(title: "Brief Accept", channelId: channelID)]
+            )
+        )
+
+        let result = await service.invokeToolFromChannelRuntime(
+            agentID: agentID,
+            channelID: channelID,
+            request: ToolInvocationRequest(
+                tool: "project.task_create",
+                arguments: [
+                    "projectId": .string(projectID),
+                    "title": .string("Fix screenshot tests"),
+                    "description": .string(planningTaskBrief()),
+                    "kind": .string(ProjectTaskKind.planning.rawValue),
+                    "status": .string(ProjectTaskStatus.pendingApproval.rawValue)
+                ]
+            ),
+            chatMode: .plan
+        )
+
+        #expect(result.ok == true)
+        let project = try await service.getProject(id: projectID)
+        let task = try #require(project.tasks.first(where: { $0.title == "Fix screenshot tests" }))
+        #expect(task.description.contains("Example/YX360Promozavr_ScreenshotMaker"))
+        #expect(task.description.contains("Potential risks from planning"))
+    }
+
+    @Test("core API still accepts short manual task descriptions")
+    func coreAPIStillAcceptsShortManualTaskDescriptions() async throws {
+        let service = makeService()
+        let projectID = "gateway-core-short-task-\(UUID().uuidString)"
+
+        _ = try await service.createProject(
+            ProjectCreateRequest(id: projectID, name: "Core Short Task")
+        )
+
+        let project = try await service.createProjectTask(
+            projectID: projectID,
+            request: ProjectTaskCreateRequest(
+                title: "Manual short task",
+                description: "Small manual note",
+                status: ProjectTaskStatus.pendingApproval.rawValue
+            )
+        )
+
+        let task = try #require(project.tasks.first(where: { $0.title == "Manual short task" }))
+        #expect(task.description == "Small manual note")
+        #expect(task.status == ProjectTaskStatus.pendingApproval.rawValue)
     }
 
     @Test("gateway plan input tool records pending request and option answer")
@@ -394,5 +495,21 @@ struct GatewayToolInvocationTests {
             object["details"] = .string(details)
         }
         return .object(object)
+    }
+
+    private func planningTaskBrief() -> String {
+        """
+        ## Goal
+        Fix the screenshot tests so `make_snapshots` produces screenshots for every language and theme.
+
+        ## Context
+        Planning found key files in `Example/YX360Promozavr_ScreenshotMaker`, including the main screenshot maker, snapshot helper, parameters, Fastfile, and Xcode scheme. Potential risks from planning include async `@MainActor` UI test hangs, launch environment values not being read by the sample app, setupSnapshot ordering, external plugin availability, AccountManagerHolder token setup, and Xcode scheme compatibility.
+
+        ## Definition of Done
+        The screenshot lane succeeds for all configured languages and themes, and the task preserves the planning findings for Build mode.
+
+        ## Tests / Verification
+        Run `bundle exec fastlane make_snapshots` or the repository-equivalent screenshot lane, then verify generated artifacts for all expected configurations.
+        """
     }
 }

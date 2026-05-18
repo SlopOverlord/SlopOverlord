@@ -187,6 +187,9 @@ public protocol PersistenceStore: Sendable {
     /// Lists dashboard projects with embedded channels and tasks.
     func listProjects() async -> [ProjectRecord]
 
+    /// Lists dashboard projects with metadata and task counts only.
+    func listProjectSummaries() async -> [ProjectListRecord]
+
     /// Returns one dashboard project by identifier.
     func project(id: String) async -> ProjectRecord?
 

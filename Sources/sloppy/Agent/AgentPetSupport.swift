@@ -699,7 +699,11 @@ enum AgentPetProgressionEngine {
         guard rng.nextDouble() < tuning.decayProbability else {
             return dampened
         }
-        return dampened + randomDecayDelta(using: &rng)
+        let adjusted = dampened + randomDecayDelta(using: &rng)
+        if !dampened.isZero && adjusted.positiveComponents().isZero {
+            return dampened
+        }
+        return adjusted
     }
 
     private static func randomDecayDelta(using rng: inout SplitMix64) -> AgentPetStats {
@@ -934,7 +938,7 @@ extension AgentPetStats {
                 return 0
             }
             let scaled = Int((Double(value) * factor).rounded(.down))
-            return max(scaled, 0)
+            return max(scaled, 1)
         }
 
         return AgentPetStats(

@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { fetchAgents, fetchActorsBoard } from "../../api";
+import { ProjectIcon } from "../../components/ProjectIcon";
 import { AgentPetIcon } from "../../features/agents/components/AgentPetSprite";
 import { workersForProject, activeWorkersForProject, buildTaskCounts, formatRelativeTime } from "./utils";
 
@@ -103,7 +104,8 @@ export function ProjectList({
   showArchived = false,
   archivedCount = 0,
   onToggleArchived,
-  onUnarchiveProject
+  onUnarchiveProject,
+  onToggleFavorite = () => {}
 }) {
   const { actorPetByName, teamMembersByName } = useBoard();
 
@@ -143,6 +145,102 @@ export function ProjectList({
     );
   }
 
+  const favoriteProjects = showArchived ? [] : projects.filter((project) => project.isFavorite);
+  const regularProjects = showArchived ? projects : projects.filter((project) => !project.isFavorite);
+  const sections = showArchived || favoriteProjects.length === 0
+    ? [{ id: "projects", title: null, projects }]
+    : [
+      { id: "favorites", title: "Favorites", projects: favoriteProjects },
+      { id: "projects", title: "Projects", projects: regularProjects }
+    ].filter((section) => section.projects.length > 0);
+
+  function renderProjectCard(project) {
+    const activeWorkers = activeWorkersForProject(project, workers);
+    const taskCounts = project.taskCounts || buildTaskCounts(project.tasks);
+    const actors = Array.isArray(project.actors) ? project.actors : [];
+    const teams = Array.isArray(project.teams) ? project.teams : [];
+    const isFavorite = Boolean(project.isFavorite);
+
+    return (
+      <article
+        key={project.id}
+        className={`project-grid-card hover-levitate ${isFavorite ? "project-grid-card--favorite" : ""}`}
+        data-testid={`project-list-item-${project.id}`}
+        role="button"
+        tabIndex={0}
+        onClick={() => openProject(project.id)}
+        onKeyDown={(event) => {
+          if (event.key === "Enter" || event.key === " ") {
+            event.preventDefault();
+            openProject(project.id);
+          }
+        }}
+      >
+        {showArchived ? (
+          <button
+            type="button"
+            className="project-unarchive-btn"
+            title="Unarchive project"
+            style={{ position: "absolute", top: 6, right: 6 }}
+            onClick={(e) => {
+              e.stopPropagation();
+              onUnarchiveProject(project.id);
+            }}
+          >
+            <span className="material-symbols-rounded" style={{ fontSize: "1rem" }}>unarchive</span>
+          </button>
+        ) : (
+          <button
+            type="button"
+            className={`project-favorite-btn ${isFavorite ? "active" : ""}`}
+            title={isFavorite ? "Remove from favorites" : "Add to favorites"}
+            aria-label={isFavorite ? "Remove from favorites" : "Add to favorites"}
+            aria-pressed={isFavorite}
+            onClick={(e) => {
+              e.stopPropagation();
+              onToggleFavorite(project.id, !isFavorite);
+            }}
+          >
+            <span className="material-symbols-rounded" aria-hidden="true">
+              {isFavorite ? "star" : "star"}
+            </span>
+          </button>
+        )}
+
+        <div className="project-grid-body">
+          {project.icon ? (
+            <ProjectIcon
+              icon={project.icon}
+              className="project-grid-icon"
+              imageClassName="project-grid-icon-image"
+            />
+          ) : null}
+          <p className="project-grid-name">{project.name}</p>
+          {project.description ? (
+            <p className="project-grid-desc">{project.description}</p>
+          ) : null}
+        </div>
+
+        <div className="project-grid-footer">
+          <div className="project-grid-badges">
+            <span className="project-grid-badge">{taskCounts.total} tasks</span>
+            <span className="project-grid-badge project-grid-badge--progress">{taskCounts.not_done} not done</span>
+            {taskCounts.in_progress > 0 && (
+              <span className="project-grid-badge project-grid-badge--progress">{taskCounts.in_progress} in progress</span>
+            )}
+            {taskCounts.done > 0 && (
+              <span className="project-grid-badge project-grid-badge--active">{taskCounts.done} done</span>
+            )}
+            {activeWorkers.length > 0 && (
+              <span className="project-grid-badge project-grid-badge--active">{activeWorkers.length} running</span>
+            )}
+          </div>
+          <AgentStack actorNames={actors} teams={teams} actorPetByName={actorPetByName} teamMembersByName={teamMembersByName} />
+        </div>
+      </article>
+    );
+  }
+
   return (
     <section className="project-grid-list" data-testid="project-list" data-tour-id="projects-overview">
       {showArchived && (
@@ -156,71 +254,19 @@ export function ProjectList({
         </div>
       )}
 
-      {projects.map((project) => {
-        const activeWorkers = activeWorkersForProject(project, workers);
-        const taskCounts = buildTaskCounts(project.tasks);
-        const actors = Array.isArray(project.actors) ? project.actors : [];
-        const teams = Array.isArray(project.teams) ? project.teams : [];
-
-        return (
-          <article
-            key={project.id}
-            className="project-grid-card hover-levitate"
-            data-testid={`project-list-item-${project.id}`}
-            role="button"
-            tabIndex={0}
-            onClick={() => openProject(project.id)}
-            onKeyDown={(event) => {
-              if (event.key === "Enter" || event.key === " ") {
-                event.preventDefault();
-                openProject(project.id);
-              }
-            }}
-          >
-            {showArchived && (
-              <button
-                type="button"
-                className="project-unarchive-btn"
-                title="Unarchive project"
-                style={{ position: "absolute", top: 6, right: 6 }}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onUnarchiveProject(project.id);
-                }}
-              >
-                <span className="material-symbols-rounded" style={{ fontSize: "1rem" }}>unarchive</span>
-              </button>
-            )}
-
-            <div className="project-grid-body">
-              {project.icon ? (
-                <span className="material-symbols-rounded project-grid-icon" aria-hidden="true">{project.icon}</span>
-              ) : null}
-              <p className="project-grid-name">{project.name}</p>
-              {project.description ? (
-                <p className="project-grid-desc">{project.description}</p>
-              ) : null}
+      {sections.map((section) => (
+        <React.Fragment key={section.id}>
+          {section.title ? (
+            <div className="project-grid-section-title">
+              <span className="material-symbols-rounded" aria-hidden="true">
+                {section.id === "favorites" ? "star" : "folder"}
+              </span>
+              <span>{section.title}</span>
             </div>
-
-            <div className="project-grid-footer">
-              <div className="project-grid-badges">
-                <span className="project-grid-badge">{taskCounts.total} tasks</span>
-                <span className="project-grid-badge project-grid-badge--progress">{taskCounts.not_done} not done</span>
-                {taskCounts.in_progress > 0 && (
-                  <span className="project-grid-badge project-grid-badge--progress">{taskCounts.in_progress} in progress</span>
-                )}
-                {taskCounts.done > 0 && (
-                  <span className="project-grid-badge project-grid-badge--active">{taskCounts.done} done</span>
-                )}
-                {activeWorkers.length > 0 && (
-                  <span className="project-grid-badge project-grid-badge--active">{activeWorkers.length} running</span>
-                )}
-              </div>
-              <AgentStack actorNames={actors} teams={teams} actorPetByName={actorPetByName} teamMembersByName={teamMembersByName} />
-            </div>
-          </article>
-        );
-      })}
+          ) : null}
+          {section.projects.map((project) => renderProjectCard(project))}
+        </React.Fragment>
+      ))}
 
       {!showArchived && archivedCount > 0 && (
         <button type="button" className="project-archive-toggle-btn" style={{ gridColumn: "1 / -1" }} onClick={onToggleArchived}>

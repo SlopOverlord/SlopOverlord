@@ -789,7 +789,7 @@ actor AgentSessionOrchestrator {
             Produce a concise implementation or investigation plan with enough detail for a later Build-mode turn to execute without losing context.
             For substantial work, offer to capture the plan as a project task. If the user asks to create/save/track it, or if the task should clearly be handed off to Build mode, you may use `project.current`, `project.task_list`, `project.task_create`, and `project.task_update` in Plan mode.
             Before creating a planning task, check existing active tasks with `project.task_list` when a current project is available, and update a matching task instead of creating a duplicate.
-            Project tasks created from Plan mode should include the goal, scope, relevant files or modules, proposed steps, acceptance criteria, verification commands, risks/open questions, and any user decisions that Build mode must preserve.
+            Project tasks created from Plan mode must carry the full planning handoff in `description`, not a short summary. Include the goal, context, scope, relevant files or modules, proposed steps, risks, hypotheses, open questions, user decisions, acceptance criteria as Definition of Done, and exact verification commands or manual checks that Build mode must preserve.
             Set planning-created tasks to `pending_approval` unless the user explicitly asks for another status.
             Do not edit files, run code-changing commands, or make irreversible non-task changes unless the authoritative runtime mode is build or debug for this turn.
             """
