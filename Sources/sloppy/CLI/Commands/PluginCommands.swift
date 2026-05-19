@@ -87,10 +87,12 @@ struct PluginCreateCommand: AsyncParsableCommand {
 }
 
 struct PluginInstallCommand: AsyncParsableCommand {
-    static let configuration = CommandConfiguration(commandName: "install", abstract: "Install a source plugin from a Git URL.")
+    static let configuration = CommandConfiguration(commandName: "install", abstract: "Install a source plugin from a Git URL or local directory.")
 
-    @Argument(help: "Plugin package Git URL") var sourceUrl: String
+    @Argument(help: "Plugin package Git URL or local directory") var sourceUrl: String
     @Option(name: .long, help: "Git ref, branch, or tag to checkout") var ref: String?
+    @Flag(name: .customLong("local"), help: "Copy plugin package from a local directory instead of cloning with Git") var local: Bool = false
+    @Flag(name: .customLong("local-directory"), help: "Copy plugin package from a local directory instead of cloning with Git") var localDirectory: Bool = false
     @Flag(name: .long, help: "Replace an existing plugin with the same plugin.json name") var force: Bool = false
     @Flag(name: .long, help: "Install and build without starting the plugin") var disabled: Bool = false
     @Option(name: .long) var url: String?
@@ -104,7 +106,8 @@ struct PluginInstallCommand: AsyncParsableCommand {
             sourceUrl: sourceUrl,
             ref: ref,
             force: force,
-            enabled: !disabled
+            enabled: !disabled,
+            localDirectory: local || localDirectory
         )
         do {
             let body = try client.encode(request)

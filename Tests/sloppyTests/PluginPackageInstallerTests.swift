@@ -15,9 +15,14 @@ private actor FakePluginProcessRunner: PluginProcessRunning {
         recordedCommands.append((executable: executable, arguments: arguments, cwd: cwd?.path))
 
         if executable == "git", arguments.first == "clone" {
-            let source = URL(fileURLWithPath: arguments[1], isDirectory: true)
             let destination = URL(fileURLWithPath: arguments[2], isDirectory: true)
-            try FileManager.default.copyItem(at: source, to: destination)
+            if arguments[1].hasPrefix("https://github.com/") {
+                let repoName = URL(string: arguments[1])?.deletingPathExtension().lastPathComponent ?? "github-plugin"
+                try makeNodePlugin(at: destination, name: repoName, pluginProtocol: "source_control")
+            } else {
+                let source = URL(fileURLWithPath: arguments[1], isDirectory: true)
+                try FileManager.default.copyItem(at: source, to: destination)
+            }
             return PluginProcessResult(exitCode: 0, stdout: "", stderr: "")
         }
 
@@ -125,6 +130,61 @@ func sourcePluginInstallerClonesBuildsAndReusesCache() async throws {
 
     let commandsAfterSecond = await runner.commands()
     #expect(commandsAfterSecond.filter { $0.executable == "swift" && $0.arguments.contains("--product") }.count == 1)
+}
+
+@Test
+func sourcePluginInstallerCopiesLocalDirectoryWhenRequested() async throws {
+    let root = FileManager.default.temporaryDirectory
+        .appendingPathComponent("plugin-local-install-test-\(UUID().uuidString)", isDirectory: true)
+    defer { try? FileManager.default.removeItem(at: root) }
+
+    let source = root.appendingPathComponent("source", isDirectory: true)
+    try makeNodePlugin(at: source, name: "local-plugin", pluginProtocol: "source_control")
+
+    let runner = FakePluginProcessRunner()
+    let installer = PluginPackageInstaller(
+        pluginsRootURL: root.appendingPathComponent("plugins", isDirectory: true),
+        cacheRootURL: root.appendingPathComponent("plugin-cache", isDirectory: true),
+        processRunner: runner
+    )
+
+    let installed = try await installer.install(
+        ChannelPluginInstallRequest(sourceUrl: source.path, force: true, localDirectory: true)
+    )
+    #expect(installed.manifest.name == "local-plugin")
+    #expect(installed.rebuilt == false)
+    #expect(FileManager.default.fileExists(atPath: installed.sourceURL.appendingPathComponent("plugin.json").path))
+
+    let commands = await runner.commands()
+    #expect(!commands.contains(where: { $0.executable == "git" && $0.arguments.first == "clone" }))
+}
+
+@Test
+func sourcePluginInstallerExpandsGitHubShorthandBeforeCloning() async throws {
+    let root = FileManager.default.temporaryDirectory
+        .appendingPathComponent("plugin-shorthand-install-test-\(UUID().uuidString)", isDirectory: true)
+    defer { try? FileManager.default.removeItem(at: root) }
+
+    let runner = FakePluginProcessRunner()
+    let installer = PluginPackageInstaller(
+        pluginsRootURL: root.appendingPathComponent("plugins", isDirectory: true),
+        cacheRootURL: root.appendingPathComponent("plugin-cache", isDirectory: true),
+        processRunner: runner
+    )
+
+    let installed = try await installer.install(
+        ChannelPluginInstallRequest(sourceUrl: "adaengine@ada_plugin", force: true)
+    )
+    #expect(installed.manifest.name == "ada_plugin")
+
+    let commands = await runner.commands()
+    let clonedExpandedGitHubURL = commands.contains { command in
+        command.executable == "git"
+            && command.arguments.count == 3
+            && command.arguments[0] == "clone"
+            && command.arguments[1] == "https://github.com/adaengine/ada_plugin.git"
+    }
+    #expect(clonedExpandedGitHubURL)
 }
 
 @Test

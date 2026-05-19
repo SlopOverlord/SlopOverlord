@@ -63,21 +63,13 @@ struct SystemJSONLLogHandler: LogHandler {
         set { metadata[key] = newValue }
     }
 
-    func log(
-        level: Logger.Level,
-        message: Logger.Message,
-        metadata callMetadata: Logger.Metadata?,
-        source: String,
-        file: String,
-        function: String,
-        line: UInt
-    ) {
-        guard level >= logLevel, let writer else {
+    func log(event: LogEvent) {
+        guard event.level >= logLevel, let writer else {
             return
         }
 
         var mergedMetadata = metadata
-        if let callMetadata {
+        if let callMetadata = event.metadata {
             for (key, value) in callMetadata {
                 mergedMetadata[key] = value
             }
@@ -85,10 +77,10 @@ struct SystemJSONLLogHandler: LogHandler {
 
         let record = SystemLogEntry(
             timestamp: Date(),
-            level: mappedLevel(level),
+            level: mappedLevel(event.level),
             label: label,
-            message: message.description,
-            source: source,
+            message: event.message.description,
+            source: event.source,
             metadata: flattenMetadata(mergedMetadata)
         )
 

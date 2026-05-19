@@ -355,6 +355,8 @@ Or through the CLI:
 
 ```bash
 sloppy plugin install https://github.com/example/my-platform-plugin.git
+sloppy plugin install example@my-platform-plugin
+sloppy plugin install ./my-platform-plugin --local
 sloppy plugin install https://github.com/example/my-platform-plugin.git --ref v1.0.0 --force
 ```
 

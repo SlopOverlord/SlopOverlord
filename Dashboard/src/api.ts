@@ -14,6 +14,7 @@ export const fetchBulletins = coreApi.fetchBulletins;
 export const fetchChannelSlashCommands = coreApi.fetchChannelSlashCommands;
 export const fetchAgentChatSlashCommands = coreApi.fetchAgentChatSlashCommands;
 export const fetchChannelPlugins = coreApi.fetchChannelPlugins;
+export const installPlugin = coreApi.installPlugin;
 export const fetchWorkers = coreApi.fetchWorkers;
 export const fetchArtifact = coreApi.fetchArtifact;
 export const fetchRuntimeConfig = coreApi.fetchRuntimeConfig;

@@ -82,6 +82,7 @@ export interface CoreApi {
     }>;
   } | null>;
   fetchChannelPlugins: () => Promise<AnyRecord[] | null>;
+  installPlugin: (payload: AnyRecord) => Promise<AnyRecord | null>;
   fetchWorkers: () => Promise<AnyRecord[]>;
   fetchArtifact: (id: string) => Promise<AnyRecord | null>;
   fetchRuntimeConfig: () => Promise<AnyRecord | null>;
@@ -438,6 +439,18 @@ export function createCoreApi(): CoreApi {
       });
       if (!response.ok || !Array.isArray(response.data)) {
         return null;
+      }
+      return response.data;
+    },
+
+    installPlugin: async (payload) => {
+      const response = await requestJson<AnyRecord, AnyRecord>({
+        path: "/v1/plugins/install",
+        method: "POST",
+        body: payload
+      });
+      if (!response.ok) {
+        throw new Error(formatHttpError(response.status, response.data));
       }
       return response.data;
     },

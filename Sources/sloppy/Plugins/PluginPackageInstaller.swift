@@ -79,7 +79,11 @@ struct PluginPackageInstaller {
         try fileManager.createDirectory(at: tempRoot, withIntermediateDirectories: true)
         defer { try? fileManager.removeItem(at: tempRoot) }
 
-        try await runGitClone(source: source, checkoutURL: checkoutURL)
+        if request.localDirectory == true {
+            try copyLocalDirectory(source: source, checkoutURL: checkoutURL)
+        } else {
+            try await runGitClone(source: source, checkoutURL: checkoutURL)
+        }
         if let ref = request.ref?.trimmingCharacters(in: .whitespacesAndNewlines), !ref.isEmpty {
             try await runGitCheckout(ref: ref, checkoutURL: checkoutURL)
         }
@@ -151,10 +155,33 @@ struct PluginPackageInstaller {
         "model_provider",
     ]
 
+    private func copyLocalDirectory(source: String, checkoutURL: URL) throws {
+        let sourceURL = localDirectoryURL(from: source)
+        var isDirectory: ObjCBool = false
+        guard fileManager.fileExists(atPath: sourceURL.path, isDirectory: &isDirectory), isDirectory.boolValue else {
+            throw PluginPackageInstallError.invalidSourceURL
+        }
+
+        do {
+            try fileManager.copyItem(at: sourceURL, to: checkoutURL)
+        } catch {
+            throw PluginPackageInstallError.moveFailed("Failed to copy local plugin directory into workspace: \(error)")
+        }
+    }
+
+    private func localDirectoryURL(from source: String) -> URL {
+        if let url = URL(string: source), url.isFileURL {
+            return url
+        }
+        let expanded = (source as NSString).expandingTildeInPath
+        return URL(fileURLWithPath: expanded, isDirectory: true)
+    }
+
     private func runGitClone(source: String, checkoutURL: URL) async throws {
+        let cloneSource = gitCloneSource(from: source)
         let result = try await processRunner.run(
             "git",
-            arguments: ["clone", source, checkoutURL.path],
+            arguments: ["clone", cloneSource, checkoutURL.path],
             cwd: nil
         )
         guard result.exitCode == 0 else {
@@ -164,6 +191,35 @@ struct PluginPackageInstaller {
                 output: combinedOutput(result)
             )
         }
+    }
+
+    private func gitCloneSource(from source: String) -> String {
+        githubShorthandSource(from: source) ?? source
+    }
+
+    private func githubShorthandSource(from source: String) -> String? {
+        let parts = source.split(separator: "@", omittingEmptySubsequences: false)
+        guard parts.count == 2 else {
+            return nil
+        }
+
+        let owner = String(parts[0])
+        let repo = String(parts[1])
+        guard isGitHubShorthandComponent(owner),
+              isGitHubShorthandComponent(repo)
+        else {
+            return nil
+        }
+
+        let repoPath = repo.hasSuffix(".git") ? repo : "\(repo).git"
+        return "https://github.com/\(owner)/\(repoPath)"
+    }
+
+    private func isGitHubShorthandComponent(_ value: String) -> Bool {
+        guard !value.isEmpty else {
+            return false
+        }
+        return value.range(of: #"^[A-Za-z0-9._-]+$"#, options: .regularExpression) != nil
     }
 
     private func runGitCheckout(ref: String, checkoutURL: URL) async throws {

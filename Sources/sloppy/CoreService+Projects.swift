@@ -557,6 +557,7 @@ extension CoreService {
                 panel.canCreateDirectories = false
                 panel.title = "Choose Project Directory"
                 panel.prompt = "Open Project"
+                panel.level = .floating
 
                 func finish(_ response: NSApplication.ModalResponse) {
                     guard response == .OK else {

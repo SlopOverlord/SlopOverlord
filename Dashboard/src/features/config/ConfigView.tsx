@@ -18,7 +18,9 @@ import {
   fetchGitHubAuthStatus,
   connectGitHub,
   disconnectGitHub,
-  runWorkspaceGitSync
+  runWorkspaceGitSync,
+  selectDirectory,
+  installPlugin
 } from "../../api";
 import { collectAggregatedProviderModels, filterModelsByQuery } from "../agents/utils/aggregateProviderModels";
 import { NodeHostEditor } from "./components/NodeHostEditor";
@@ -2268,6 +2270,8 @@ export function ConfigView({
           onSelectPluginIndex={setSelectedPluginIndex}
           mutateDraft={mutateDraft}
           emptyPlugin={emptyPlugin}
+          selectDirectory={selectDirectory}
+          installPlugin={installPlugin}
         />
       );
     }

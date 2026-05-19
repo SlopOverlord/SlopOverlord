@@ -164,6 +164,7 @@
   .providers-list,
   .providers-opencode-grid,
   .config-capability-grid,
+  .config-plugin-source-row,
   .provider-modal-form,
   .updates-status-grid {
     grid-template-columns: 1fr;
@@ -216,6 +217,16 @@
   .agent-tools-head {
     flex-direction: column;
     align-items: flex-start;
+  }
+
+  .config-plugin-source-actions {
+    justify-content: stretch;
+    flex-wrap: wrap;
+  }
+
+  .config-plugin-force,
+  .config-plugin-install-button {
+    flex: 1 1 180px;
   }
 
   .agent-tools-status {

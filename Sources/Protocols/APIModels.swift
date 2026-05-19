@@ -2364,17 +2364,20 @@ public struct ChannelPluginInstallRequest: Codable, Sendable {
     public var ref: String?
     public var force: Bool?
     public var enabled: Bool?
+    public var localDirectory: Bool?
 
     public init(
         sourceUrl: String,
         ref: String? = nil,
         force: Bool? = nil,
-        enabled: Bool? = nil
+        enabled: Bool? = nil,
+        localDirectory: Bool? = nil
     ) {
         self.sourceUrl = sourceUrl
         self.ref = ref
         self.force = force
         self.enabled = enabled
+        self.localDirectory = localDirectory
     }
 }
 

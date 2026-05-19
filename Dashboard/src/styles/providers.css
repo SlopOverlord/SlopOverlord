@@ -428,6 +428,16 @@
   align-items: start;
 }
 
+.config-plugin-layout {
+  grid-template-columns: minmax(230px, 280px) minmax(0, 1fr);
+}
+
+.config-plugin-main {
+  min-width: 0;
+  display: grid;
+  gap: 12px;
+}
+
 .config-integration-list {
   background: var(--surface-2);
 }
@@ -497,6 +507,153 @@
   border: 1px solid var(--line);
   background: var(--surface-2);
   padding: 14px;
+}
+
+.config-plugin-detail-card {
+  min-height: 230px;
+}
+
+.config-plugin-install-panel {
+  border: 1px solid var(--line);
+  background:
+    linear-gradient(135deg, rgba(204, 255, 0, 0.06), transparent 36%),
+    var(--surface-2);
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+}
+
+.config-plugin-install-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.config-plugin-install-head h3 {
+  margin: 0;
+  font-size: 1rem;
+}
+
+.config-plugin-install-head span {
+  display: block;
+  margin-top: 4px;
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+
+.config-plugin-install-head button,
+.config-plugin-install-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  white-space: nowrap;
+}
+
+.config-plugin-install-head button .material-symbols-rounded,
+.config-plugin-install-button .material-symbols-rounded {
+  font-size: 1rem;
+}
+
+.config-plugin-dropzone {
+  min-height: 108px;
+  border: 1px dashed color-mix(in srgb, var(--accent) 58%, var(--line));
+  background: rgba(204, 255, 0, 0.025);
+  display: grid;
+  grid-template-columns: 44px minmax(0, 1fr);
+  align-items: center;
+  gap: 12px;
+  padding: 16px;
+  transition:
+    background var(--motion-duration-fast) ease,
+    border-color var(--motion-duration-fast) ease,
+    box-shadow var(--motion-duration-fast) var(--motion-ease-brutalist);
+}
+
+.config-plugin-dropzone.active {
+  border-color: var(--accent);
+  background: rgba(204, 255, 0, 0.08);
+  box-shadow: var(--shadow-brutalist-sm);
+}
+
+.config-plugin-drop-icon {
+  width: 44px;
+  height: 44px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--line);
+  color: var(--accent);
+  background: var(--surface);
+  font-size: 1.35rem;
+  font-variation-settings: "FILL" 0, "wght" 300, "GRAD" 0, "opsz" 24;
+}
+
+.config-plugin-drop-copy {
+  min-width: 0;
+  display: grid;
+  gap: 5px;
+}
+
+.config-plugin-drop-copy strong {
+  color: var(--text);
+  font-size: 0.92rem;
+}
+
+.config-plugin-drop-copy span {
+  color: var(--muted);
+  font-size: 0.78rem;
+  overflow-wrap: anywhere;
+}
+
+.config-plugin-source-row {
+  display: grid;
+  grid-template-columns: 1fr;
+  align-items: stretch;
+  gap: 10px;
+}
+
+.config-plugin-source-row label:not(.settings-checkbox) {
+  display: grid;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 0.82rem;
+}
+
+.config-plugin-source-actions {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 10px;
+}
+
+.config-plugin-force {
+  min-height: 41px;
+  border: 1px solid var(--line);
+  padding: 0 10px;
+  background: var(--surface);
+  align-items: center;
+  width: auto;
+  white-space: nowrap;
+}
+
+.config-plugin-install-button {
+  min-height: 41px;
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.config-plugin-install-button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.config-plugin-install-status {
+  margin: 0;
+  color: var(--success);
+  font-size: 0.78rem;
+  overflow-wrap: anywhere;
 }
 
 .config-integration-head {
