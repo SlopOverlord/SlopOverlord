@@ -1,7 +1,7 @@
 import Foundation
 import Protocols
 
-public struct TaskSyncProjectDescriptor: Sendable, Equatable {
+public struct TaskSyncProjectDescriptor: Codable, Sendable, Equatable {
     public var providerId: String
     public var projectURL: String
     public var title: String?
@@ -26,7 +26,7 @@ public struct TaskSyncProjectDescriptor: Sendable, Equatable {
     }
 }
 
-public struct TaskSyncExternalTask: Sendable, Equatable {
+public struct TaskSyncExternalTask: Codable, Sendable, Equatable {
     public var title: String
     public var description: String
     public var status: String?
@@ -48,7 +48,7 @@ public struct TaskSyncExternalTask: Sendable, Equatable {
     }
 }
 
-public struct TaskSyncExternalComment: Sendable, Equatable {
+public struct TaskSyncExternalComment: Codable, Sendable, Equatable {
     public var body: String
     public var author: String
     public var metadata: TaskExternalMetadata

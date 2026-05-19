@@ -156,6 +156,41 @@ extension CoreService {
             )
         }
 
+        if result.manifest.protocol == "task_sync" {
+            if enabled {
+                let loader = PluginLoader(logger: logger)
+                guard let loaded = await loader.loadTaskSyncPlugin(
+                    from: result.sourceURL,
+                    cacheRootURL: pluginCacheRootURL,
+                    manifest: result.manifest
+                ) else {
+                    throw ChannelPluginError.invalidPayload
+                }
+                registerTaskSyncProvider(loaded.provider)
+            }
+
+            let now = Date()
+            let existing = await store.channelPlugin(id: result.manifest.name)
+            let record = ChannelPluginRecord(
+                id: result.manifest.name,
+                type: result.manifest.name,
+                baseUrl: "",
+                channelIds: [],
+                config: existing?.config ?? [:],
+                enabled: enabled,
+                deliveryMode: ChannelPluginRecord.DeliveryMode.inProcess,
+                createdAt: existing?.createdAt ?? now,
+                updatedAt: now
+            )
+            await store.saveChannelPlugin(record)
+            return ChannelPluginInstallResponse(
+                plugin: record,
+                sourcePath: result.sourceURL.path,
+                binaryPath: result.binaryURL?.path ?? result.sourceURL.appendingPathComponent(result.manifest.entrypoint ?? "").path,
+                rebuilt: result.rebuilt
+            )
+        }
+
         guard result.manifest.protocol == "gateway" else {
             let now = Date()
             let existing = await store.channelPlugin(id: result.manifest.name)
@@ -182,16 +217,15 @@ extension CoreService {
         let record: ChannelPluginRecord
         if enabled {
             let loader = PluginLoader(logger: logger)
-            guard let binaryURL = result.binaryURL else {
-                throw ChannelPluginError.invalidPayload
-            }
-            guard let plugin = loader.loadDylibGatewayPlugin(
-                binaryURL: binaryURL,
+            guard let loaded = await loader.loadGatewayPlugin(
+                from: result.sourceURL,
+                cacheRootURL: pluginCacheRootURL,
                 manifest: result.manifest,
                 inboundReceiver: self
             ) else {
                 throw ChannelPluginError.invalidPayload
             }
+            let plugin = loaded.plugin
             await channelDelivery.registerPlugin(plugin)
             do {
                 try await plugin.start(inboundReceiver: self)
@@ -234,7 +268,7 @@ extension CoreService {
         return ChannelPluginInstallResponse(
             plugin: record,
             sourcePath: result.sourceURL.path,
-            binaryPath: result.binaryURL?.path ?? "",
+            binaryPath: result.binaryURL?.path ?? result.sourceURL.appendingPathComponent(result.manifest.entrypoint ?? "").path,
             rebuilt: result.rebuilt
         )
     }

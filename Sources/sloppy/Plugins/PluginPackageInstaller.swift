@@ -30,7 +30,7 @@ enum PluginPackageInstallError: Error, LocalizedError, Sendable {
         case .missingOrInvalidManifest:
             return "Plugin package must contain a valid plugin.json at its root."
         case .unsupportedProtocol(let value):
-            return "Only gateway, task_sync, and source_control source plugins are supported; plugin.json protocol was \(value)."
+            return "Only gateway, task_sync, source_control, tool, memory, and model_provider source plugins are supported; plugin.json protocol was \(value)."
         case .invalidPluginName(let name):
             return "Invalid plugin name in plugin.json: \(name)."
         case .conflict(let name):
@@ -102,7 +102,7 @@ struct PluginPackageInstaller {
         }
 
         let build: PluginPackageBuildResult?
-        if manifest.runtime == .swiftDylib {
+        if manifest.runtime == .swift {
             let builder = PluginPackageBuilder(
                 cacheRootURL: cacheRootURL,
                 processRunner: processRunner,
@@ -135,14 +135,21 @@ struct PluginPackageInstaller {
         guard isValidPluginDirectoryName(manifest.name) else {
             throw PluginPackageInstallError.invalidPluginName(manifest.name)
         }
-        if manifest.runtime == .swiftDylib,
+        if manifest.runtime == .swift,
            !fileManager.fileExists(atPath: packageURL.appendingPathComponent("Package.swift").path) {
             throw PluginPackageInstallError.missingPackageSwift
         }
         return manifest
     }
 
-    private static let supportedSourceProtocols: Set<String> = ["gateway", "task_sync", "source_control"]
+    private static let supportedSourceProtocols: Set<String> = [
+        "gateway",
+        "task_sync",
+        "source_control",
+        "tool",
+        "memory",
+        "model_provider",
+    ]
 
     private func runGitClone(source: String, checkoutURL: URL) async throws {
         let result = try await processRunner.run(

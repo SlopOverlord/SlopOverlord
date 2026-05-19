@@ -5,26 +5,34 @@ title: Plugins
 
 # Plugins
 
-Sloppy is built around a plugin system that allows you to extend its capabilities without modifying the core runtime. There are four plugin types, each targeting a different integration point, and two delivery modes: in-process Swift plugins and out-of-process HTTP plugins.
+Sloppy is built around a plugin system that allows you to extend its capabilities without modifying the core runtime. Source plugins are installed as standalone packages and run on one of two runtimes:
+
+- `swift` for SwiftPM dynamic-library plugins loaded through the Swift C ABI.
+- `nodejs` for JavaScript/TypeScript plugins called over a JSON-lines stdio bridge.
+
+Bundled Swift plugins and legacy HTTP channel plugins are still supported, but new source plugins should choose one of these two manifest runtimes.
 
 ## Plugin types
 
 | Type | Protocol | Purpose |
 | --- | --- | --- |
 | Gateway | `GatewayPlugin` | Bridge an external messaging platform to Sloppy channels |
+| Task Sync | `TaskSyncProvider` | Mirror project tasks to an external task system |
+| Source Control | `SourceControlProvider` | Provide repository/worktree/diff operations |
 | Tool | `ToolPlugin` | Expose custom tools (actions) to the agent runtime |
 | Memory | `MemoryPlugin` | Add a custom memory backend for recall and save operations |
 | Model Provider | `ModelProvider` | Integrate a new LLM backend |
 
 All plugin protocols are defined in the `PluginSDK` library (`Sources/PluginSDK/PluginProtocols.swift`).
 
-## Delivery modes
+## Runtimes
 
-| Mode | Language | Loading mechanism |
-| --- | --- | --- |
-| In-process (bundled) | Swift | Linked at compile time via SwiftPM |
-| In-process (external) | Swift | Loaded at runtime via `dlopen` |
-| Out-of-process | Any | HTTP/JSON protocol over a local server |
+| Runtime | Language | Loading mechanism | Best for |
+| --- | --- | --- | --- |
+| `swift` | Swift | Build or load a Swift dynamic library and call the C ABI entrypoint | Native integrations, high-throughput providers, shared `PluginSDK` types |
+| `nodejs` | JavaScript/TypeScript | Run the configured Node.js entrypoint and exchange one JSON request/response over stdio | CLI adapters, web API wrappers, fast iteration |
+
+The legacy manifest values `swift-dylib` and `node` are accepted as aliases during migration. When writing new manifests, use `swift` and `nodejs`.
 
 ---
 
@@ -269,9 +277,29 @@ For `GatewayPlugin` implementations, bootstrap them inside `CoreService.bootstra
 
 ---
 
-## Writing a SwiftPM source plugin
+## Source plugins
 
-Swift source plugins are distributed as standalone SwiftPM packages. Sloppy clones the package into the workspace, builds a dynamic library for the current OS and architecture, caches the binary, and loads it with `dlopen`. Currently only `GatewayPlugin` is supported through this source-package path.
+Source plugins are distributed as standalone packages. Sloppy clones the package into the workspace, reads `plugin.json`, and chooses a runtime adapter from the manifest:
+
+- `"runtime": "swift"` builds or loads a Swift dynamic library and calls the C ABI entrypoint for the plugin type.
+- `"runtime": "nodejs"` runs the configured Node.js entrypoint over a JSON-lines stdio bridge.
+
+If `runtime` is omitted, Sloppy defaults to `"swift"`. Existing manifests that use `"swift-dylib"` or `"node"` still load, but those values are compatibility aliases, not the preferred spelling.
+
+Supported source plugin protocols are:
+
+```text
+gateway
+task_sync
+source_control
+tool
+memory
+model_provider
+```
+
+### Swift runtime layout
+
+Swift source plugins are standalone SwiftPM packages. Sloppy builds a dynamic library for the current OS and architecture, caches the binary, and loads it with `dlopen`.
 
 ### Directory structure
 
@@ -290,15 +318,19 @@ MyPlatformPlugin/
 {
   "name": "my-platform",
   "protocol": "gateway",
-  "version": "1.0.0"
+  "version": "1.0.0",
+  "runtime": "swift"
 }
 ```
 
 | Field | Description |
 | --- | --- |
 | `name` | Unique plugin identifier. Use lowercase letters, numbers, `.`, `_`, or `-`. Must match the source package product name. |
-| `protocol` | Must be `"gateway"` for external plugins. |
+| `protocol` | One of `gateway`, `task_sync`, `source_control`, `tool`, `memory`, or `model_provider`. |
 | `version` | Optional semver string for diagnostics. |
+| `runtime` | Optional. `"swift"` or `"nodejs"`; defaults to `"swift"`. Legacy aliases: `"swift-dylib"` and `"node"`. |
+| `entrypoint` | Required for `nodejs` plugins; ignored for `swift` plugins. |
+| `config` | Runtime/plugin-specific JSON configuration. |
 
 The package must expose a dynamic library product named exactly like `plugin.json` `name`:
 
@@ -328,19 +360,76 @@ sloppy plugin install https://github.com/example/my-platform-plugin.git --ref v1
 
 Sloppy stores the cloned source under `<workspace>/plugins/<name>/` and the built binary under `<workspace>/plugin-cache/<name>/<fingerprint>/`. The `plugin.json` file is read as-is and is not rewritten.
 
-### C ABI entry point
+### Swift C ABI entry points
 
-The dylib must export a C function with this signature:
+The dylib must export a C function matching its plugin protocol:
 
 ```c
 void* sloppy_gateway_create(const char* manifest_json, void* inbound_receiver_opaque);
+void* sloppy_task_sync_create(const char* manifest_json);
+void* sloppy_source_control_create(const char* manifest_json);
+void* sloppy_tool_create(const char* manifest_json);
+void* sloppy_memory_create(const char* manifest_json);
+void* sloppy_model_provider_create(const char* manifest_json);
 ```
 
 - `manifest_json` is a UTF-8 JSON string of the manifest.
-- `inbound_receiver_opaque` is an opaque pointer to a retained `GatewayPluginReceiverBox`.
-- Return an opaque pointer to a retained `AnyGatewayPluginBox` from `PluginSDK`, or `NULL` on failure.
+- `inbound_receiver_opaque` is only passed to gateway plugins; it is an opaque pointer to a retained `GatewayPluginReceiverBox`.
+- Return an opaque pointer to a retained `Any...Box` from `PluginSDK` (`AnyGatewayPluginBox`, `AnyTaskSyncProviderBox`, `AnySourceControlProviderBox`, `AnyToolPluginBox`, `AnyMemoryPluginBox`, or `AnyModelProviderBox`), or `NULL` on failure.
 
 Sloppy will call `start`, `stop`, and `send` on the returned object through the `GatewayPlugin` protocol.
+
+### Node.js runtime layout
+
+Node.js plugins do not need `Package.swift`; they need `plugin.json` and an entrypoint:
+
+```text
+MyNodePlugin/
+  plugin.json
+  index.js
+```
+
+```json
+{
+  "name": "node-weather",
+  "protocol": "tool",
+  "runtime": "nodejs",
+  "entrypoint": "index.js",
+  "config": {
+    "supportedTools": ["weather.current"],
+    "timeoutMs": 30000
+  }
+}
+```
+
+Sloppy starts `node <entrypoint>`, sends one JSON request on stdin, and expects one JSON response on stdout:
+
+```json
+{"id":"...","method":"invoke","params":{"tool":"weather.current","arguments":{"city":"Berlin"}},"manifest":{}}
+```
+
+Successful response:
+
+```json
+{"id":"...","result":{"temperature":22,"condition":"sunny"}}
+```
+
+Error response:
+
+```json
+{"id":"...","error":{"code":"unsupported","message":"invoke is not configured"}}
+```
+
+Node.js method names match the Swift protocol methods:
+
+| Protocol | Node.js methods |
+| --- | --- |
+| `gateway` | `start`, `stop`, `send` |
+| `task_sync` | `resolveProject`, `importTasks`, `createOrUpdateTask`, `mirrorComment` |
+| `source_control` | `inspectRepository`, `workingTreeStatus`, `workingTreeDiff`, `branchDiff`, `currentBranch`, `defaultBranch`, `createWorktree`, `removeWorktree`, `worktreePath`, `restorePathFromHead`, `mergeBranch` |
+| `tool` | `invoke` |
+| `memory` | `recall`, `save` |
+| `model_provider` | `respond` |
 
 ### Legacy prebuilt plugin layout
 
@@ -356,9 +445,9 @@ Prebuilt dynamic libraries are still supported for backward compatibility:
 
 ---
 
-## Writing an out-of-process channel plugin (HTTP)
+## Legacy HTTP channel plugins
 
-Out-of-process plugins are standalone HTTP servers written in any language. Sloppy communicates with them over a plain JSON protocol. This is the recommended approach for non-Swift implementations.
+HTTP channel plugins are standalone servers written in any language. Sloppy communicates with them over a plain JSON protocol. They are supported for older gateway integrations, but new package plugins should use the `nodejs` runtime for non-Swift code.
 
 ### How it works
 
@@ -499,7 +588,7 @@ Or add it to `sloppy.json` so it is registered on startup (consult the API refer
 ### Startup
 
 1. Sloppy reads `sloppy.json` and instantiates built-in gateway plugins (Telegram, Discord) if configured.
-2. `PluginLoader` scans the `plugins/` directory. SwiftPM source plugins are built or reused from `plugin-cache`, then loaded via `dlopen`; legacy prebuilt dynamic libraries are loaded directly.
+2. `PluginLoader` scans the `plugins/` directory. `swift` source plugins are built or reused from `plugin-cache`, then loaded via `dlopen`; `nodejs` plugins are initialized from their entrypoint without a Swift build. Legacy prebuilt dynamic libraries are loaded directly.
 3. All in-process plugins are registered with `ChannelDeliveryService` and `start(inboundReceiver:)` is called.
 4. HTTP plugin records stored in the database become active immediately; source plugins can be installed through `POST /v1/plugins/install` or `sloppy plugin install`.
 
@@ -525,7 +614,7 @@ sloppy project update my-project \
   --source-control-provider command-source-control
 ```
 
-Node source-control plugins use a JSON-lines stdio protocol. Sloppy sends one request:
+Node.js source-control plugins use the same JSON-lines stdio protocol as other `nodejs` plugins. Sloppy sends one request:
 
 ```json
 {"id":"...","method":"createWorktree","params":{"repoPath":"/repo","taskId":"task-1","baseBranch":"HEAD"},"manifest":{}}
@@ -545,13 +634,13 @@ or:
 
 ### Command Adapter Example
 
-The repository includes `Plugins/command-source-control`, a Node adapter that runs configured CLI commands. For Arcadia-style mounts, install or copy it into the Sloppy workspace plugins directory and edit `plugin.json`:
+The repository includes `Plugins/command-source-control`, a Node.js adapter that runs configured CLI commands. For Arcadia-style mounts, install or copy it into the Sloppy workspace plugins directory and edit `plugin.json`:
 
 ```json
 {
   "name": "arcadia-mount",
   "protocol": "source_control",
-  "runtime": "node",
+  "runtime": "nodejs",
   "entrypoint": "index.js",
   "config": {
     "displayName": "Arcadia Mount",
@@ -574,11 +663,11 @@ Command templates receive `{repoPath}`, `{taskId}`, `{worktreePath}`, `{branchNa
 
 ## Quick reference
 
-| Type | Protocol | Key methods | Delivery |
+| Type | Protocol | Key methods | Source runtimes |
 | --- | --- | --- | --- |
-| Gateway | `GatewayPlugin` | `start`, `stop`, `send` | In-process or HTTP |
-| Gateway (streaming) | `StreamingGatewayPlugin` | `beginStreaming`, `updateStreaming`, `endStreaming` | In-process or HTTP |
-| Source Control | `SourceControlProvider` | `createWorktree`, `branchDiff`, `mergeBranch` | Swift dylib or Node stdio |
-| Tool | `ToolPlugin` | `invoke` | In-process |
-| Memory | `MemoryPlugin` | `recall`, `save` | In-process |
-| Model Provider | `ModelProvider` | `createLanguageModel`, `generationOptions` | In-process |
+| Gateway | `GatewayPlugin` | `start`, `stop`, `send` | `swift`, `nodejs` |
+| Gateway (streaming) | `StreamingGatewayPlugin` | `beginStreaming`, `updateStreaming`, `endStreaming` | `swift` |
+| Source Control | `SourceControlProvider` | `createWorktree`, `branchDiff`, `mergeBranch` | `swift`, `nodejs` |
+| Tool | `ToolPlugin` | `invoke` | `swift`, `nodejs` |
+| Memory | `MemoryPlugin` | `recall`, `save` | `swift`, `nodejs` |
+| Model Provider | `ModelProvider` | `createLanguageModel`, `generationOptions` | `swift`, `nodejs` |

@@ -2,7 +2,7 @@
   "name": "command-source-control",
   "protocol": "source_control",
   "version": "0.1.0",
-  "runtime": "node",
+  "runtime": "nodejs",
   "entrypoint": "index.js",
   "config": {
     "displayName": "Command Source Control",

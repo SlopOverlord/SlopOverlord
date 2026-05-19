@@ -45,6 +45,15 @@ extension CoreService {
             logger.info("External source-control provider \(loaded.provider.id) registered.")
         }
 
+        let taskSyncPlugins = await loader.loadTaskSyncPluginBundles(
+            from: pluginsDir,
+            cacheRootURL: pluginCacheRootURL
+        )
+        for loaded in taskSyncPlugins {
+            registerTaskSyncProvider(loaded.provider)
+            logger.info("External task-sync provider \(loaded.provider.id) registered.")
+        }
+
         let disabledPluginIDs = Set(
             await store.listChannelPlugins()
                 .filter { !$0.enabled && $0.deliveryMode == ChannelPluginRecord.DeliveryMode.inProcess }

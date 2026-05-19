@@ -3,6 +3,18 @@ import PluginSDK
 import Protocols
 
 extension CoreService {
+    func taskSyncProvider(id requestedId: String?) -> (any TaskSyncProvider)? {
+        let providerId = requestedId?.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let providerId, !providerId.isEmpty else {
+            return taskSyncProviders["github"]
+        }
+        return taskSyncProviders[providerId]
+    }
+
+    func registerTaskSyncProvider(_ provider: any TaskSyncProvider) {
+        taskSyncProviders[provider.id] = provider
+    }
+
     public enum TaskSyncError: LocalizedError {
         case invalidProjectID
         case invalidPayload
@@ -183,11 +195,13 @@ extension CoreService {
     public func syncTaskSyncNow(projectID: String) async throws -> ProjectTaskSyncNowResponse {
         var project = try await taskSyncProject(projectID)
         let settings = project.taskSyncSettings
-        guard settings.enabled, settings.providerId == "github" else {
+        guard settings.enabled,
+              let providerId = settings.providerId,
+              let provider = taskSyncProvider(id: providerId)
+        else {
             throw TaskSyncError.unsupportedProvider
         }
-        let provider = GitHubProjectTaskSyncProvider()
-        let token = resolvedTaskSyncToken(projectID: project.id, providerId: "github", tokenMode: settings.tokenMode)
+        let token = resolvedTaskSyncToken(projectID: project.id, providerId: providerId, tokenMode: settings.tokenMode)
         do {
             let imported = try await provider.importTasks(settings: settings, token: token)
             var importedCount = 0
@@ -235,7 +249,8 @@ extension CoreService {
         await store.listProjects().compactMap { project in
             let settings = project.taskSyncSettings
             guard settings.enabled,
-                  settings.providerId == "github",
+                  let providerId = settings.providerId,
+                  taskSyncProviders[providerId] != nil,
                   settings.syncSchedule.enabled
             else { return nil }
             return ProjectTaskSyncScheduleEntry(
@@ -259,7 +274,7 @@ extension CoreService {
         providerId: String,
         token: String
     ) async throws -> ProjectTaskSyncTokenStatusResponse {
-        guard providerId == "github" else { throw TaskSyncError.unsupportedProvider }
+        guard taskSyncProvider(id: providerId) != nil else { throw TaskSyncError.unsupportedProvider }
         let project = try await taskSyncProject(projectID)
         let trimmed = token.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { throw TaskSyncError.invalidPayload }
@@ -277,7 +292,7 @@ extension CoreService {
         projectID: String,
         providerId: String
     ) async throws -> ProjectTaskSyncTokenStatusResponse {
-        guard providerId == "github" else { throw TaskSyncError.unsupportedProvider }
+        guard taskSyncProvider(id: providerId) != nil else { throw TaskSyncError.unsupportedProvider }
         let project = try await taskSyncProject(projectID)
         try? clearOverrideToken(projectID: project.id, providerId: providerId)
         _ = try await updateTaskSyncSettings(
@@ -332,18 +347,18 @@ extension CoreService {
     func syncOutboundTaskIfNeeded(projectID: String, taskID: String) async {
         guard var project = await store.project(id: projectID),
               project.taskSyncSettings.enabled,
-              project.taskSyncSettings.providerId == "github",
+              let providerId = project.taskSyncSettings.providerId,
+              let provider = taskSyncProvider(id: providerId),
               let index = project.tasks.firstIndex(where: { $0.id == taskID })
         else { return }
         var task = project.tasks[index]
-        guard task.externalMetadata?.origin != "github" else { return }
+        guard task.externalMetadata?.origin != providerId else { return }
         guard task.externalMetadata?.externalIssueId != nil || task.externalMetadata?.externalIssueNumber != nil else { return }
-        let provider = GitHubProjectTaskSyncProvider()
-        let token = resolvedTaskSyncToken(projectID: project.id, providerId: "github", tokenMode: project.taskSyncSettings.tokenMode)
+        let token = resolvedTaskSyncToken(projectID: project.id, providerId: providerId, tokenMode: project.taskSyncSettings.tokenMode)
         do {
             let metadata = try await provider.createOrUpdateTask(task, settings: project.taskSyncSettings, token: token)
             task.externalMetadata = metadata
-            task.tags = Array(Set(task.tags + ["github", "sloppy:\(project.id)"])).sorted()
+            task.tags = Array(Set(task.tags + [providerId, "sloppy:\(project.id)"])).sorted()
             task.updatedAt = Date()
             project.tasks[index] = task
             project.taskSyncSettings.health = ProjectTaskSyncHealth(status: "ok", checkedAt: Date())
@@ -359,17 +374,17 @@ extension CoreService {
     func mirrorOutboundCommentIfNeeded(projectID: String, taskID: String, commentID: String) async {
         guard let project = await store.project(id: projectID),
               project.taskSyncSettings.enabled,
-              project.taskSyncSettings.providerId == "github",
+              let providerId = project.taskSyncSettings.providerId,
+              let provider = taskSyncProvider(id: providerId),
               let task = project.tasks.first(where: { $0.id == taskID })
         else { return }
         let comments = await listTaskComments(projectID: projectID, taskID: taskID)
         guard var comment = comments.first(where: { $0.id == commentID }),
-              comment.externalMetadata?.origin != "github",
+              comment.externalMetadata?.origin != providerId,
               !comment.isAgentReply,
               comment.mentionedActorId == nil
         else { return }
-        let provider = GitHubProjectTaskSyncProvider()
-        let token = resolvedTaskSyncToken(projectID: project.id, providerId: "github", tokenMode: project.taskSyncSettings.tokenMode)
+        let token = resolvedTaskSyncToken(projectID: project.id, providerId: providerId, tokenMode: project.taskSyncSettings.tokenMode)
         do {
             comment.externalMetadata = try await provider.mirrorComment(comment, task: task, settings: project.taskSyncSettings, token: token)
             var updated = comments

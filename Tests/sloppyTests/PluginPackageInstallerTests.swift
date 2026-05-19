@@ -171,12 +171,65 @@ func sourcePluginInstallerAcceptsTaskSyncProtocol() throws {
 }
 
 @Test
+func pluginManifestRuntimeUsesCanonicalNamesAndDecodesLegacyAliases() throws {
+    let legacySwift = try JSONDecoder().decode(
+        PluginManifest.self,
+        from: Data(#"{"name":"legacy-swift","protocol":"tool","runtime":"swift-dylib"}"#.utf8)
+    )
+    let legacyNode = try JSONDecoder().decode(
+        PluginManifest.self,
+        from: Data(#"{"name":"legacy-node","protocol":"tool","runtime":"node","entrypoint":"index.js"}"#.utf8)
+    )
+    let currentNode = try JSONDecoder().decode(
+        PluginManifest.self,
+        from: Data(#"{"name":"current-node","protocol":"tool","runtime":"nodejs","entrypoint":"index.js"}"#.utf8)
+    )
+    let defaultRuntime = try JSONDecoder().decode(
+        PluginManifest.self,
+        from: Data(#"{"name":"default-swift","protocol":"tool"}"#.utf8)
+    )
+
+    #expect(legacySwift.runtime == .swift)
+    #expect(legacyNode.runtime == .nodejs)
+    #expect(currentNode.runtime == .nodejs)
+    #expect(defaultRuntime.runtime == .swift)
+
+    let encoded = try JSONEncoder().encode(currentNode)
+    let payload = try #require(String(data: encoded, encoding: .utf8))
+    #expect(payload.contains(#""runtime":"nodejs""#))
+}
+
+@Test
+func sourcePluginInstallerAcceptsAllPluginProtocolsAndNodejsRuntime() throws {
+    let root = FileManager.default.temporaryDirectory
+        .appendingPathComponent("plugin-protocol-validation-test-\(UUID().uuidString)", isDirectory: true)
+    defer { try? FileManager.default.removeItem(at: root) }
+
+    let installer = PluginPackageInstaller(
+        pluginsRootURL: root.appendingPathComponent("plugins", isDirectory: true),
+        cacheRootURL: root.appendingPathComponent("plugin-cache", isDirectory: true),
+        processRunner: FakePluginProcessRunner()
+    )
+
+    for pluginProtocol in ["gateway", "task_sync", "source_control", "tool", "memory", "model_provider"] {
+        let source = root.appendingPathComponent(pluginProtocol, isDirectory: true)
+        if pluginProtocol == "gateway" {
+            try makeSourcePlugin(at: source, name: "\(pluginProtocol)-plugin", pluginProtocol: pluginProtocol)
+        } else {
+            try makeNodePlugin(at: source, name: "\(pluginProtocol)-plugin", pluginProtocol: pluginProtocol)
+        }
+        let manifest = try installer.validateSourcePackage(at: source)
+        #expect(manifest.protocol == pluginProtocol)
+    }
+}
+
+@Test
 func sourcePluginInstallerRejectsInvalidManifestProtocol() throws {
     let root = FileManager.default.temporaryDirectory
         .appendingPathComponent("plugin-validation-test-\(UUID().uuidString)", isDirectory: true)
     defer { try? FileManager.default.removeItem(at: root) }
 
-    try makeSourcePlugin(at: root, name: "tool-plugin", pluginProtocol: "tool")
+    try makeSourcePlugin(at: root, name: "unknown-plugin", pluginProtocol: "unknown")
     let installer = PluginPackageInstaller(
         pluginsRootURL: root.appendingPathComponent("plugins", isDirectory: true),
         cacheRootURL: root.appendingPathComponent("plugin-cache", isDirectory: true),
@@ -233,6 +286,45 @@ func pluginLoaderSkipsDisabledSourcePluginBeforeBuild() async throws {
     #expect(await runner.commands().isEmpty)
 }
 
+@Test
+func pluginLoaderSelectsNodejsRuntimeWithoutSwiftBuild() async throws {
+    let root = FileManager.default.temporaryDirectory
+        .appendingPathComponent("plugin-loader-node-runtime-test-\(UUID().uuidString)", isDirectory: true)
+    defer { try? FileManager.default.removeItem(at: root) }
+
+    let pluginsRoot = root.appendingPathComponent("plugins", isDirectory: true)
+    try makeNodePlugin(
+        at: pluginsRoot.appendingPathComponent("node-tool", isDirectory: true),
+        name: "node-tool",
+        pluginProtocol: "tool",
+        config: #""supportedTools": ["node.echo"]"#
+    )
+    try makeNodePlugin(
+        at: pluginsRoot.appendingPathComponent("node-gateway", isDirectory: true),
+        name: "node-gateway",
+        pluginProtocol: "gateway",
+        config: #""channelIds": ["main"]"#
+    )
+
+    let runner = FakePluginProcessRunner()
+    let loader = PluginLoader(processRunner: runner)
+    let tools = await loader.loadToolPluginBundles(
+        from: pluginsRoot,
+        cacheRootURL: root.appendingPathComponent("plugin-cache", isDirectory: true)
+    )
+    let gateways = await loader.loadGatewayPluginBundles(
+        from: pluginsRoot,
+        cacheRootURL: root.appendingPathComponent("plugin-cache", isDirectory: true),
+        inboundReceiver: NoopInboundMessageReceiver()
+    )
+
+    #expect(tools.map(\.manifest.name) == ["node-tool"])
+    #expect(tools.first?.plugin.supportedTools == ["node.echo"])
+    #expect(gateways.map(\.manifest.name) == ["node-gateway"])
+    #expect(gateways.first?.plugin.channelIds == ["main"])
+    #expect(await runner.commands().filter { $0.executable == "swift" }.isEmpty)
+}
+
 private func makeSourcePlugin(
     at url: URL,
     name: String,
@@ -262,6 +354,34 @@ private func makeSourcePlugin(
     """
     try Data(package.utf8).write(to: url.appendingPathComponent("Package.swift"))
     try Data(manifest.utf8).write(to: url.appendingPathComponent("plugin.json"))
+}
+
+private func makeNodePlugin(
+    at url: URL,
+    name: String,
+    pluginProtocol: String,
+    config: String = ""
+) throws {
+    try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+    let configLine = config.isEmpty ? "" : ",\n  \"config\": {\n    \(config)\n  }"
+    let manifest = """
+    {
+      "name": "\(name)",
+      "protocol": "\(pluginProtocol)",
+      "version": "1.0.0",
+      "runtime": "nodejs",
+      "entrypoint": "index.js"\(configLine)
+    }
+    """
+    let script = """
+    #!/usr/bin/env node
+    process.stdin.resume();
+    process.stdin.on("data", () => {
+      process.stdout.write(JSON.stringify({ result: {} }) + "\\n");
+    });
+    """
+    try Data(manifest.utf8).write(to: url.appendingPathComponent("plugin.json"))
+    try Data(script.utf8).write(to: url.appendingPathComponent("index.js"))
 }
 
 private struct NoopInboundMessageReceiver: InboundMessageReceiver {

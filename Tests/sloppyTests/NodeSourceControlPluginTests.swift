@@ -22,7 +22,7 @@ struct NodeSourceControlPluginTests {
         let manifest = PluginManifest(
             name: "command-source-control",
             protocol: "source_control",
-            runtime: .node,
+            runtime: .nodejs,
             entrypoint: "index.js",
             config: [
                 "displayName": .string("Command Source Control"),
@@ -57,7 +57,7 @@ struct NodeSourceControlPluginTests {
         let manifest = PluginManifest(
             name: "command-source-control",
             protocol: "source_control",
-            runtime: .node,
+            runtime: .nodejs,
             entrypoint: "index.js",
             config: [:]
         )
